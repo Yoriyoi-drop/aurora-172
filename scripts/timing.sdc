@@ -9,16 +9,33 @@
 # =========================================================================
 # Clock definition
 # =========================================================================
-# Primary clock (simulasi: 100 MHz)
+# Primary clock (simulasi: 100 MHz, target: 6 GHz = 0.167ns)
 create_clock -period 10.000 -name clk [get_ports clk]
 
-# Uncertainty untuk clock
-set_clock_uncertainty -rise 0.050 [get_clocks clk]
-set_clock_uncertainty -fall 0.050 [get_clocks clk]
+# CRITICAL FIX: Multi-clock domain constraints untuk heterogenous cores
+# G-Core domain (target: 6GHz)
+create_clock -period 0.167 -name g_core_clk -waveform {0.000 0.084} [get_ports clk]
+set_clock_uncertainty -rise 0.017 [get_clocks g_core_clk]
+set_clock_uncertainty -fall 0.017 [get_clocks g_core_clk]
 
-# Latency
-set_clock_latency -source_max 0.200 [get_clocks clk]
-set_clock_latency -max 0.300 [get_clocks clk]
+# A-Core domain (target: 3GHz)
+create_clock -period 0.333 -name a_core_clk -waveform {0.000 0.167} [get_ports clk]
+set_clock_uncertainty -rise 0.033 [get_clocks a_core_clk]
+set_clock_uncertainty -fall 0.033 [get_clocks a_core_clk]
+
+# H-Core domain (target: 2GHz)
+create_clock -period 0.500 -name h_core_clk -waveform {0.000 0.250} [get_ports clk]
+set_clock_uncertainty -rise 0.050 [get_clocks h_core_clk]
+set_clock_uncertainty -fall 0.050 [get_clocks h_core_clk]
+
+# NPU domain (target: 1.5GHz)
+create_clock -period 0.667 -name npu_clk -waveform {0.000 0.334} [get_ports clk]
+set_clock_uncertainty -rise 0.067 [get_clocks npu_clk]
+set_clock_uncertainty -fall 0.067 [get_clocks npu_clk]
+
+# Clock latency (realistic untuk 6GHz)
+set_clock_latency -source_max 0.050 [get_clocks clk]  # 50ps source latency
+set_clock_latency -max 0.080 [get_clocks clk]          # 80ps total latency
 
 # =========================================================================
 # Reset

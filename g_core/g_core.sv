@@ -522,18 +522,22 @@ module g_core #(
                 // ERROR_STATE: Trap state untuk error handling
                 // ─────────────────────────────────────────────────
                 ERROR_STATE: begin
-                    // FIX v4.1: Error recovery protocol
+                    // CRITICAL FIX: Enhanced error recovery protocol
                     // Stay in error state for fixed recovery period, then force return to IDLE
                     // This prevents infinite loop if scheduler keeps re-sending bad commands
                     
-                    // Error recovery counter - stay for 5 cycles minimum
-                    if (mem_wait_counter < 16'd5) begin
+                    // Error recovery counter - stay for 10 cycles minimum
+                    if (mem_wait_counter < 16'd10) begin
                         mem_wait_counter <= mem_wait_counter + 1;
                         error_valid <= 1'b0;  // Pulse already sent on entry
-                        result <= {DATA_WIDTH{1'b0}};
-                        result_valid <= 1'b0;
+                        result <= {DATA_WIDTH{1'b1}};  // Keep error result visible
+                        result_valid <= 1'b0;  // Don't assert during recovery
                         busy <= 1'b0;
                         cmd_ready <= 1'b0;  // Don't accept new commands during recovery
+                        if (CORE_ID == 0 && mem_wait_counter == 16'd5) begin
+                            $display("[%0t] [G-CORE#%0d] ** ERROR RECOVERY: In recovery state (cycle %0d/10)", 
+                                    $time, CORE_ID, mem_wait_counter);
+                        end
                     end else begin
                         // Recovery period complete - force return to IDLE
                         // Clear error state regardless of cmd_valid
@@ -546,6 +550,8 @@ module g_core #(
                         cmd_ready <= 1'b1;  // Ready to accept new commands
                         mem_wait_counter <= 16'h0;
                         pipeline_state <= IDLE;
+                        if (CORE_ID == 0)
+                            $display("[%0t] [G-CORE#%0d] ** ERROR RECOVERY COMPLETE: Returning to IDLE", $time, CORE_ID);
                         
                         // Log recovery event (only once)
                         $display("[%0t] [G-CORE] ✅ Error recovery complete, returning to IDLE", $time);

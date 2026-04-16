@@ -1,1 +1,1998 @@
-build/bin/aurora_sim: Unable to open input file.
+[0] [ASSERTIONS] Memory assertions initialized
+[0] [RING-BUS] VC + Credit System Initialized
+[0] [RING-BUS] VC + Credit System Initialized
+[0] [MEM-INIT] Memory initialized: 1024 entries x 512 bits
+VCD info: dumpfile aurora_172_tb.vcd opened for output.
+[5000] [A-RSLT] RESULT_CONSUMED: data=0x0000000000000000
+[15000] [A-RSLT] RESULT_CONSUMED: data=0x0000000000000000
+[25000] [A-RSLT] RESULT_CONSUMED: data=0x0000000000000000
+[35000] [A-RSLT] RESULT_CONSUMED: data=0x0000000000000000
+[45000] [A-RSLT] RESULT_CONSUMED: data=0x0000000000000000
+[55000] [A-RSLT] RESULT_CONSUMED: data=0x0000000000000000
+[65000] [A-RSLT] RESULT_CONSUMED: data=0x0000000000000000
+[75000] [A-RSLT] RESULT_CONSUMED: data=0x0000000000000000
+[85000] [A-RSLT] RESULT_CONSUMED: data=0x0000000000000000
+[95000] [A-RSLT] RESULT_CONSUMED: data=0x0000000000000000
+[100000] ┌─────────────────────────────────────────────────────────┐
+[100000] │ ▶ TEST 1: Reset Sequence                                 │
+[100000] └─────────────────────────────────────────────────────────┘
+[100000] [RESET] Asserting reset...
+[105000] [A-RSLT] RESULT_CONSUMED: data=0x0000000000000000
+[150000] [RESET] Deasserting reset...
+[155000] [A-RSLT] RESULT_CONSUMED: data=0x0000000000000000
+[165000] [A-RSLT] RESULT_CONSUMED: data=0x0000000000000000
+[175000] [A-RSLT] RESULT_CONSUMED: data=0x0000000000000000
+[185000] [A-RSLT] RESULT_CONSUMED: data=0x0000000000000000
+[195000] [A-RSLT] RESULT_CONSUMED: data=0x0000000000000000
+[200000] [RESET] ✓ Reset complete
+[205000] [A-RSLT] RESULT_CONSUMED: data=0x0000000000000000
+[300000] ┌─────────────────────────────────────────────────────────┐
+[300000] │ ▶ TEST 2: Gaming Commands (All Types - Realistic Latency)│
+[300000] └─────────────────────────────────────────────────────────┘
+[300000] [G-CMD]                                       DRAW Command
+[300000]         addr=0x000000001000, data=0x01000001
+[305000] [SCHED-BP] G-Task ACCEPTED: queue=1/16, ring_congested=0
+[305000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=1
+[1315000] [MQ-SCHEDULER] ⚠ STARVATION: G-Core has 1 pending tasks but not dispatching for 100 cycles
+[20320000] [G-RSLT] ✗ TIMEOUT after 2000 cycles (scheduler queue backlog)
+[20560000] [G-CMD]                                    TEXTURE Command
+[20560000]         addr=0x000000001004, data=0x02000002
+[20565000] [SCHED-BP] G-Task ACCEPTED: queue=2/16, ring_congested=0
+[20565000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=2
+[40580000] [G-RSLT] ✗ TIMEOUT after 2000 cycles (scheduler queue backlog)
+[40810000] [G-CMD]                                    PHYSICS Command
+[40810000]         addr=0x000000001008, data=0x03000003
+[40815000] [SCHED-BP] G-Task ACCEPTED: queue=3/16, ring_congested=0
+[40815000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=3
+[60830000] [G-RSLT] ✗ TIMEOUT after 2000 cycles (scheduler queue backlog)
+[61150000] [G-CMD]                                  COLLISION Command
+[61150000]         addr=0x00000000100c, data=0x04000004
+[61155000] [SCHED-BP] G-Task ACCEPTED: queue=4/16, ring_congested=0
+[61155000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=4
+[81170000] [G-RSLT] ✗ TIMEOUT after 2000 cycles (scheduler queue backlog)
+[81490000] [G-CMD]                                   RAYTRACE Command
+[81490000]         addr=0x000000001010, data=0x05000005
+[81495000] [SCHED-BP] G-Task ACCEPTED: queue=5/16, ring_congested=0
+[81495000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=5
+[101510000] [G-RSLT] ✗ TIMEOUT after 2000 cycles (scheduler queue backlog)
+[102050000] [G-CMD]                                   FRAMEGEN Command
+[102050000]         addr=0x000000001014, data=0x06000006
+[102055000] [SCHED-BP] G-Task ACCEPTED: queue=6/16, ring_congested=0
+[102055000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=6
+[122070000] [G-RSLT] ✗ TIMEOUT after 2000 cycles (scheduler queue backlog)
+[122520000] [G-CMD]                                    SHADING Command
+[122520000]         addr=0x000000001018, data=0x07000007
+[122525000] [SCHED-BP] G-Task ACCEPTED: queue=7/16, ring_congested=0
+[122525000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=7
+[142540000] [G-RSLT] ✗ TIMEOUT after 2000 cycles (scheduler queue backlog)
+[142860000] [G-SUMMARY] All 7 gaming command types executed
+[142860000] [G-SUMMARY] G-Core operations: 7
+[142960000] ┌─────────────────────────────────────────────────────────┐
+[142960000] │ ▶ TEST 3: AI Commands (All Operations - Realistic Latency)│
+[142960000] └─────────────────────────────────────────────────────────┘
+[142960000] [A-CMD]                                   MATMUL Operation
+[142960000]         addr=0x000000002000, data=0x2000aaaabbbbcccc
+[142965000] [SCHED-BP] A-Task ACCEPTED: queue=1/16, ring_congested=0
+[142965000] [SQ-SCHEDULER] 📥 Enqueued A task, queue_count=8
+[142965000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000aaaabbbbcccc, extracted_dir=2, expected_dir=2
+[142965000] [RING-BUS] VC0 INJECT CCW: Node 2 (credits: 14)
+[142975000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000aaaabbbbcccc, extracted_dir=2, expected_dir=2
+[142985000] [SCHED] 🚀 Dispatching A task: addr=0x000000002000
+[142995000] [A-CORE#0] 📥 Received command, opcode=0x20
+[142995000] [A-CORE#0] MATMUL opcode matched, loading from memory
+[142995000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[142995000] [RING-BUS] VC0 INJECT CCW: Node 0 (credits: 14)
+[143005000] [A-CORE#0] 🚨 FORWARD PROGRESS VIOLATION: State=1 stuck for 14280 cycles (max=500)
+[143005000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[143005000] [TOP] a0_busy went HIGH (A-Core started)
+[143005000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[143015000] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=1
+[143015000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[143815000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[143975000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[144045000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[144055000] [A-CORE#0] STORE_RESULT: Computing result hash
+[144065000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[144085000] [TOP] a0_busy went LOW (A-Core finished)
+[144085000] [RING-BUS] VC0 INJECT CCW: Node 0 (credits: 14)
+[144085000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000aaaabbbbcccc, extracted_dir=2, expected_dir=2
+[144085000] [RING-BUS] VC0 INJECT CCW: Node 2 (credits: 14)
+[144095000] [A-RSLT] 📤 RESULT_VALID: data=0xed24477763139c57, ready=1, consumer_ready=1
+[144095000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[144095000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[144095000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000aaaabbbbcccc, extracted_dir=2, expected_dir=2
+[144105000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[144105000] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=1
+[144105000] [A-CORE#0] 📥 Received command, opcode=0x20
+[144105000] [A-CORE#0] MATMUL opcode matched, loading from memory
+[144105000] [RING-BUS] VC0 INJECT CCW: Node 0 (credits: 14)
+[144105000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000aaaabbbbcccc, extracted_dir=2, expected_dir=2
+[144105000] [RING-BUS] VC0 INJECT CCW: Node 2 (credits: 13)
+[144115000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[144115000] [TOP] a0_busy went HIGH (A-Core started)
+[144115000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[144125000] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=1
+[144125000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=1
+[144135000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=2
+[144135000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[144145000] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=1
+[144145000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=3
+[144155000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=4
+[144165000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=5
+[144175000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=6
+[144185000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=7
+[144195000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=8
+[144205000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=9
+[144215000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=10
+[144225000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=11
+[144235000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=12
+[144245000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=13
+[144255000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=14
+[144265000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=15
+[144435000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[144445000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=80 cycles
+[145245000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[145405000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[145465000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[145475000] [A-CORE#0] STORE_RESULT: Computing result hash
+[145485000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[145505000] [TOP] a0_busy went LOW (A-Core finished)
+[145515000] [A-RSLT] 📤 RESULT_VALID: data=0x994e7b6a692cc247, ready=1, consumer_ready=1
+[145515000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[145525000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[147980000] [A-RSLT] ✗ TIMEOUT after 500 cycles (FIFO not consumed)
+[148510000] [A-CMD]                                ATTENTION Operation
+[148510000]         addr=0x000000002004, data=0x2100123456789abc
+[148515000] [SCHED-BP] A-Task ACCEPTED: queue=1/16, ring_congested=0
+[148515000] [SQ-SCHEDULER] 📥 Enqueued A task, queue_count=9
+[148515000] [RING-BUS] DEBUG: Node 2 raw_data=0x2100123456789abc, extracted_dir=2, expected_dir=2
+[148515000] [RING-BUS] VC0 INJECT CCW: Node 2 (credits: 13)
+[148525000] [RING-BUS] DEBUG: Node 2 raw_data=0x2100123456789abc, extracted_dir=2, expected_dir=2
+[148535000] [SCHED] 🚀 Dispatching A task: addr=0x000000002004
+[148545000] [A-CORE#0] 📥 Received command, opcode=0x21
+[148545000] [A-CORE#0] ATTENTION opcode matched, loading from memory
+[148545000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[148545000] [RING-BUS] VC0 INJECT CCW: Node 0 (credits: 14)
+[148555000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[148555000] [TOP] a0_busy went HIGH (A-Core started)
+[148555000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[148565000] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=1
+[148565000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=1
+[148575000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=2
+[148585000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=3
+[148595000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=4
+[148605000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=5
+[148615000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=6
+[148625000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=7
+[148635000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=8
+[148645000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=9
+[148655000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=10
+[148665000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=11
+[148675000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=12
+[148685000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=13
+[148695000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=14
+[148705000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=15
+[148875000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[148885000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=100 cycles
+[149885000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[149905000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[149915000] [A-CORE#0] STORE_RESULT: Computing result hash
+[149925000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[149945000] [TOP] a0_busy went LOW (A-Core finished)
+[149945000] [RING-BUS] VC0 INJECT CCW: Node 0 (credits: 14)
+[149945000] [RING-BUS] DEBUG: Node 2 raw_data=0x2100123456789abc, extracted_dir=2, expected_dir=2
+[149945000] [RING-BUS] VC0 INJECT CCW: Node 2 (credits: 12)
+[149955000] [A-RSLT] 📤 RESULT_VALID: data=0x256aea8a32806180, ready=1, consumer_ready=1
+[149955000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[149955000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[149955000] [RING-BUS] DEBUG: Node 2 raw_data=0x2100123456789abc, extracted_dir=2, expected_dir=2
+[149965000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[149965000] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=1
+[149965000] [A-CORE#0] 📥 Received command, opcode=0x21
+[149965000] [A-CORE#0] ATTENTION opcode matched, loading from memory
+[149965000] [RING-BUS] VC0 INJECT CCW: Node 0 (credits: 14)
+[149965000] [RING-BUS] DEBUG: Node 2 raw_data=0x2100123456789abc, extracted_dir=2, expected_dir=2
+[149965000] [RING-BUS] VC0 INJECT CCW: Node 2 (credits: 11)
+[149975000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[149975000] [TOP] a0_busy went HIGH (A-Core started)
+[149975000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[149985000] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=1
+[149985000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=1
+[149995000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=2
+[149995000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[150005000] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=1
+[150005000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=3
+[150015000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=4
+[150025000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=5
+[150035000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=6
+[150045000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=7
+[150055000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=8
+[150065000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=9
+[150075000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=10
+[150085000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=11
+[150095000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=12
+[150105000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=13
+[150115000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=14
+[150125000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=15
+[150295000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[150305000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=100 cycles
+[151305000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[151325000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[151335000] [A-CORE#0] STORE_RESULT: Computing result hash
+[151345000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[151365000] [TOP] a0_busy went LOW (A-Core finished)
+[151375000] [A-RSLT] 📤 RESULT_VALID: data=0x256aea8a32806180, ready=1, consumer_ready=1
+[151375000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[151385000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[153530000] [A-RSLT] ✗ TIMEOUT after 500 cycles (FIFO not consumed)
+[154090000] [A-CMD]                                   CONV2D Operation
+[154090000]         addr=0x000000002008, data=0x2200deadbeeff00d
+[154095000] [SCHED-BP] A-Task ACCEPTED: queue=1/16, ring_congested=0
+[154095000] [SQ-SCHEDULER] 📥 Enqueued A task, queue_count=10
+[154095000] [RING-BUS] DEBUG: Node 2 raw_data=0x2200deadbeeff00d, extracted_dir=2, expected_dir=2
+[154095000] [RING-BUS] VC0 INJECT CCW: Node 2 (credits: 12)
+[154105000] [RING-BUS] DEBUG: Node 2 raw_data=0x2200deadbeeff00d, extracted_dir=2, expected_dir=2
+[154115000] [SCHED] 🚀 Dispatching A task: addr=0x000000002008
+[154125000] [A-CORE#0] 📥 Received command, opcode=0x22
+[154125000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[154125000] [RING-BUS] VC0 INJECT CCW: Node 0 (credits: 14)
+[154135000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[154135000] [TOP] a0_busy went HIGH (A-Core started)
+[154135000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[154145000] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=1
+[154145000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=70 cycles
+[154845000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[155005000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[155165000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[155175000] [A-CORE#0] STORE_RESULT: Computing result hash
+[155185000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[155205000] [TOP] a0_busy went LOW (A-Core finished)
+[155205000] [RING-BUS] VC0 INJECT CCW: Node 0 (credits: 14)
+[155205000] [RING-BUS] DEBUG: Node 2 raw_data=0x2200deadbeeff00d, extracted_dir=2, expected_dir=2
+[155205000] [RING-BUS] VC0 INJECT CCW: Node 2 (credits: 10)
+[155215000] [A-RSLT] 📤 RESULT_VALID: data=0x2f4d89b2fc2973f3, ready=1, consumer_ready=1
+[155215000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[155215000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[155215000] [RING-BUS] DEBUG: Node 2 raw_data=0x2200deadbeeff00d, extracted_dir=2, expected_dir=2
+[155225000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[155225000] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=1
+[155225000] [A-CORE#0] 📥 Received command, opcode=0x22
+[155225000] [RING-BUS] VC0 INJECT CCW: Node 0 (credits: 14)
+[155225000] [RING-BUS] DEBUG: Node 2 raw_data=0x2200deadbeeff00d, extracted_dir=2, expected_dir=2
+[155225000] [RING-BUS] VC0 INJECT CCW: Node 2 (credits: 9)
+[155235000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[155235000] [TOP] a0_busy went HIGH (A-Core started)
+[155235000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[155245000] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=1
+[155245000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=70 cycles
+[155255000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[155265000] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=1
+[155945000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[156105000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[156265000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[156275000] [A-CORE#0] STORE_RESULT: Computing result hash
+[156285000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[156305000] [TOP] a0_busy went LOW (A-Core finished)
+[156315000] [A-RSLT] 📤 RESULT_VALID: data=0x2f4d89b2fc2973f3, ready=1, consumer_ready=1
+[156315000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[156325000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[159110000] [A-RSLT] ✗ TIMEOUT after 500 cycles (FIFO not consumed)
+[159670000] [A-CMD]                                  POOLING Operation
+[159670000]         addr=0x00000000200c, data=0x2300cafebabe1234
+[159675000] [SCHED-BP] A-Task ACCEPTED: queue=1/16, ring_congested=0
+[159675000] [SQ-SCHEDULER] 📥 Enqueued A task, queue_count=11
+[159675000] [RING-BUS] DEBUG: Node 2 raw_data=0x2300cafebabe1234, extracted_dir=2, expected_dir=2
+[159675000] [RING-BUS] VC0 INJECT CCW: Node 2 (credits: 11)
+[159685000] [RING-BUS] DEBUG: Node 2 raw_data=0x2300cafebabe1234, extracted_dir=2, expected_dir=2
+[159695000] [SCHED] 🚀 Dispatching A task: addr=0x00000000200c
+[159705000] [A-CORE#0] 📥 Received command, opcode=0x23
+[159705000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[159705000] [RING-BUS] VC0 INJECT CCW: Node 0 (credits: 14)
+[159715000] [TOP] a0_busy went HIGH (A-Core started)
+[159715000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[159725000] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=1
+[160175000] [A-CORE#0] STORE_RESULT: Computing result hash
+[160185000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[160205000] [TOP] a0_busy went LOW (A-Core finished)
+[160205000] [RING-BUS] VC0 INJECT CCW: Node 0 (credits: 14)
+[160205000] [RING-BUS] DEBUG: Node 2 raw_data=0x2300cafebabe1234, extracted_dir=2, expected_dir=2
+[160205000] [RING-BUS] VC0 INJECT CCW: Node 2 (credits: 8)
+[160215000] [A-RSLT] 📤 RESULT_VALID: data=0x1eac57d00a2cef1a, ready=1, consumer_ready=1
+[160215000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[160215000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[160215000] [RING-BUS] DEBUG: Node 2 raw_data=0x2300cafebabe1234, extracted_dir=2, expected_dir=2
+[160225000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[160225000] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=1
+[160225000] [A-CORE#0] 📥 Received command, opcode=0x23
+[160225000] [RING-BUS] VC0 INJECT CCW: Node 0 (credits: 14)
+[160225000] [RING-BUS] DEBUG: Node 2 raw_data=0x2300cafebabe1234, extracted_dir=2, expected_dir=2
+[160225000] [RING-BUS] VC0 INJECT CCW: Node 2 (credits: 7)
+[160235000] [TOP] a0_busy went HIGH (A-Core started)
+[160235000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[160245000] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=1
+[160255000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[160265000] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=1
+[160695000] [A-CORE#0] STORE_RESULT: Computing result hash
+[160705000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[160725000] [TOP] a0_busy went LOW (A-Core finished)
+[160735000] [A-RSLT] 📤 RESULT_VALID: data=0x1eac57d00a2cef1a, ready=1, consumer_ready=1
+[160735000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[160745000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[164690000] [A-RSLT] ✗ TIMEOUT after 500 cycles (FIFO not consumed)
+[165260000] [A-CMD]                                  ACTIVATION (ReLU)
+[165260000]         addr=0x000000002010, data=0x240087654321abcd
+[165265000] [SCHED-BP] A-Task ACCEPTED: queue=1/16, ring_congested=0
+[165265000] [SQ-SCHEDULER] 📥 Enqueued A task, queue_count=12
+[165265000] [RING-BUS] DEBUG: Node 2 raw_data=0x240087654321abcd, extracted_dir=3, expected_dir=0
+[165275000] [RING-BUS] DEBUG: Node 2 raw_data=0x240087654321abcd, extracted_dir=3, expected_dir=0
+[165285000] [SCHED] 🚀 Dispatching A task: addr=0x000000002010
+[165295000] [A-CORE#0] 📥 Received command, opcode=0x24
+[165305000] [TOP] a0_busy went HIGH (A-Core started)
+[165795000] [A-CORE#0] STORE_RESULT: Computing result hash
+[165805000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[165825000] [TOP] a0_busy went LOW (A-Core finished)
+[165825000] [RING-BUS] DEBUG: Node 2 raw_data=0x240087654321abcd, extracted_dir=3, expected_dir=0
+[165835000] [A-RSLT] 📤 RESULT_VALID: data=0xdd922e581c23ab57, ready=1, consumer_ready=1
+[165835000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[165835000] [RING-BUS] DEBUG: Node 2 raw_data=0x240087654321abcd, extracted_dir=3, expected_dir=0
+[165845000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[165845000] [A-CORE#0] 📥 Received command, opcode=0x24
+[165845000] [RING-BUS] DEBUG: Node 2 raw_data=0x240087654321abcd, extracted_dir=3, expected_dir=0
+[165855000] [TOP] a0_busy went HIGH (A-Core started)
+[166345000] [A-CORE#0] STORE_RESULT: Computing result hash
+[166355000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[166375000] [TOP] a0_busy went LOW (A-Core finished)
+[166385000] [A-RSLT] 📤 RESULT_VALID: data=0xdd922e581c23ab57, ready=1, consumer_ready=1
+[166385000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[166395000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[170280000] [A-RSLT] ✗ TIMEOUT after 500 cycles (FIFO not consumed)
+[170840000] [A-CMD]                                NORMALIZE Operation
+[170840000]         addr=0x000000002014, data=0x2500ffffeeeedddd
+[170845000] [SCHED-BP] A-Task ACCEPTED: queue=1/16, ring_congested=0
+[170845000] [SQ-SCHEDULER] 📥 Enqueued A task, queue_count=13
+[170845000] [RING-BUS] DEBUG: Node 2 raw_data=0x2500ffffeeeedddd, extracted_dir=3, expected_dir=0
+[170855000] [RING-BUS] DEBUG: Node 2 raw_data=0x2500ffffeeeedddd, extracted_dir=3, expected_dir=0
+[170865000] [SCHED] 🚀 Dispatching A task: addr=0x000000002014
+[170875000] [A-CORE#0] 📥 Received command, opcode=0x25
+[170885000] [TOP] a0_busy went HIGH (A-Core started)
+[171605000] [A-CORE#0] STORE_RESULT: Computing result hash
+[171615000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[171635000] [TOP] a0_busy went LOW (A-Core finished)
+[171635000] [RING-BUS] DEBUG: Node 2 raw_data=0x2500ffffeeeedddd, extracted_dir=3, expected_dir=0
+[171645000] [A-RSLT] 📤 RESULT_VALID: data=0xfeae5dcb00c927f4, ready=1, consumer_ready=1
+[171645000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[171645000] [RING-BUS] DEBUG: Node 2 raw_data=0x2500ffffeeeedddd, extracted_dir=3, expected_dir=0
+[171655000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[171655000] [A-CORE#0] 📥 Received command, opcode=0x25
+[171655000] [RING-BUS] DEBUG: Node 2 raw_data=0x2500ffffeeeedddd, extracted_dir=3, expected_dir=0
+[171665000] [TOP] a0_busy went HIGH (A-Core started)
+[172385000] [A-CORE#0] STORE_RESULT: Computing result hash
+[172395000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[172415000] [TOP] a0_busy went LOW (A-Core finished)
+[172425000] [A-RSLT] 📤 RESULT_VALID: data=0xfeae5dcb00c927f4, ready=1, consumer_ready=1
+[172425000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[172435000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[175860000] [A-RSLT] ✗ TIMEOUT after 500 cycles (FIFO not consumed)
+[176440000] [A-SUMMARY] All 6 AI operation types executed
+[176440000] [A-SUMMARY] A-Core operations: 6
+[176540000] ┌─────────────────────────────────────────────────────────┐
+[176540000] │ ▶ TEST 4: Memory Access Patterns (Realistic 172-bit)     │
+[176540000] └─────────────────────────────────────────────────────────┘
+[176540000] [MEM] Sequential writes through fabric...
+[176540000] [MEM] <<< WRITE | addr=0x00000000 | data=0x00000000000000000000000000000000000000000000000000000000deadbeef | access#1
+[176570000] [MEM] <<< WRITE | addr=0x00000001 | data=0x00000000000000000000000000000000000000000000000000000000deadbef0 | access#2
+[176600000] [MEM] <<< WRITE | addr=0x00000002 | data=0x00000000000000000000000000000000000000000000000000000000deadbef1 | access#3
+[176630000] [MEM] <<< WRITE | addr=0x00000003 | data=0x00000000000000000000000000000000000000000000000000000000deadbef2 | access#4
+[176660000] [MEM] <<< WRITE | addr=0x00000004 | data=0x00000000000000000000000000000000000000000000000000000000deadbef3 | access#5
+[176690000] [MEM] ✓ Sequential writes complete (5 writes)
+[176690000] [MEM] Committing write buffer to main memory (write-back latency)...
+[176740000] [MEM] ✓ Write buffer committed
+[176740000] [MEM] Random access writes (256-bit aligned)...
+[176740000] [MEM] <<< WRITE | addr=0x00000318 | data=0x0000000000000000000000000000000000000000000000000000000000000000fcfde9f9633724c662f784c55513d2aaf2aff7e53bd272770932d612c7ecdb8f | access#6
+[176770000] [MEM] <<< WRITE | addr=0x000003e4 | data=0x0000000000000000000000000000000000000000000000000000000000000000677696ce74007ae862ca4ec5ae58495c5e8e28bd16ab582d32a7266531ef6263 | access#7
+[176800000] [MEM] <<< WRITE | addr=0x00000215 | data=0x0000000000000000000000000000000000000000000000000000000000000000403b228090642120d57845aa4ecccc9d4b203e960983b81306bc380d29a7d653 | access#8
+[176830000] [MEM] <<< WRITE | addr=0x000002d6 | data=0x00000000000000000000000000000000000000000000000000000000000000006aa62ad501174a0257563eae8effe91d67c572cf918449238509650a65730aca | access#9
+[176860000] [MEM] <<< WRITE | addr=0x00000078 | data=0x0000000000000000000000000000000000000000000000000000000000000000f968bdf2c52e618aa0c4b3416c4b34d8bc20f378448a1289f5c50debdb0265b6 | access#10
+[176890000] [MEM] ✓ Random writes complete
+[176890000] [MEM] Read back verification (read from SAME addresses)...
+[176895000] [MEM] >>> READ START | addr=0x000 | access#11
+[177295000] [MEM] >>> READ COMPLETE | addr=0x000 | data=0x00000000000000000000000000000000000000000000000000000000deadbeef | latency=40 cycles
+[177320000] [MEM] ✓ READ  | addr=0x00000000 | data=0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000deadbeef | EXPECTED=0x00000000000000000000000000000000000000000000000000000000deadbeef | MATCH
+[177325000] [MEM] >>> READ START | addr=0x001 | access#12
+[177725000] [MEM] >>> READ COMPLETE | addr=0x001 | data=0x00000000000000000000000000000000000000000000000000000000deadbef0 | latency=40 cycles
+[177750000] [MEM] ✓ READ  | addr=0x00000001 | data=0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000deadbef0 | EXPECTED=0x00000000000000000000000000000000000000000000000000000000deadbef0 | MATCH
+[177755000] [MEM] >>> READ START | addr=0x002 | access#13
+[178155000] [MEM] >>> READ COMPLETE | addr=0x002 | data=0x00000000000000000000000000000000000000000000000000000000deadbef1 | latency=40 cycles
+[178180000] [MEM] ✓ READ  | addr=0x00000002 | data=0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000deadbef1 | EXPECTED=0x00000000000000000000000000000000000000000000000000000000deadbef1 | MATCH
+[178185000] [MEM] >>> READ START | addr=0x003 | access#14
+[178585000] [MEM] >>> READ COMPLETE | addr=0x003 | data=0x00000000000000000000000000000000000000000000000000000000deadbef2 | latency=40 cycles
+[178610000] [MEM] ✓ READ  | addr=0x00000003 | data=0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000deadbef2 | EXPECTED=0x00000000000000000000000000000000000000000000000000000000deadbef2 | MATCH
+[178615000] [MEM] >>> READ START | addr=0x004 | access#15
+[179015000] [MEM] >>> READ COMPLETE | addr=0x004 | data=0x00000000000000000000000000000000000000000000000000000000deadbef3 | latency=40 cycles
+[179040000] [MEM] ✓ READ  | addr=0x00000004 | data=0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000deadbef3 | EXPECTED=0x00000000000000000000000000000000000000000000000000000000deadbef3 | MATCH
+[179040000] [MEM] ✓ Read verification PASSED (5/5 matches)
+[179140000] ┌─────────────────────────────────────────────────────────┐
+[179140000] │ ▶ TEST 5: Performance Counters (Accumulating)            │
+[179140000] └─────────────────────────────────────────────────────────┘
+[179140000] [PERF] G-Core counter:  7 operations (accumulated)
+[179140000] [PERF] A-Core counter:  6 operations (accumulated)
+[179140000] [PERF] NPU counter:     0 operations (accumulated)
+[179140000] [PERF] Memory accesses: 15 (R:5 W:10)
+[179240000] ┌─────────────────────────────────────────────────────────┐
+[179240000] │ ▶ TEST 5b: NPU Inference (Integrated)                    │
+[179240000] └─────────────────────────────────────────────────────────┘
+[179240000] [NPU-PRELOAD] Loading representative weights...
+[179240000] [NPU-PRELOAD] ✓ Weights loaded: 3 patterns x 3 entries
+[179240000] [NPU-PRELOAD]   - Image Classification: addr=0x0000-0x0002
+[179240000] [NPU-PRELOAD]   - Object Detection: addr=0x0040-0x0042
+[179240000] [NPU-PRELOAD]   - Semantic Segmentation: addr=0x0080-0x0082
+[179240000] [NPU-CMD]            NPU Inference #1 - Image Classification
+[179240000]         Loading weights from addr=0x00000000
+[179245000] [MEM] >>> READ START | addr=0x000 | access#16
+[179250000] [TOP] npu_busy went HIGH (NPU started)
+[179350000] [TOP] npu_busy went LOW (NPU finished)
+[179350000] [NPU-RSLT] ¥ Inference complete (latency: 10 cycles, addr=0x00000000)
+[179390000] [NPU-CMD]                NPU Inference #2 - Object Detection
+[179390000]         Loading weights from addr=0x00000040
+[179400000] [TOP] npu_busy went HIGH (NPU started)
+[179470000] [TOP] npu_busy went LOW (NPU finished)
+[179470000] [NPU-RSLT] ¥ Inference complete (latency: 7 cycles, addr=0x00000040)
+[179500000] [NPU-CMD]           NPU Inference #3 - Semantic Segmentation
+[179500000]         Loading weights from addr=0x00000080
+[179510000] [TOP] npu_busy went HIGH (NPU started)
+[179560000] [TOP] npu_busy went LOW (NPU finished)
+[179560000] [NPU-RSLT] ¥ Inference complete (latency: 5 cycles, addr=0x00000080)
+[179580000] [NPU-SUMMARY] NPU operations: 3
+[179580000] [NPU-SUMMARY] ✓ All inferences used pre-loaded weights (not zeros)
+[179645000] [MEM] >>> READ COMPLETE | addr=0x000 | data=0x00000000000000000000000000000000deadbeefcafe123456789abcdef01111 | latency=40 cycles
+[179680000] ┌─────────────────────────────────────────────────────────┐
+[179680000] │ ▶ TEST 6: Interrupt Handling                             │
+[179680000] └─────────────────────────────────────────────────────────┘
+[179680000] [IRQ] Asserting interrupt...
+[179700000] [IRQ] ✓ Interrupt asserted
+[179700000] [IRQ] Deasserting interrupt...
+[179720000] [IRQ] ✓ Interrupt deasserted
+[179820000] ┌─────────────────────────────────────────────────────────┐
+[179820000] │ ▶ TEST 7: Power Mode Transitions                         │
+[179820000] └─────────────────────────────────────────────────────────┘
+[179820000] [PWR] Current power mode: 0x0001
+[179920000] [PWR] Switching to: GAMING (0x0000)
+[180420000] [PWR] ✓ Mode GAMING active
+[180420000] [PWR] Switching to: AI (0x0001)
+[180920000] [PWR] ✓ Mode AI active
+[180920000] [PWR] Switching to: MIXED (0x0002)
+[181420000] [PWR] ✓ Mode MIXED active
+[181420000] [PWR] Switching to: POWERSAVE (0x0003)
+[181920000] [PWR] ✓ Mode POWERSAVE active
+[182020000] ┌─────────────────────────────────────────────────────────┐
+[182020000] │ ▶ TEST 8: Scheduler Arbitration (Resource Conflict)      │
+[182020000] └─────────────────────────────────────────────────────────┘
+[182020000] [SCHED] Sending G command first...
+[182020000] [SCHED] Expected: Gaming dispatched (priority 0)
+[182020000] [G-CMD]                                       SCHED-GAMING
+[182020000]         addr=0x000000004000, data=0x01000001
+[182025000] [SCHED-BP] G-Task ACCEPTED: queue=8/16, ring_congested=0
+[182025000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=14
+[202040000] [G-RSLT] ✗ TIMEOUT after 2000 cycles (scheduler queue backlog)
+[202190000] [SCHED] Sending AI command after Gaming...
+[202190000] [SCHED] Expected: AI dispatched second (priority 1)
+[202190000] [A-CMD]                                           SCHED-AI
+[202190000]         addr=0x000000004004, data=0x2000000000000000
+[202195000] [SCHED-BP] A-Task ACCEPTED: queue=1/16, ring_congested=0
+[202195000] [SQ-SCHEDULER] 📥 Enqueued A task, queue_count=15
+[202195000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[202205000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[202215000] [SCHED] 🚀 Dispatching A task: addr=0x000000004004
+[202225000] [A-CORE#0] 📥 Received command, opcode=0x20
+[202225000] [A-CORE#0] MATMUL opcode matched, loading from memory
+[202235000] [A-CORE#0] 🚨 FORWARD PROGRESS VIOLATION: State=1 stuck for 2979 cycles (max=1000)
+[202235000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[202235000] [TOP] a0_busy went HIGH (A-Core started)
+[202245000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[203045000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[203205000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[203275000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[203285000] [A-CORE#0] STORE_RESULT: Computing result hash
+[203295000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[203315000] [TOP] a0_busy went LOW (A-Core finished)
+[203315000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[203325000] [A-RSLT] 📤 RESULT_VALID: data=0x960a7cd54f0fc7e5, ready=1, consumer_ready=1
+[203325000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[203325000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[203335000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[203335000] [A-CORE#0] 📥 Received command, opcode=0x20
+[203335000] [A-CORE#0] MATMUL opcode matched, loading from memory
+[203335000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[203345000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[203345000] [TOP] a0_busy went HIGH (A-Core started)
+[203355000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=1
+[203365000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=2
+[203375000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=3
+[203385000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=4
+[203395000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=5
+[203405000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=6
+[203415000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=7
+[203425000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=8
+[203435000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=9
+[203445000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=10
+[203455000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=11
+[203465000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=12
+[203475000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=13
+[203485000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=14
+[203495000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=15
+[203665000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[203675000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=80 cycles
+[204475000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[204635000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[204695000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[204705000] [A-CORE#0] STORE_RESULT: Computing result hash
+[204715000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[204735000] [TOP] a0_busy went LOW (A-Core finished)
+[204745000] [A-RSLT] 📤 RESULT_VALID: data=0x63d1ff7cfc1b7005, ready=1, consumer_ready=1
+[204745000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[204755000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[207210000] [A-RSLT] ✗ TIMEOUT after 500 cycles (FIFO not consumed)
+[209270000] [SCHED-SUMMARY] Scheduler operations: dispatched=7 completed=7 stalled=0 conflicts=0 watchdog=0
+[209370000] ┌─────────────────────────────────────────────────────────┐
+[209370000] │ ▶ TEST 9: TRUE STRESS TEST (High Concurrency + Queue Saturation)│
+[209370000] └─────────────────────────────────────────────────────────┘
+[209370000] [TRUE-STRESS] 🔥🔥🔥 FLOODING 100+ REQUESTS - NO DELAY 🔥🔥🔥
+[209370000] [TRUE-STRESS] Target: Trigger queue contention, back-pressure, structural hazards
+[209370000] [TRUE-STRESS] Phase 1: Flooding 30 G requests (NO DELAY)...
+[209375000] [SCHED-BP] G-Task ACCEPTED: queue=9/16, ring_congested=0
+[209375000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=16
+[209670000] [TRUE-STRESS] Phase 1 complete: G_sent=30, G_busy_cycles=0
+[209670000] [TRUE-STRESS] Phase 2: Flooding 30 A requests (NO DELAY)...
+[209675000] [SCHED-BP] A-Task ACCEPTED: queue=1/16, ring_congested=0
+[209675000] [SQ-SCHEDULER] 📥 Enqueued A task, queue_count=17
+[209675000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[209685000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000001, extracted_dir=0, expected_dir=0
+[209695000] [SCHED] 🚀 Dispatching A task: addr=0x000000006000
+[209695000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000002, extracted_dir=0, expected_dir=0
+[209705000] [A-CORE#0] 📥 Received command, opcode=0x20
+[209705000] [A-CORE#0] MATMUL opcode matched, loading from memory
+[209705000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000003, extracted_dir=0, expected_dir=0
+[209715000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[209715000] [TOP] a0_busy went HIGH (A-Core started)
+[209715000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000004, extracted_dir=0, expected_dir=0
+[209725000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=1
+[209725000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000005, extracted_dir=0, expected_dir=0
+[209735000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=2
+[209735000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000006, extracted_dir=0, expected_dir=0
+[209745000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=3
+[209745000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000007, extracted_dir=0, expected_dir=0
+[209755000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=4
+[209755000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000008, extracted_dir=0, expected_dir=0
+[209765000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=5
+[209765000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000009, extracted_dir=0, expected_dir=0
+[209775000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=6
+[209775000] [RING-BUS] DEBUG: Node 2 raw_data=0x200000000000000a, extracted_dir=0, expected_dir=0
+[209785000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=7
+[209785000] [RING-BUS] DEBUG: Node 2 raw_data=0x200000000000000b, extracted_dir=0, expected_dir=0
+[209795000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=8
+[209795000] [RING-BUS] DEBUG: Node 2 raw_data=0x200000000000000c, extracted_dir=0, expected_dir=0
+[209805000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=9
+[209805000] [RING-BUS] DEBUG: Node 2 raw_data=0x200000000000000d, extracted_dir=0, expected_dir=0
+[209815000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=10
+[209815000] [RING-BUS] DEBUG: Node 2 raw_data=0x200000000000000e, extracted_dir=0, expected_dir=0
+[209825000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=11
+[209825000] [RING-BUS] DEBUG: Node 2 raw_data=0x200000000000000f, extracted_dir=0, expected_dir=0
+[209835000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=12
+[209835000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000010, extracted_dir=0, expected_dir=0
+[209845000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=13
+[209845000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000011, extracted_dir=0, expected_dir=0
+[209855000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=14
+[209855000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000012, extracted_dir=0, expected_dir=0
+[209865000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=15
+[209865000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000013, extracted_dir=0, expected_dir=0
+[209875000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000014, extracted_dir=0, expected_dir=0
+[209885000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000015, extracted_dir=0, expected_dir=0
+[209895000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000016, extracted_dir=0, expected_dir=0
+[209905000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000017, extracted_dir=0, expected_dir=0
+[209915000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000018, extracted_dir=0, expected_dir=0
+[209925000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000019, extracted_dir=0, expected_dir=0
+[209935000] [RING-BUS] DEBUG: Node 2 raw_data=0x200000000000001a, extracted_dir=0, expected_dir=0
+[209945000] [RING-BUS] DEBUG: Node 2 raw_data=0x200000000000001b, extracted_dir=0, expected_dir=0
+[209955000] [RING-BUS] DEBUG: Node 2 raw_data=0x200000000000001c, extracted_dir=0, expected_dir=0
+[209965000] [RING-BUS] DEBUG: Node 2 raw_data=0x200000000000001d, extracted_dir=0, expected_dir=0
+[209970000] [TRUE-STRESS] Phase 2 complete: A_sent=30, A_busy_cycles=0 (total_busy=0)
+[209970000] [TRUE-STRESS] Phase 3: Flooding 20 NPU requests (NO DELAY)...
+[209975000] [MEM] >>> READ START | addr=0x000 | access#17
+[210035000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[210045000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=80 cycles
+[210170000] [TRUE-STRESS] Phase 3 complete: NPU_sent=20, NPU_busy_cycles=0 (total_busy=0)
+[210170000] [TRUE-STRESS] Phase 4: Waiting for queue drain...
+[210375000] [MEM] >>> READ COMPLETE | addr=0x000 | data=0x00000000000000000000000000000000deadbeefcafe123456789abcdef01111 | latency=40 cycles
+[210845000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[211005000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[211065000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[211075000] [A-CORE#0] STORE_RESULT: Computing result hash
+[211085000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[211105000] [TOP] a0_busy went LOW (A-Core finished)
+[211105000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[211115000] [A-RSLT] 📤 RESULT_VALID: data=0x9e87da93551e75b3, ready=1, consumer_ready=1
+[211115000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[211115000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[211125000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[211125000] [A-CORE#0] 📥 Received command, opcode=0x20
+[211125000] [A-CORE#0] MATMUL opcode matched, loading from memory
+[211125000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[211135000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[211135000] [TOP] a0_busy went HIGH (A-Core started)
+[211145000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=1
+[211155000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=2
+[211165000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=3
+[211175000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=4
+[211185000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=5
+[211195000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=6
+[211205000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=7
+[211215000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=8
+[211225000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=9
+[211235000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=10
+[211245000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=11
+[211255000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=12
+[211265000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=13
+[211275000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=14
+[211285000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=15
+[211455000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[211465000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=80 cycles
+[212265000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[212425000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[212485000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[212495000] [A-CORE#0] STORE_RESULT: Computing result hash
+[212505000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[212525000] [TOP] a0_busy went LOW (A-Core finished)
+[212535000] [A-RSLT] 📤 RESULT_VALID: data=0x9e87da93551e75b3, ready=1, consumer_ready=1
+[212535000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[212545000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[260170000] [TRUE-STRESS-SUMMARY] =========================================
+[260170000] [TRUE-STRESS-SUMMARY] Total requests sent: 80 (G=30, A=30, N=20)
+[260170000] [TRUE-STRESS-SUMMARY] Total busy cycles: 0 (G=0, A=0, N=0)
+[260170000] [TRUE-STRESS-SUMMARY] During stress: dispatched=1, completed=1, in-flight=0
+[260170000] [TRUE-STRESS-SUMMARY] Overall: dispatched=8, completed=8, stalled=0
+[260170000] [TRUE-STRESS-SUMMARY] Queue peak depth: 9, admission_rejections=0
+[260170000] [TRUE-STRESS-SUMMARY] =========================================
+[260270000] ┌─────────────────────────────────────────────────────────┐
+[260270000] │ ▶ TEST 10: Back-Pressure Test (Saturate Queue)           │
+[260270000] └─────────────────────────────────────────────────────────┘
+[260270000] [BP-TEST] Flooding queue to trigger back-pressure...
+[260275000] [SCHED-BP] G-Task ACCEPTED: queue=10/16, ring_congested=0
+[260275000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=18
+[260335000] [SCHED-BP] G-Task ACCEPTED: queue=11/16, ring_congested=0
+[260335000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=19
+[260395000] [SCHED-BP] G-Task ACCEPTED: queue=12/16, ring_congested=0
+[260395000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=20
+[260450000] [BP-TEST] Back-pressure detected! (rejection #1, queue_depth=12)
+[260550000] [BP-TEST] Back-pressure detected! (rejection #2, queue_depth=12)
+[260650000] [BP-TEST] Back-pressure detected! (rejection #3, queue_depth=12)
+[260750000] [BP-TEST] Back-pressure detected! (rejection #4, queue_depth=12)
+[260850000] [BP-TEST] Back-pressure detected! (rejection #5, queue_depth=12)
+[260950000] [BP-TEST] Back-pressure detected! (rejection #6, queue_depth=12)
+[261050000] [BP-TEST] Back-pressure detected! (rejection #7, queue_depth=12)
+[261150000] [BP-TEST] Back-pressure detected! (rejection #8, queue_depth=12)
+[261250000] [BP-TEST] Back-pressure detected! (rejection #9, queue_depth=12)
+[261350000] [BP-TEST] Back-pressure detected! (rejection #10, queue_depth=12)
+[261450000] [BP-TEST] Back-pressure detected! (rejection #11, queue_depth=12)
+[261550000] [BP-TEST] Back-pressure detected! (rejection #12, queue_depth=12)
+[261650000] [BP-TEST] Back-pressure detected! (rejection #13, queue_depth=12)
+[261750000] [BP-TEST] Back-pressure detected! (rejection #14, queue_depth=12)
+[261850000] [BP-TEST] Back-pressure detected! (rejection #15, queue_depth=12)
+[261950000] [BP-TEST] Back-pressure detected! (rejection #16, queue_depth=12)
+[262050000] [BP-TEST] Back-pressure detected! (rejection #17, queue_depth=12)
+[262150000] [BP-TEST] Back-pressure detected! (rejection #18, queue_depth=12)
+[262250000] [BP-TEST] Back-pressure detected! (rejection #19, queue_depth=12)
+[262350000] [BP-TEST] Back-pressure detected! (rejection #20, queue_depth=12)
+[262450000] [BP-TEST] Back-pressure detected! (rejection #21, queue_depth=12)
+[262550000] [BP-TEST] Back-pressure detected! (rejection #22, queue_depth=12)
+[262650000] [BP-TEST] Back-pressure detected! (rejection #23, queue_depth=12)
+[262750000] [BP-TEST] Back-pressure detected! (rejection #24, queue_depth=12)
+[262850000] [BP-TEST] Back-pressure detected! (rejection #25, queue_depth=12)
+[262950000] [BP-TEST] Back-pressure detected! (rejection #26, queue_depth=12)
+[263050000] [BP-TEST] Final drain wait...
+[264050000] [BP-TEST] Back-pressure test complete:
+[264050000] [BP-TEST]   Test-level: Accepted=3, Rejected=26
+[264050000] [BP-TEST]   Hardware counters:
+[264050000] [BP-TEST]     - Queue Full Rejections: 0
+[264050000] [BP-TEST]     - Timeout Stalls: 0
+[264050000] [BP-TEST]     - Total Accepts: 20
+[264050000] [BP-TEST]   Queue depth: 12 (peak: 12)
+[264150000] ┌─────────────────────────────────────────────────────────┐
+[264150000] │ ▶ TEST 11: Error Injection (Valid Opcode + OOB Address)  │
+[264150000] └─────────────────────────────────────────────────────────┘
+[264150000] [ERR-TEST] Sending OOB address (beyond memory range)...
+[264155000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[264155000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=21
+[265160000] [ERR-TEST] OOB#1 at 0x500 (1280) - system still stable
+[265165000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[265165000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=22
+[266170000] [ERR-TEST] OOB#2 at 0x7FF (2047) - system still stable
+[266175000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[266175000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=23
+[267180000] [ERR-TEST] OOB#3 at 0xFFF (4095) - system still stable
+[267180000] [ERR-TEST] Error injection complete - system handled 3 OOB accesses
+[267280000] ┌─────────────────────────────────────────────────────────┐
+[267280000] │ ▶ TEST 12: Mixed Power Mode + High Load                  │
+[267280000] └─────────────────────────────────────────────────────────┘
+[267280000] [PWR-TEST] Switched to POWERSAVE mode under load...
+[656675000] [MQ-SCHEDULER] ⚠ STARVATION: G-Core has 12 pending tasks but not dispatching for 100 cycles
+[767380000] [PWR-TEST] ⚠ Timeout waiting for ready - dispatched 0/5
+[767380000] [PWR-TEST] Switched back to PERFORMANCE mode
+[767380000] [PWR-TEST] Waiting for pipeline drain and cores idle...
+[767880000] [PWR-TEST] ⚠ Timeout waiting for ready - forcing continue
+[767930000] [PWR-TEST] Pipeline drained and settled, starting burst dispatch
+[768930000] [G-WARN] Timeout waiting for G-Core ready!
+[768930000] [G-CMD]                                             PERF-G
+[768930000]         addr=0x000000009100, data=0x01455200
+[768935000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[768935000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=24
+[788950000] [G-RSLT] ✗ TIMEOUT after 2000 cycles (scheduler queue backlog)
+[790140000] [G-WARN] Timeout waiting for G-Core ready!
+[790140000] [G-CMD]                                             PERF-G
+[790140000]         addr=0x000000009104, data=0x01455201
+[790145000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[790145000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=25
+[810160000] [G-RSLT] ✗ TIMEOUT after 2000 cycles (scheduler queue backlog)
+[811350000] [G-WARN] Timeout waiting for G-Core ready!
+[811350000] [G-CMD]                                             PERF-G
+[811350000]         addr=0x000000009108, data=0x01455202
+[811355000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[811355000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=26
+[831370000] [G-RSLT] ✗ TIMEOUT after 2000 cycles (scheduler queue backlog)
+[832570000] [G-WARN] Timeout waiting for G-Core ready!
+[832570000] [G-CMD]                                             PERF-G
+[832570000]         addr=0x00000000910c, data=0x01455203
+[832575000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[832575000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=27
+[852590000] [G-RSLT] ✗ TIMEOUT after 2000 cycles (scheduler queue backlog)
+[853780000] [G-WARN] Timeout waiting for G-Core ready!
+[853780000] [G-CMD]                                             PERF-G
+[853780000]         addr=0x000000009110, data=0x01455204
+[853785000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[853785000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=28
+[853795000] [RING-BUS] WARNING BACKLOG: pending=101
+[853795000] [RING-BUS] CREDIT RECOVERY: pending=101 > 100, resetting all credits
+[873800000] [G-RSLT] ✗ TIMEOUT after 2000 cycles (scheduler queue backlog)
+[874000000] [PWR-TEST] Power mode transition test complete
+[874100000] ┌─────────────────────────────────────────────────────────┐
+[874100000] │ ▶ TEST 13: Memory Hazard Test (RAW Hazard)               │
+[874100000] └─────────────────────────────────────────────────────────┘
+[874100000] [HAZ-TEST] Step 1: G-Core writing 0x01004757 to addr=0x00000000a000...
+[874105000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[874105000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=29
+[876110000] [HAZ-TEST] Step 2: Memory barrier (waiting for G-Core write commit)...
+[876310000] [HAZ-TEST] ✓ G-Core write committed to memory
+[876310000] [HAZ-TEST] Step 3: A-Core writing 0x20575231deadbeef to SAME addr=0x00000000a000...
+[876310000] [A-CMD]                                            A-WRITE
+[876310000]         addr=0x00000000a000, data=0x20575231deadbeef
+[876315000] [SCHED-BP] A-Task ACCEPTED: queue=1/16, ring_congested=0
+[876315000] [SQ-SCHEDULER] 📥 Enqueued A task, queue_count=30
+[876315000] [RING-BUS] DEBUG: Node 2 raw_data=0x20575231deadbeef, extracted_dir=2, expected_dir=2
+[876315000] [RING-BUS] VC0 INJECT CCW: Node 2 (credits: 14)
+[876325000] [RING-BUS] DEBUG: Node 2 raw_data=0x20575231deadbeef, extracted_dir=2, expected_dir=2
+[876335000] [SCHED] 🚀 Dispatching A task: addr=0x00000000a000
+[876345000] [A-CORE#0] 📥 Received command, opcode=0x20
+[876345000] [A-CORE#0] MATMUL opcode matched, loading from memory
+[876345000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[876345000] [RING-BUS] VC0 INJECT CCW: Node 0 (credits: 14)
+[876355000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[876355000] [TOP] a0_busy went HIGH (A-Core started)
+[876355000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[876365000] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=1
+[876365000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=1
+[876375000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=2
+[876385000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=3
+[876395000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=4
+[876405000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=5
+[876415000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=6
+[876425000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=7
+[876435000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=8
+[876445000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=9
+[876455000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=10
+[876465000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=11
+[876475000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=12
+[876485000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=13
+[876495000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=14
+[876505000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=15
+[876675000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[876685000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=80 cycles
+[877485000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[877645000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[877705000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[877715000] [A-CORE#0] STORE_RESULT: Computing result hash
+[877725000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[877745000] [TOP] a0_busy went LOW (A-Core finished)
+[877745000] [RING-BUS] VC0 INJECT CCW: Node 0 (credits: 14)
+[877745000] [RING-BUS] DEBUG: Node 2 raw_data=0x20575231deadbeef, extracted_dir=2, expected_dir=2
+[877745000] [RING-BUS] VC0 INJECT CCW: Node 2 (credits: 6)
+[877755000] [A-RSLT] 📤 RESULT_VALID: data=0x2f90ebde90c54e15, ready=1, consumer_ready=1
+[877755000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[877755000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[877755000] [RING-BUS] DEBUG: Node 2 raw_data=0x20575231deadbeef, extracted_dir=2, expected_dir=2
+[877765000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[877765000] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=1
+[877765000] [A-CORE#0] 📥 Received command, opcode=0x20
+[877765000] [A-CORE#0] MATMUL opcode matched, loading from memory
+[877765000] [RING-BUS] VC0 INJECT CCW: Node 0 (credits: 14)
+[877765000] [RING-BUS] DEBUG: Node 2 raw_data=0x20575231deadbeef, extracted_dir=2, expected_dir=2
+[877765000] [RING-BUS] VC0 INJECT CCW: Node 2 (credits: 5)
+[877775000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[877775000] [TOP] a0_busy went HIGH (A-Core started)
+[877775000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[877785000] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=1
+[877785000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=1
+[877795000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=2
+[877795000] [RING-BUS] CREDIT_RETURN: src=0, dir=CCW (on-delivery), cw_credit=15, ccw_credit=15
+[877805000] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=1
+[877805000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=3
+[877815000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=4
+[877825000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=5
+[877835000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=6
+[877845000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=7
+[877855000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=8
+[877865000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=9
+[877875000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=10
+[877885000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=11
+[877895000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=12
+[877905000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=13
+[877915000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=14
+[877925000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=15
+[878095000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[878105000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=80 cycles
+[878905000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[879065000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[879125000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[879135000] [A-CORE#0] STORE_RESULT: Computing result hash
+[879145000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[879165000] [TOP] a0_busy went LOW (A-Core finished)
+[879175000] [A-RSLT] 📤 RESULT_VALID: data=0x2f90ebde90c54e15, ready=1, consumer_ready=1
+[879175000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[879185000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[881330000] [A-RSLT] ✗ TIMEOUT after 500 cycles (FIFO not consumed)
+[881410000] [HAZ-TEST] Step 4: Memory barrier (waiting for A-Core write commit)...
+[881710000] [HAZ-TEST] ✓ A-Core write committed to memory
+[881710000] [HAZ-TEST] Step 5: Reading back addr=0x00000000a000 (expecting A-Core value)...
+[881710000] [HAZ-TEST] ✓ MEMORY ORDERING CORRECT
+[881710000] [HAZ-TEST]   Actual:   0x00000000000000000000000000020575231deadbeef
+[881710000] [HAZ-TEST]   Expected: 0x00000000000000000000000000020575231deadbeef (A-Core latest write)
+[881710000] [HAZ-TEST]   ✓ Last writer wins semantics maintained
+[881710000] [HAZ-TEST] Memory hazard test complete
+[881810000] ┌─────────────────────────────────────────────────────────┐
+[881810000] │ ▶ TEST 14: Dependency Chain Test (RAW Tanpa Barrier)     │
+[881810000] └─────────────────────────────────────────────────────────┘
+[881810000] [DEP-TEST] 🔗 Testing dependency chain: G write → A read → NPU read → G overwrite
+[881810000] [DEP-TEST] NO BARRIER between operations - test RAW hazard detection
+[881810000] [DEP-TEST] Step 1: G-Core writing VALUE_A (0x47000041) to addr=0x00000000b000...
+[881815000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[881815000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=31
+[881820000] [DEP-TEST] Step 2: A-Core reading from SAME addr (RAW dependency)...
+[881825000] [SCHED-BP] A-Task ACCEPTED: queue=1/16, ring_congested=0
+[881825000] [SQ-SCHEDULER] 📥 Enqueued A task, queue_count=32
+[881825000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[881830000] [DEP-TEST] Step 3: NPU reading from SAME addr...
+[881835000] [MEM] >>> READ START | addr=0x000 | access#18
+[881840000] [DEP-TEST] Step 4: G-Core OVERWRITING with VALUE_B (0x47000042)...
+[881845000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[881845000] [SCHED] 🚀 Dispatching A task: addr=0x00000000b000
+[881855000] [A-CORE#0] 📥 Received command, opcode=0x20
+[881855000] [A-CORE#0] MATMUL opcode matched, loading from memory
+[881865000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[881865000] [TOP] a0_busy went HIGH (A-Core started)
+[881875000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=1
+[881885000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=2
+[881895000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=3
+[881905000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=4
+[881915000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=5
+[881925000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=6
+[881935000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=7
+[881945000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=8
+[881955000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=9
+[881965000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=10
+[881975000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=11
+[881985000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=12
+[881995000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=13
+[882005000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=14
+[882015000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=15
+[882185000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[882195000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=80 cycles
+[882235000] [MEM] >>> READ COMPLETE | addr=0x000 | data=0x00000000000000000000000000000000000000000000000020575231deadbeef | latency=40 cycles
+[882995000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[883155000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[883215000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[883225000] [A-CORE#0] STORE_RESULT: Computing result hash
+[883235000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[883255000] [TOP] a0_busy went LOW (A-Core finished)
+[883255000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[883265000] [A-RSLT] 📤 RESULT_VALID: data=0x0457131235adaab6, ready=1, consumer_ready=1
+[883265000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[883265000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[883275000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[883275000] [A-CORE#0] 📥 Received command, opcode=0x20
+[883275000] [A-CORE#0] MATMUL opcode matched, loading from memory
+[883275000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[883285000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[883285000] [TOP] a0_busy went HIGH (A-Core started)
+[883295000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=1
+[883305000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=2
+[883315000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=3
+[883325000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=4
+[883335000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=5
+[883345000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=6
+[883355000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=7
+[883365000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=8
+[883375000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=9
+[883385000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=10
+[883395000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=11
+[883405000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=12
+[883415000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=13
+[883425000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=14
+[883435000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=15
+[883605000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[883615000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=80 cycles
+[884415000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[884575000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[884635000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[884645000] [A-CORE#0] STORE_RESULT: Computing result hash
+[884655000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[884675000] [TOP] a0_busy went LOW (A-Core finished)
+[884685000] [A-RSLT] 📤 RESULT_VALID: data=0x0457131235adaab6, ready=1, consumer_ready=1
+[884685000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[884695000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[886850000] [DEP-TEST] Step 5: Reading back final value...
+[886855000] [MEM] >>> READ START | addr=0x000 | access#19
+[886910000] [DEP-TEST] Dependency chain test complete
+[886910000] [DEP-TEST] Scheduler: dispatched=10, completed=10, stalled=0
+[886910000] [DEP-TEST] Hazards: RAW=0, WAR=0, WAW=0, Structural=0
+[887010000] ┌─────────────────────────────────────────────────────────┐
+[887010000] │ ▶ TEST 15: Queue Contention Stress Test (Massive Burst)  │
+[887010000] └─────────────────────────────────────────────────────────┘
+[887010000] [QUEUE-TEST] AGGRESSIVE QUEUE FLOOD - TRIGGERING ADMISSION CONTROL
+[887010000] [QUEUE-TEST] Target: Fill G-queue beyond 75 percent threshold
+[887010000] [QUEUE-TEST] Strategy: Send 25 G tasks instantly (queue depth=16, threshold=12)
+[887010000] [QUEUE-TEST] Phase 1: Forcing 25 G requests (ignore ready)...
+[887015000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887035000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887055000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887075000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887095000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887115000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887135000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887155000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887175000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887195000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887215000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887235000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887255000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887255000] [MEM] >>> READ COMPLETE | addr=0x000 | data=0x00000000000000000000000000000000000000000000000020575231deadbeef | latency=40 cycles
+[887275000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887295000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887315000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887335000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887355000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887375000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887395000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887415000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887435000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887455000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887475000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887495000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[887510000] [QUEUE-TEST] Phase 1 complete: G_sent=25
+[887510000] [QUEUE-TEST] Phase 2: Forcing 20 A requests (ignore ready)...
+[887515000] [SCHED-BP] A-Task ACCEPTED: queue=1/16, ring_congested=0
+[887515000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[887535000] [SCHED-BP] A-Task ACCEPTED: queue=2/16, ring_congested=0
+[887535000] [SCHED] 🚀 Dispatching A task: addr=0x00000000f000
+[887535000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[887545000] [A-CORE#0] 📥 Received command, opcode=0x20
+[887545000] [A-CORE#0] MATMUL opcode matched, loading from memory
+[887555000] [SCHED-BP] A-Task ACCEPTED: queue=1/16, ring_congested=0
+[887555000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[887555000] [TOP] a0_busy went HIGH (A-Core started)
+[887555000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[887565000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=1
+[887575000] [SCHED-BP] A-Task ACCEPTED: queue=2/16, ring_congested=0
+[887575000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=2
+[887575000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[887585000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=3
+[887595000] [SCHED-BP] A-Task ACCEPTED: queue=3/16, ring_congested=0
+[887595000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=4
+[887595000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[887605000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=5
+[887615000] [SCHED-BP] A-Task ACCEPTED: queue=4/16, ring_congested=0
+[887615000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=6
+[887615000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[887625000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=7
+[887635000] [SCHED-BP] A-Task ACCEPTED: queue=5/16, ring_congested=0
+[887635000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=8
+[887635000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[887645000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=9
+[887655000] [SCHED-BP] A-Task ACCEPTED: queue=6/16, ring_congested=0
+[887655000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=10
+[887655000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[887665000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=11
+[887675000] [SCHED-BP] A-Task ACCEPTED: queue=7/16, ring_congested=0
+[887675000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=12
+[887675000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[887685000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=13
+[887695000] [SCHED-BP] A-Task ACCEPTED: queue=8/16, ring_congested=0
+[887695000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=14
+[887695000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[887705000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=15
+[887715000] [SCHED-BP] A-Task ACCEPTED: queue=9/16, ring_congested=0
+[887715000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[887735000] [SCHED-BP] A-Task ACCEPTED: queue=10/16, ring_congested=0
+[887735000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[887755000] [SCHED-BP] A-Task ACCEPTED: queue=11/16, ring_congested=0
+[887755000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[887775000] [SCHED-BP] A-Task ACCEPTED: queue=12/16, ring_congested=0
+[887775000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[887795000] [SCHED-RB] 🔄 A-Task ACCEPTED via Ring Bus (queue_full=12, ring_packets=20)
+[887795000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[887815000] [SCHED-RB] 🔄 A-Task ACCEPTED via Ring Bus (queue_full=13, ring_packets=20)
+[887815000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[887835000] [SCHED-RB] 🔄 A-Task ACCEPTED via Ring Bus (queue_full=14, ring_packets=20)
+[887835000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[887855000] [SCHED-RB] 🔄 A-Task ACCEPTED via Ring Bus (queue_full=15, ring_packets=20)
+[887855000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[887875000] [SCHED-RB] 🔄 A-Task ACCEPTED via Ring Bus (queue_full=16, ring_packets=20)
+[887875000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[887875000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+ERROR: interconnect/global_scheduler_mq.sv:2042: [887885000] [MQ-SCHEDULER] BUG: A-Queue overflow! count=17 depth=16 (double-enqueue bug)
+       Time: 887885000  Scope: tb_aurora_172.dut.u_scheduler_mq
+[887885000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=80 cycles
+[887895000] [SCHED-RB] 🔄 A-Task ACCEPTED via Ring Bus (queue_full=16, ring_packets=20)
+[887895000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+ERROR: interconnect/global_scheduler_mq.sv:2042: [887905000] [MQ-SCHEDULER] BUG: A-Queue overflow! count=17 depth=16 (double-enqueue bug)
+       Time: 887905000  Scope: tb_aurora_172.dut.u_scheduler_mq
+[887910000] [QUEUE-TEST] Phase 2 complete: A_sent=20
+[888410000] [QUEUE-TEST-SUMMARY] ========================================
+[888410000] [QUEUE-TEST-SUMMARY] QUEUE OVERFLOW TEST RESULTS:
+[888410000] [QUEUE-TEST-SUMMARY]   G requests forced:    25
+[888410000] [QUEUE-TEST-SUMMARY]   A requests forced:    20
+[888410000] [QUEUE-TEST-SUMMARY]   Queue peak depth:     17 (was 12)
+[888410000] [QUEUE-TEST-SUMMARY]   HW admission rejections: 0
+[888410000] [QUEUE-TEST-SUMMARY]   HW queue full rejections: 0
+[888410000] [QUEUE-TEST-SUMMARY]   ⚠ No admission rejections (queue drained too fast)
+[888410000] [QUEUE-TEST-SUMMARY] ========================================
+[888510000] ┌─────────────────────────────────────────────────────────┐
+[888510000] │ ▶ TEST 16: Power Monitor Stress Test (Intel RAPL)        │
+[888510000] └─────────────────────────────────────────────────────────┘
+[888510000] [PM-TEST] 🔥 Power Monitor Stress Test - Monitoring energy consumption 🔥
+[888510000] [PM-TEST] Target: Validate RAPL energy counters, PL1/PL2 violations, throttling
+[888510000] [PM-TEST] Phase 1: Capturing baseline power readings...
+[888510000] [PM-TEST] Baseline: Energy_G=532986uJ, Energy_A=749204uJ, Total=1815240uJ
+[888510000] [PM-TEST] Baseline: Power_G=40000mW, Power_A=95006mW, Total=175006mW
+[888510000] [PM-TEST] Baseline: PL1_violations=0, PL2_violations=0
+[888510000] [PM-TEST] Phase 2: Heavy workload to trigger power monitoring (50 ops)...
+[888685000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[888845000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[888905000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[888915000] [A-CORE#0] STORE_RESULT: Computing result hash
+[888925000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[888945000] [TOP] a0_busy went LOW (A-Core finished)
+[888945000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[888955000] [A-RSLT] 📤 RESULT_VALID: data=0xf3dae7601e143913, ready=1, consumer_ready=1
+[888955000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[888955000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[888965000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[888965000] [A-CORE#0] 📥 Received command, opcode=0x20
+[888965000] [A-CORE#0] MATMUL opcode matched, loading from memory
+[888965000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[888975000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[888975000] [TOP] a0_busy went HIGH (A-Core started)
+[888985000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=1
+[888995000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=2
+[889005000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=3
+[889015000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=4
+[889025000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=5
+[889035000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=6
+[889045000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=7
+[889055000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=8
+[889065000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=9
+[889075000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=10
+[889085000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=11
+[889095000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=12
+[889105000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=13
+[889115000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=14
+[889125000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=15
+[889295000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[889305000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=80 cycles
+[890105000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[890265000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[890325000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[890335000] [A-CORE#0] STORE_RESULT: Computing result hash
+[890345000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[890365000] [SCHED] 🚀 Dispatching A task: addr=0x00000000f028
+[890365000] [TOP] a0_busy went LOW (A-Core finished)
+[890375000] [A-RSLT] 📤 RESULT_VALID: data=0xf3dae7601e143913, ready=1, consumer_ready=1
+[890375000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[890375000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[890385000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[890385000] [A-CORE#0] 📥 Received command, opcode=0x20
+[890385000] [A-CORE#0] MATMUL opcode matched, loading from memory
+[890385000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[890395000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[890395000] [TOP] a0_busy went HIGH (A-Core started)
+[890405000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=1
+[890415000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=2
+[890425000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=3
+[890435000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=4
+[890445000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=5
+[890455000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=6
+[890465000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=7
+[890475000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=8
+[890485000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=9
+[890495000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=10
+[890505000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=11
+[890515000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=12
+[890525000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=13
+[890535000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=14
+[890545000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=15
+[890715000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[890725000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=80 cycles
+[891525000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[891685000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[891745000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[891755000] [A-CORE#0] STORE_RESULT: Computing result hash
+[891765000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[891785000] [SCHED] 🚀 Dispatching A task: addr=0x00000000f020
+[891785000] [TOP] a0_busy went LOW (A-Core finished)
+[891795000] [A-RSLT] 📤 RESULT_VALID: data=0x38bc0e1061a6cb33, ready=1, consumer_ready=1
+[891795000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[891795000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[891805000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[891805000] [A-CORE#0] 📥 Received command, opcode=0x20
+[891805000] [A-CORE#0] MATMUL opcode matched, loading from memory
+[891805000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[891815000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[891815000] [TOP] a0_busy went HIGH (A-Core started)
+[891825000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=1
+[891835000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=2
+[891845000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=3
+[891855000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=4
+[891865000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=5
+[891875000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=6
+[891885000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=7
+[891895000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=8
+[891905000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=9
+[891915000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=10
+[891925000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=11
+[891935000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=12
+[891945000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=13
+[891955000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=14
+[891965000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=15
+[892135000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[892145000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=80 cycles
+[892945000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[893105000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[893165000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[893175000] [A-CORE#0] STORE_RESULT: Computing result hash
+[893185000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[893205000] [SCHED] 🚀 Dispatching A task: addr=0x00000000f018
+[893205000] [TOP] a0_busy went LOW (A-Core finished)
+[893215000] [SCHED-BP] A-Task ACCEPTED: queue=12/16, ring_congested=0
+[893215000] [A-RSLT] 📤 RESULT_VALID: data=0x814d1743a08175bb, ready=1, consumer_ready=1
+[893215000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[893215000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[893215000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[893225000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[893225000] [A-CORE#0] 📥 Received command, opcode=0x20
+[893225000] [A-CORE#0] MATMUL opcode matched, loading from memory
+[893225000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[893235000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[893235000] [TOP] a0_busy went HIGH (A-Core started)
+[893245000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=1
+[893255000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=2
+[893265000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=3
+[893275000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=4
+[893285000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=5
+[893295000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=6
+[893305000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=7
+[893315000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=8
+[893325000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=9
+[893335000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=10
+[893345000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=11
+[893355000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=12
+[893365000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=13
+[893375000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=14
+[893385000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=15
+[893425000] [SCHED-BP] A-Task ACCEPTED: queue=11/16, ring_congested=0
+[893425000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[893530000] [PM-TEST] Phase 2 complete: 2 stress operations dispatched
+[893530000] [PM-TEST] Phase 3: Waiting for power accumulation...
+[893555000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[893565000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=80 cycles
+[894365000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[894525000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[894585000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[894595000] [A-CORE#0] STORE_RESULT: Computing result hash
+[894605000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[894625000] [SCHED] 🚀 Dispatching A task: addr=0x00000000d0c0
+[894625000] [TOP] a0_busy went LOW (A-Core finished)
+[894635000] [A-RSLT] 📤 RESULT_VALID: data=0xd93e7e2f2430aeee, ready=1, consumer_ready=1
+[894635000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[894635000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[894645000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[894645000] [A-CORE#0] 📥 Received command, opcode=0x31
+[894645000] [A-CORE#0] 💾 STORE_WT opcode, addr=0xd0c0
+[894645000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[894655000] [A-CORE#0] STORE_RESULT: Computing result hash
+[894655000] [TOP] a0_busy went HIGH (A-Core started)
+[894665000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[894685000] [SCHED] 🚀 Dispatching A task: addr=0x00000000d0b8
+[894685000] [TOP] a0_busy went LOW (A-Core finished)
+[894695000] [A-RSLT] 📤 RESULT_VALID: data=0xf80da4aa26c718e7, ready=1, consumer_ready=1
+[894695000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[894695000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[894705000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[894705000] [A-CORE#0] 📥 Received command, opcode=0x31
+[894705000] [A-CORE#0] 💾 STORE_WT opcode, addr=0xd0b8
+[894705000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[894715000] [A-CORE#0] STORE_RESULT: Computing result hash
+[894715000] [TOP] a0_busy went HIGH (A-Core started)
+[894725000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[894745000] [SCHED] 🚀 Dispatching A task: addr=0x00000000f080
+[894745000] [TOP] a0_busy went LOW (A-Core finished)
+[894755000] [A-RSLT] 📤 RESULT_VALID: data=0x293f0a0ac6014eb6, ready=1, consumer_ready=1
+[894755000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[894755000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[894765000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[894765000] [A-CORE#0] 📥 Received command, opcode=0x20
+[894765000] [A-CORE#0] MATMUL opcode matched, loading from memory
+[894765000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[894775000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[894775000] [TOP] a0_busy went HIGH (A-Core started)
+[894785000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=1
+[894795000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=2
+[894805000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=3
+[894815000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=4
+[894825000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=5
+[894835000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=6
+[894845000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=7
+[894855000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=8
+[894865000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=9
+[894875000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=10
+[894885000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=11
+[894895000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=12
+[894905000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=13
+[894915000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=14
+[894925000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=15
+[895095000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[895105000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=80 cycles
+[895905000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[896065000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[896125000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[896135000] [A-CORE#0] STORE_RESULT: Computing result hash
+[896145000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[896165000] [SCHED] 🚀 Dispatching A task: addr=0x00000000f078
+[896165000] [TOP] a0_busy went LOW (A-Core finished)
+[896175000] [A-RSLT] 📤 RESULT_VALID: data=0xf71ed5efd48b3d0b, ready=1, consumer_ready=1
+[896175000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[896175000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[896185000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[896185000] [A-CORE#0] 📥 Received command, opcode=0x20
+[896185000] [A-CORE#0] MATMUL opcode matched, loading from memory
+[896185000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[896195000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[896195000] [TOP] a0_busy went HIGH (A-Core started)
+[896205000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=1
+[896215000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=2
+[896225000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=3
+[896235000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=4
+[896245000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=5
+[896255000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=6
+[896265000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=7
+[896275000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=8
+[896285000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=9
+[896295000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=10
+[896305000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=11
+[896315000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=12
+[896325000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=13
+[896335000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=14
+[896345000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=15
+[896515000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[896525000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=80 cycles
+[897325000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[897485000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[897545000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[897555000] [A-CORE#0] STORE_RESULT: Computing result hash
+[897565000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[897585000] [SCHED] 🚀 Dispatching A task: addr=0x00000000f070
+[897585000] [TOP] a0_busy went LOW (A-Core finished)
+[897595000] [A-RSLT] 📤 RESULT_VALID: data=0x657a8eb0f73997ea, ready=1, consumer_ready=1
+[897595000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[897595000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[897605000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[897605000] [A-CORE#0] 📥 Received command, opcode=0x20
+[897605000] [A-CORE#0] MATMUL opcode matched, loading from memory
+[897605000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[897615000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[897615000] [TOP] a0_busy went HIGH (A-Core started)
+[897625000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=1
+[897635000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=2
+[897645000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=3
+[897655000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=4
+[897665000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=5
+[897675000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=6
+[897685000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=7
+[897695000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=8
+[897705000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=9
+[897715000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=10
+[897725000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=11
+[897735000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=12
+[897745000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=13
+[897755000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=14
+[897765000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=15
+[897935000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[897945000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=80 cycles
+[898745000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[898905000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[898965000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[898975000] [A-CORE#0] STORE_RESULT: Computing result hash
+[898985000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[899005000] [SCHED] 🚀 Dispatching A task: addr=0x00000000f068
+[899005000] [TOP] a0_busy went LOW (A-Core finished)
+[899015000] [A-RSLT] 📤 RESULT_VALID: data=0xb7b5d5e007a72ba4, ready=1, consumer_ready=1
+[899015000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[899015000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[899025000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[899025000] [A-CORE#0] 📥 Received command, opcode=0x20
+[899025000] [A-CORE#0] MATMUL opcode matched, loading from memory
+[899025000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[899035000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[899035000] [TOP] a0_busy went HIGH (A-Core started)
+[899045000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=1
+[899055000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=2
+[899065000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=3
+[899075000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=4
+[899085000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=5
+[899095000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=6
+[899105000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=7
+[899115000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=8
+[899125000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=9
+[899135000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=10
+[899145000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=11
+[899155000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=12
+[899165000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=13
+[899175000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=14
+[899185000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=15
+[899355000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[899365000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=80 cycles
+[900165000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[900325000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[900385000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[900395000] [A-CORE#0] STORE_RESULT: Computing result hash
+[900405000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[900425000] [TOP] a0_busy went LOW (A-Core finished)
+[900435000] [A-RSLT] 📤 RESULT_VALID: data=0x215db019cb777c2a, ready=1, consumer_ready=1
+[900435000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[900445000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[903530000] [PM-TEST-SUMMARY] ========================================
+[903530000] [PM-TEST-SUMMARY] POWER MONITOR RESULTS:
+[903530000] [PM-TEST-SUMMARY]   Duration: 15020000 cycles
+[903530000] [PM-TEST-SUMMARY]   Energy Delta (G-Core):  9012 uJ
+[903530000] [PM-TEST-SUMMARY]   Energy Delta (A-Core):  31753 uJ
+[903530000] [PM-TEST-SUMMARY]   Energy Delta (NPU):     1502 uJ
+[903530000] [PM-TEST-SUMMARY]   Energy Delta (Total):   49777 uJ
+[903530000] [PM-TEST-SUMMARY]   Final G-Core Power:     40000 mW
+[903530000] [PM-TEST-SUMMARY]   Final A-Core Power:     56606 mW
+[903530000] [PM-TEST-SUMMARY]   Final NPU Power:        z mW
+[903530000] [PM-TEST-SUMMARY]   Final Total Power:      136606 mW
+[903530000] [PM-TEST-SUMMARY]   PL1 Violations:         0 (delta: 0)
+[903530000] [PM-TEST-SUMMARY]   PL2 Violations:         0 (delta: 0)
+[903530000] [PM-TEST-SUMMARY]   Throttle Requests:      0
+[903530000] [PM-TEST-SUMMARY]   ✅ PASS: Energy counter increasing (accumulating correctly)
+[903530000] [PM-TEST-SUMMARY]   ✅ PASS: Power monitoring active
+[903530000] [PM-TEST-SUMMARY] ========================================
+[903630000] ┌─────────────────────────────────────────────────────────┐
+[903630000] │ ▶ TEST 17: V-Cache Stress Test (AMD 3D V-Cache)          │
+[903630000] └─────────────────────────────────────────────────────────┘
+[903630000] [VC-TEST] 🔥 V-Cache Stress Test - Cache hit/miss patterns 🔥
+[903630000] [VC-TEST] Target: Validate cache hits, misses, evictions, promotions, hit rate
+[903630000] [VC-TEST] Phase 1: Capturing baseline V-Cache stats...
+[903630000] [VC-TEST] Baseline: Hits=0, Misses=0, HitRate=0%, Capacity=0MB
+[903630000] [VC-TEST] Phase 2: Memory accesses to trigger V-Cache traffic...
+[903635000] [MEM] >>> READ START | addr=0x000 | access#20
+[904035000] [MEM] >>> READ COMPLETE | addr=0x000 | data=0x00000000000000000000000000000000000000000000000020575231deadbeef | latency=40 cycles
+[904075000] [MEM] >>> READ START | addr=0x100 | access#21
+[904475000] [MEM] >>> READ COMPLETE | addr=0x100 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[904515000] [MEM] >>> READ START | addr=0x200 | access#22
+[904730000] [VC-TEST] Phase 2b: Re-issuing same addresses for V-Cache hits...
+[904915000] [MEM] >>> READ COMPLETE | addr=0x200 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[904955000] [MEM] >>> READ START | addr=0x080 | access#23
+[905355000] [MEM] >>> READ COMPLETE | addr=0x080 | data=0x00000000000000000000000000000000ffffeeeeddddccccbbbbaaaa99998888 | latency=40 cycles
+[905395000] [MEM] >>> READ START | addr=0x180 | access#24
+[905795000] [MEM] >>> READ COMPLETE | addr=0x180 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[905830000] [VC-TEST] Phase 2 complete: 20 memory accesses
+[906830000] [VC-TEST] Phase 3: Random access pattern (expect more misses)...
+[906835000] [MEM] >>> READ START | addr=0x1bc | access#25
+[907235000] [MEM] >>> READ COMPLETE | addr=0x1bc | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[907255000] [MEM] >>> READ START | addr=0x2bf | access#26
+[907655000] [MEM] >>> READ COMPLETE | addr=0x2bf | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[907675000] [MEM] >>> READ START | addr=0x1ef | access#27
+[908075000] [MEM] >>> READ COMPLETE | addr=0x1ef | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[908095000] [MEM] >>> READ START | addr=0x02d | access#28
+[908495000] [MEM] >>> READ COMPLETE | addr=0x02d | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[908515000] [MEM] >>> READ START | addr=0x033 | access#29
+[908630000] [VC-TEST] Phase 3 complete: 30 random accesses
+[908915000] [MEM] >>> READ COMPLETE | addr=0x033 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[910630000] [VC-TEST-SUMMARY] ========================================
+[910630000] [VC-TEST-SUMMARY] V-CACHE RESULTS:
+[910630000] [VC-TEST-SUMMARY]   Cache Hits:          0 (delta: 0)
+[910630000] [VC-TEST-SUMMARY]   Cache Misses:        0 (delta: 0)
+[910630000] [VC-TEST-SUMMARY]   Evictions:           0 (delta: 0)
+[910630000] [VC-TEST-SUMMARY]   Promotions:          0 (delta: 0)
+[910630000] [VC-TEST-SUMMARY]   Hit Rate:            0% (was 0%)
+[910630000] [VC-TEST-SUMMARY]   Capacity Used:       0 MB (was 0 MB)
+[910630000] [VC-TEST-SUMMARY]   ⚠️  WARN: No cache hits recorded
+[910630000] [VC-TEST-SUMMARY]   ⚠️  WARN: No cache misses recorded
+[910630000] [VC-TEST-SUMMARY] ========================================
+[910730000] ┌─────────────────────────────────────────────────────────┐
+[910730000] │ ▶ TEST 18: Speed Shift / HWP Stress Test (Intel Hardware P-States)│
+[910730000] └─────────────────────────────────────────────────────────┘
+[910730000] [HWP-TEST] 🔥 Speed Shift HWP Stress Test - Dynamic frequency scaling 🔥
+[910730000] [HWP-TEST] Target: Validate P-state transitions, frequency scaling, thermal limits
+[910730000] [HWP-TEST] Phase 1: Capturing baseline HWP state...
+[910730000] [HWP-TEST] Baseline: HWP_active=1, G_PState=15, A_PState=15, N_PState=15
+[910730000] [HWP-TEST] Baseline: G_Freq=1625MHz, A_Freq=1125MHz, N_Freq=250MHz
+[910730000] [HWP-TEST] Baseline: Transitions=51, ThermLimits=0
+[910730000] [HWP-TEST] Phase 2: Varying workload intensity to trigger P-state changes...
+[910730000] [HWP-TEST]   Burst 1: HEAVY workload (expect P0/P1 - max boost)...
+[910735000] [SCHED-BP] A-Task ACCEPTED: queue=1/16, ring_congested=0
+[910735000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[910745000] [SCHED] 🚀 Dispatching A task: addr=0x00000000f060
+[910755000] [A-CORE#0] 📥 Received command, opcode=0x20
+[910755000] [A-CORE#0] MATMUL opcode matched, loading from memory
+[910765000] [A-CORE#0] 🚨 FORWARD PROGRESS VIOLATION: State=1 stuck for 1031 cycles (max=1000)
+[910765000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[910765000] [TOP] a0_busy went HIGH (A-Core started)
+[910775000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[910825000] [SCHED-BP] A-Task ACCEPTED: queue=1/16, ring_congested=0
+[910825000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[910915000] [SCHED-BP] A-Task ACCEPTED: queue=2/16, ring_congested=0
+[910915000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[911005000] [SCHED-BP] A-Task ACCEPTED: queue=3/16, ring_congested=0
+[911005000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[911095000] [SCHED-BP] A-Task ACCEPTED: queue=4/16, ring_congested=0
+[911095000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[911185000] [SCHED-BP] A-Task ACCEPTED: queue=5/16, ring_congested=0
+[911185000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[911275000] [SCHED-BP] A-Task ACCEPTED: queue=6/16, ring_congested=0
+[911275000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[911365000] [SCHED-BP] A-Task ACCEPTED: queue=7/16, ring_congested=0
+[911365000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[911455000] [SCHED-BP] A-Task ACCEPTED: queue=8/16, ring_congested=0
+[911455000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[911545000] [SCHED-BP] A-Task ACCEPTED: queue=9/16, ring_congested=0
+[911545000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[911575000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[911635000] [SCHED-BP] A-Task ACCEPTED: queue=10/16, ring_congested=0
+[911635000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[911725000] [SCHED-BP] A-Task ACCEPTED: queue=11/16, ring_congested=0
+[911725000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[911735000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[911805000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[911815000] [SCHED-BP] A-Task ACCEPTED: queue=12/16, ring_congested=0
+[911815000] [A-CORE#0] STORE_RESULT: Computing result hash
+[911815000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[911825000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[911845000] [TOP] a0_busy went LOW (A-Core finished)
+[911845000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[911855000] [A-RSLT] 📤 RESULT_VALID: data=0x7cb3d6889f87c5a0, ready=1, consumer_ready=1
+[911855000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[911855000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[911865000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[911865000] [A-CORE#0] 📥 Received command, opcode=0x20
+[911865000] [A-CORE#0] MATMUL opcode matched, loading from memory
+[911865000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[911875000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=0
+[911875000] [TOP] a0_busy went HIGH (A-Core started)
+[911885000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=1
+[911895000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=2
+[911905000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=3
+[911915000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=4
+[911925000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=5
+[911935000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=6
+[911945000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=7
+[911955000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=8
+[911965000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=9
+[911975000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=10
+[911985000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=11
+[911995000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=12
+[912005000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=13
+[912015000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=14
+[912025000] [A-CORE#0] LOAD_INPUT: Loading matrix A from memory, stage_counter=15
+[912060000] [HWP-TEST] Burst 1 complete: G_PState=14, A_PState=0, Transitions=52
+[912195000] [A-CORE#0] MAC_INIT: Transitioning to MAC_COMPUTE
+[912205000] [A-CORE#0] MAC_COMPUTE: Counter starting, target=80 cycles
+[913005000] [A-CORE#0] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1
+[913165000] [A-CORE#0] MAC: Row 0 complete (stage 16)
+[913225000] [A-CORE#0] 🚨 MAC_COMPUTE: Watchdog timeout! Forcing transition
+[913235000] [A-CORE#0] STORE_RESULT: Computing result hash
+[913245000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[913265000] [SCHED] 🚀 Dispatching A task: addr=0x00000000f010
+[913265000] [TOP] a0_busy went LOW (A-Core finished)
+[913275000] [A-RSLT] 📤 RESULT_VALID: data=0x741f36fd6f352c5a, ready=1, consumer_ready=1
+[913275000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[913275000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[913285000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[913285000] [A-CORE#0] 📥 Received command, opcode=0x31
+[913285000] [A-CORE#0] 💾 STORE_WT opcode, addr=0xf010
+[913285000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[913295000] [A-CORE#0] STORE_RESULT: Computing result hash
+[913295000] [TOP] a0_busy went HIGH (A-Core started)
+[913305000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[913325000] [SCHED] 🚀 Dispatching A task: addr=0x00000000f008
+[913325000] [TOP] a0_busy went LOW (A-Core finished)
+[913335000] [A-RSLT] 📤 RESULT_VALID: data=0xf5737b2240e07fbd, ready=1, consumer_ready=1
+[913335000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[913335000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[913345000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[913345000] [A-CORE#0] 📥 Received command, opcode=0x31
+[913345000] [A-CORE#0] 💾 STORE_WT opcode, addr=0xf008
+[913345000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[913355000] [A-CORE#0] STORE_RESULT: Computing result hash
+[913355000] [TOP] a0_busy went HIGH (A-Core started)
+[913365000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[913385000] [SCHED] 🚀 Dispatching A task: addr=0x00000000f000
+[913385000] [TOP] a0_busy went LOW (A-Core finished)
+[913395000] [A-RSLT] 📤 RESULT_VALID: data=0x51f4301b01786922, ready=1, consumer_ready=1
+[913395000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[913395000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[913405000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[913405000] [A-CORE#0] 📥 Received command, opcode=0x31
+[913405000] [A-CORE#0] 💾 STORE_WT opcode, addr=0xf000
+[913405000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[913415000] [A-CORE#0] STORE_RESULT: Computing result hash
+[913415000] [TOP] a0_busy went HIGH (A-Core started)
+[913425000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[913445000] [SCHED] 🚀 Dispatching A task: addr=0x00000000f060
+[913445000] [TOP] a0_busy went LOW (A-Core finished)
+[913455000] [A-RSLT] 📤 RESULT_VALID: data=0x7e15862005fb461d, ready=1, consumer_ready=1
+[913455000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[913455000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[913465000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[913465000] [A-CORE#0] 📥 Received command, opcode=0x31
+[913465000] [A-CORE#0] 💾 STORE_WT opcode, addr=0xf060
+[913465000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[913475000] [A-CORE#0] STORE_RESULT: Computing result hash
+[913475000] [TOP] a0_busy went HIGH (A-Core started)
+[913485000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[913505000] [SCHED] 🚀 Dispatching A task: addr=0x00000000f058
+[913505000] [TOP] a0_busy went LOW (A-Core finished)
+[913515000] [A-RSLT] 📤 RESULT_VALID: data=0x9991dd5483052353, ready=1, consumer_ready=1
+[913515000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[913515000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[913525000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[913525000] [A-CORE#0] 📥 Received command, opcode=0x31
+[913525000] [A-CORE#0] 💾 STORE_WT opcode, addr=0xf058
+[913525000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[913535000] [A-CORE#0] STORE_RESULT: Computing result hash
+[913535000] [TOP] a0_busy went HIGH (A-Core started)
+[913545000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[913565000] [SCHED] 🚀 Dispatching A task: addr=0x00000000f050
+[913565000] [TOP] a0_busy went LOW (A-Core finished)
+[913575000] [A-RSLT] 📤 RESULT_VALID: data=0x33452a06b29889ea, ready=1, consumer_ready=1
+[913575000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[913575000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[913585000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[913585000] [A-CORE#0] 📥 Received command, opcode=0x31
+[913585000] [A-CORE#0] 💾 STORE_WT opcode, addr=0xf050
+[913585000] [RING-BUS] DEBUG: Node 2 raw_data=0x3100000000000000, extracted_dir=0, expected_dir=0
+[913595000] [A-CORE#0] STORE_RESULT: Computing result hash
+[913595000] [TOP] a0_busy went HIGH (A-Core started)
+[913605000] [A-CORE#0] STORE_RESULT: Pushing to RESULT_WAIT
+[913625000] [TOP] a0_busy went LOW (A-Core finished)
+[913635000] [A-RSLT] 📤 RESULT_VALID: data=0xe7bcfa546338f605, ready=1, consumer_ready=1
+[913635000] [A-CORE#0] ✅ RESULT_WAIT: Result consumed by scheduler, transitioning to IDLE
+[913645000] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=1, fifo_drain=1
+[914060000] [HWP-TEST]   Burst 2: LIGHT workload (expect P3/P4 - power save)...
+[916060000] [HWP-TEST] Burst 2 complete: G_PState=15, A_PState=15, Transitions=59
+[918060000] [HWP-TEST]   Burst 3: Power mode transition (POWERSAVE → PERFORMANCE)...
+[921060000] [HWP-TEST]   POWERSAVE: G_PState=15, G_Freq=1625MHz
+[924060000] [HWP-TEST]   PERFORMANCE: G_PState=15, G_Freq=1625MHz
+[924060000] [HWP-TEST-SUMMARY] ========================================
+[924060000] [HWP-TEST-SUMMARY] SPEED SHIFT / HWP RESULTS:
+[924060000] [HWP-TEST-SUMMARY]   HWP Active:               1
+[924060000] [HWP-TEST-SUMMARY]   G-Core P-State:           15 (was 15)
+[924060000] [HWP-TEST-SUMMARY]   A-Core P-State:           15 (was 15)
+[924060000] [HWP-TEST-SUMMARY]   NPU P-State:              15 (was 15)
+[924060000] [HWP-TEST-SUMMARY]   G-Core Freq:              1625 MHz (was 1625)
+[924060000] [HWP-TEST-SUMMARY]   A-Core Freq:              1125 MHz (was 1125)
+[924060000] [HWP-TEST-SUMMARY]   NPU Freq:                 250 MHz (was 250)
+[924060000] [HWP-TEST-SUMMARY]   Total Transitions:        59 (delta: 8)
+[924060000] [HWP-TEST-SUMMARY]   SW Overrides:             0 (delta: 0)
+[924060000] [HWP-TEST-SUMMARY]   Thermal Limits:           0 (delta: 0)
+[924060000] [HWP-TEST-SUMMARY]   Response Cycles:          2 (delta: 0)
+[924060000] [HWP-TEST-SUMMARY]   ✅ PASS: P-state transitions detected (8 transitions)
+[924060000] [HWP-TEST-SUMMARY]   ✅ PASS: HWP is active
+[924060000] [HWP-TEST-SUMMARY] ========================================
+[924160000] ┌─────────────────────────────────────────────────────────┐
+[924160000] │ ▶ TEST 19: Hardware Prefetcher Stress Test (Intel)       │
+[924160000] └─────────────────────────────────────────────────────────┘
+[924160000] [PF-TEST] 🔥 Hardware Prefetcher Stress Test - Stream detection & coverage 🔥
+[924160000] [PF-TEST] Target: Validate stream detection, stride patterns, coverage, utilization
+[924160000] [PF-TEST] Phase 1: Capturing baseline prefetcher state...
+[924160000] [PF-TEST] Baseline: ActiveStreams=x, TotalReqs=0, Coverage=0
+[924160000] [PF-TEST] Baseline: Useful=0, Useless=0, Utilization=0%
+[924160000] [PF-TEST] Phase 2: Sequential pattern (trigger stride prefetcher)...
+[924160000] [PF-TEST]   Pattern 1: Fixed stride=64 bytes (linear sweep)...
+[924165000] [MEM] >>> READ START | addr=0x000 | access#30
+[924565000] [MEM] >>> READ COMPLETE | addr=0x000 | data=0x00000000000000000000000000000000000000000000000020575231deadbeef | latency=40 cycles
+[924615000] [MEM] >>> READ START | addr=0x140 | access#31
+[925015000] [MEM] >>> READ COMPLETE | addr=0x140 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[925065000] [MEM] >>> READ START | addr=0x280 | access#32
+[925465000] [MEM] >>> READ COMPLETE | addr=0x280 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[925515000] [MEM] >>> READ START | addr=0x3c0 | access#33
+[925915000] [MEM] >>> READ COMPLETE | addr=0x3c0 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[925965000] [MEM] >>> READ START | addr=0x100 | access#34
+[926365000] [MEM] >>> READ COMPLETE | addr=0x100 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[926415000] [MEM] >>> READ START | addr=0x240 | access#35
+[926815000] [MEM] >>> READ COMPLETE | addr=0x240 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[926865000] [MEM] >>> READ START | addr=0x380 | access#36
+[927265000] [MEM] >>> READ COMPLETE | addr=0x380 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[927540000] [PF-TEST]   Pattern 2: Fixed stride=128 bytes (wider stride)...
+[927545000] [MEM] >>> READ START | addr=0x200 | access#37
+[927945000] [MEM] >>> READ COMPLETE | addr=0x200 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[927995000] [MEM] >>> READ START | addr=0x080 | access#38
+[928395000] [MEM] >>> READ COMPLETE | addr=0x080 | data=0x00000000000000000000000000000000ffffeeeeddddccccbbbbaaaa99998888 | latency=40 cycles
+[928445000] [MEM] >>> READ START | addr=0x300 | access#39
+[928845000] [MEM] >>> READ COMPLETE | addr=0x300 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[928895000] [MEM] >>> READ START | addr=0x180 | access#40
+[929295000] [MEM] >>> READ COMPLETE | addr=0x180 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[929840000] [PF-TEST] Phase 2 complete: 52 sequential accesses, Streams=x, Coverage=0
+[929840000] [PF-TEST] Phase 3: Re-access pattern (validate prefetch usefulness)...
+[929845000] [MEM] >>> READ START | addr=0x000 | access#41
+[930245000] [MEM] >>> READ COMPLETE | addr=0x000 | data=0x00000000000000000000000000000000000000000000000020575231deadbeef | latency=40 cycles
+[930295000] [MEM] >>> READ START | addr=0x140 | access#42
+[930695000] [MEM] >>> READ COMPLETE | addr=0x140 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[930745000] [MEM] >>> READ START | addr=0x280 | access#43
+[931145000] [MEM] >>> READ COMPLETE | addr=0x280 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[931195000] [MEM] >>> READ START | addr=0x3c0 | access#44
+[931595000] [MEM] >>> READ COMPLETE | addr=0x3c0 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[931645000] [MEM] >>> READ START | addr=0x100 | access#45
+[932045000] [MEM] >>> READ COMPLETE | addr=0x100 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[932095000] [MEM] >>> READ START | addr=0x240 | access#46
+[932495000] [MEM] >>> READ COMPLETE | addr=0x240 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[932545000] [MEM] >>> READ START | addr=0x380 | access#47
+[932945000] [MEM] >>> READ COMPLETE | addr=0x380 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[933220000] [PF-TEST] Phase 4: Random pattern (trigger stream eviction)...
+[933225000] [MEM] >>> READ START | addr=0x0e2 | access#48
+[933625000] [MEM] >>> READ COMPLETE | addr=0x0e2 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[933675000] [MEM] >>> READ START | addr=0x179 | access#49
+[934075000] [MEM] >>> READ COMPLETE | addr=0x179 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[934125000] [MEM] >>> READ START | addr=0x259 | access#50
+[934525000] [MEM] >>> READ COMPLETE | addr=0x259 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[934575000] [MEM] >>> READ START | addr=0x2d5 | access#51
+[934975000] [MEM] >>> READ COMPLETE | addr=0x2d5 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[935025000] [MEM] >>> READ START | addr=0x223 | access#52
+[935425000] [MEM] >>> READ COMPLETE | addr=0x223 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[935475000] [MEM] >>> READ START | addr=0x2e5 | access#53
+[935875000] [MEM] >>> READ COMPLETE | addr=0x2e5 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[935925000] [MEM] >>> READ START | addr=0x277 | access#54
+[936325000] [MEM] >>> READ COMPLETE | addr=0x277 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[936375000] [MEM] >>> READ START | addr=0x3cd | access#55
+[936775000] [MEM] >>> READ COMPLETE | addr=0x3cd | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[937820000] [PF-TEST-SUMMARY] ========================================
+[937820000] [PF-TEST-SUMMARY] HARDWARE PREFETCHER RESULTS:
+[937820000] [PF-TEST-SUMMARY]   Active Streams:         x (was x)
+[937820000] [PF-TEST-SUMMARY]   Stream0 Stride:         x (was x)
+[937820000] [PF-TEST-SUMMARY]   Total Requests:         0 (delta: 0)
+[937820000] [PF-TEST-SUMMARY]   Useful Prefetches:      0 (delta: 0)
+[937820000] [PF-TEST-SUMMARY]   Useless Prefetches:     0 (delta: 0)
+[937820000] [PF-TEST-SUMMARY]   Coverage:               0 (delta: 0)
+[937820000] [PF-TEST-SUMMARY]   Stream Allocations:     0 (delta: 0)
+[937820000] [PF-TEST-SUMMARY]   Stream Deallocations:   0 (delta: 0)
+[937820000] [PF-TEST-SUMMARY]   Utilization:            0% (was 0%)
+[937820000] [PF-TEST-SUMMARY]   ⚠️  WARN: No prefetcher activity
+[937820000] [PF-TEST-SUMMARY]   ⚠️  WARN: No useful prefetches
+[937820000] [PF-TEST-SUMMARY]   ⚠️  WARN: No stream activity
+[937820000] [PF-TEST-SUMMARY] ========================================
+[937920000] ┌─────────────────────────────────────────────────────────┐
+[937920000] │ ▶ TEST 20: CET Anti-Cheat Stress Test (Intel Control-flow Enforcement)│
+[937920000] └─────────────────────────────────────────────────────────┘
+[937920000] [CET-TEST] 🔥 CET Anti-Cheat Stress Test - Control-flow integrity validation 🔥
+[937920000] [CET-TEST] Target: Validate shadow stack, branch/return checks, ROP/JOP detection
+[937920000] [CET-TEST] Phase 1: Capturing baseline CET state...
+[937920000] [CET-TEST] Baseline: StateOK=1, ShadowActive=0, ShadowDepth=0
+[937920000] [CET-TEST] Baseline: BranchChecks=x, ReturnChecks=x
+[937920000] [CET-TEST] Baseline: ROP=x, JOP=x, StateViolations=0
+[937920000] [CET-TEST] Phase 2: Normal workload with control-flow instructions...
+[937925000] [SCHED-BP] A-Task ACCEPTED: queue=1/16, ring_congested=0
+[937925000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[937935000] [SCHED] 🚀 Dispatching A task: addr=0x00000000f048
+[937945000] [A-CORE#0] 📥 Received command, opcode=0x31
+[937945000] [A-CORE#0] 💾 STORE_WT opcode, addr=0xf048
+[937955000] [A-CORE#0] 🚨 FORWARD PROGRESS VIOLATION: State=8 stuck for 2430 cycles (max=1000)
+[937955000] [A-CORE#0] STORE_RESULT: Computing result hash
+[937955000] [TOP] a0_busy went HIGH (A-Core started)
+[938035000] [SCHED-BP] A-Task ACCEPTED: queue=1/16, ring_congested=0
+[938035000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[938145000] [SCHED-BP] A-Task ACCEPTED: queue=2/16, ring_congested=0
+[938145000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[938255000] [SCHED-BP] A-Task ACCEPTED: queue=3/16, ring_congested=0
+[938255000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[938365000] [SCHED-BP] A-Task ACCEPTED: queue=4/16, ring_congested=0
+[938365000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[938475000] [SCHED-BP] A-Task ACCEPTED: queue=5/16, ring_congested=0
+[938475000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[938585000] [SCHED-BP] A-Task ACCEPTED: queue=6/16, ring_congested=0
+[938585000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[938695000] [SCHED-BP] A-Task ACCEPTED: queue=7/16, ring_congested=0
+[938695000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[938805000] [SCHED-BP] A-Task ACCEPTED: queue=8/16, ring_congested=0
+[938805000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[938915000] [SCHED-BP] A-Task ACCEPTED: queue=9/16, ring_congested=0
+[938915000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[939025000] [SCHED-BP] A-Task ACCEPTED: queue=10/16, ring_congested=0
+[939025000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[939135000] [SCHED-BP] A-Task ACCEPTED: queue=11/16, ring_congested=0
+[939135000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[939245000] [SCHED-BP] A-Task ACCEPTED: queue=12/16, ring_congested=0
+[939245000] [RING-BUS] DEBUG: Node 2 raw_data=0x2000000000000000, extracted_dir=0, expected_dir=0
+[939855000] [MQ-SCHEDULER] ⚠ A-CORE STALLED: 190 cycles, checking for cross-domain deps
+[939955000] [MQ-SCHEDULER] ⚠ DEADLOCK RECOVERY: A-Core stalled 200 cycles, force clearing
+[940050000] [CET-TEST] Phase 2 complete: 13 normal operations
+[940050000] [CET-TEST] CET state after normal workload: StateOK=1, Violations=0
+[941865000] [MQ-SCHEDULER] ⚠ A-CORE STALLED: 190 cycles, checking for cross-domain deps
+[941965000] [MQ-SCHEDULER] ⚠ DEADLOCK RECOVERY: A-Core stalled 200 cycles, force clearing
+[942050000] [CET-TEST] Phase 3: Error injection (trigger CET monitoring)...
+[942050000] [CET-TEST]   Test 1: Execute from data region (potential ROP)...
+[942055000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[942945000] [SCHED-WD] ⚠ A-Core watchdog timeout (500 cycles), force clearing...
+[943060000] [CET-TEST]   Test 2: Jump to unmapped region (potential JOP)...
+[943065000] [SCHED-RB] 🔄 A-Task ACCEPTED via Ring Bus (queue_full=12, ring_packets=20)
+[943065000] [RING-BUS] DEBUG: Node 2 raw_data=0xffffffffffffffff, extracted_dir=3, expected_dir=0
+[943875000] [MQ-SCHEDULER] ⚠ A-CORE STALLED: 190 cycles, checking for cross-domain deps
+[943975000] [MQ-SCHEDULER] ⚠ DEADLOCK RECOVERY: A-Core stalled 200 cycles, force clearing
+[944070000] [CET-TEST]   Test 3: Rapid OOB accesses (shadow stack stress)...
+[944075000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[944585000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[945095000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[945605000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[945885000] [MQ-SCHEDULER] ⚠ A-CORE STALLED: 190 cycles, checking for cross-domain deps
+[945985000] [MQ-SCHEDULER] ⚠ DEADLOCK RECOVERY: A-Core stalled 200 cycles, force clearing
+[946115000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[946625000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[947135000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[947645000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[947895000] [MQ-SCHEDULER] ⚠ A-CORE STALLED: 190 cycles, checking for cross-domain deps
+[947995000] [MQ-SCHEDULER] ⚠ DEADLOCK RECOVERY: A-Core stalled 200 cycles, force clearing
+[948155000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[948665000] [SCHED-BP] G-Task RING-BALANCED: queue=12 >= threshold=12
+[949170000] [CET-TEST] Phase 3 complete: 12 error injection attempts
+[949905000] [MQ-SCHEDULER] ⚠ A-CORE STALLED: 190 cycles, checking for cross-domain deps
+[950005000] [MQ-SCHEDULER] ⚠ DEADLOCK RECOVERY: A-Core stalled 200 cycles, force clearing
+[951915000] [MQ-SCHEDULER] ⚠ A-CORE STALLED: 190 cycles, checking for cross-domain deps
+[952015000] [MQ-SCHEDULER] ⚠ DEADLOCK RECOVERY: A-Core stalled 200 cycles, force clearing
+[952170000] [CET-TEST-SUMMARY] ========================================
+[952170000] [CET-TEST-SUMMARY] CET ANTI-CHEAT RESULTS:
+[952170000] [CET-TEST-SUMMARY]   State Integrity OK:     1 (was 1)
+[952170000] [CET-TEST-SUMMARY]   Shadow Stack Active:    0 (was 0)
+[952170000] [CET-TEST-SUMMARY]   Shadow Stack Depth:     0 (was 0)
+[952170000] [CET-TEST-SUMMARY]   Violation Detected:     0 (was 0)
+[952170000] [CET-TEST-SUMMARY]   Violation Type:         0 (was 0)
+[952170000] [CET-TEST-SUMMARY]   Branch Checks:          x (delta: x)
+[952170000] [CET-TEST-SUMMARY]   Return Checks:          x (delta: x)
+[952170000] [CET-TEST-SUMMARY]   ROP Violations:         x (delta: x)
+[952170000] [CET-TEST-SUMMARY]   JOP Violations:         x (delta: x)
+[952170000] [CET-TEST-SUMMARY]   State Violations:       x (delta: x)
+[952170000] [CET-TEST-SUMMARY]   ✅ PASS: CET state integrity maintained
+[952170000] [CET-TEST-SUMMARY]   ⚠️  WARN: No CET checks recorded
+[952170000] [CET-TEST-SUMMARY] ========================================
+[952270000] [QUEUE-FLUSH] 🔧 Draining pending queues before Ring Bus test...
+[952270000] [QUEUE-FLUSH] Queue depth before flush: 13
+[953925000] [MQ-SCHEDULER] ⚠ A-CORE STALLED: 190 cycles, checking for cross-domain deps
+[954025000] [MQ-SCHEDULER] ⚠ DEADLOCK RECOVERY: A-Core stalled 200 cycles, force clearing
+[955935000] [MQ-SCHEDULER] ⚠ A-CORE STALLED: 190 cycles, checking for cross-domain deps
+[956035000] [MQ-SCHEDULER] ⚠ DEADLOCK RECOVERY: A-Core stalled 200 cycles, force clearing
+[957270000] [QUEUE-FLUSH] WARNING: Queue stuck at depth 13 for 500 cycles - FORCE BREAK
+[957270000] [QUEUE-FLUSH] Queue depth after flush: 13 (waited 500 cycles)
+[957870000] ┌─────────────────────────────────────────────────────────┐
+[957870000] │ ▶ TEST 21: Ring Bus + Chiplet Stress Test (AMD Interconnect) - DISABLED (backlog issue)│
+[957870000] └─────────────────────────────────────────────────────────┘
+[957870000] [RING-TEST] SKIPPED: Ring Bus disabled due to credit deadlock issue
+[957870000] [RING-TEST] NOTE: Direct G-Core connection is working perfectly
+[957945000] [MQ-SCHEDULER] ⚠ A-CORE STALLED: 190 cycles, checking for cross-domain deps
+[958045000] [MQ-SCHEDULER] ⚠ DEADLOCK RECOVERY: A-Core stalled 200 cycles, force clearing
+[958970000] ┌─────────────────────────────────────────────────────────┐
+[958970000] │ ▶ TEST 22: Per-Core Utilization Stress Test              │
+[958970000] └─────────────────────────────────────────────────────────┘
+[958970000] [UTIL-TEST] 🔥 Per-Core Utilization Stress Test - Core busy cycles validation 🔥
+[958970000] [UTIL-TEST] Target: Validate per-core busy cycle counters and utilization tracking
+[958970000] [UTIL-TEST] Phase 1: Capturing baseline utilization...
+[958970000] [UTIL-TEST] Baseline: G_Busy=0, A_Busy=5796, N_Busy=0, Total=95877
+[958970000] [UTIL-TEST] Phase 2: G-Core saturation workload...
+[959955000] [MQ-SCHEDULER] ⚠ A-CORE STALLED: 190 cycles, checking for cross-domain deps
+[960055000] [MQ-SCHEDULER] ⚠ DEADLOCK RECOVERY: A-Core stalled 200 cycles, force clearing
+[961370000] [UTIL-TEST] Phase 2 complete: 0 G ops sent, G_Busy=0 (delta: 0)
+[961965000] [MQ-SCHEDULER] ⚠ A-CORE STALLED: 190 cycles, checking for cross-domain deps
+[962065000] [MQ-SCHEDULER] ⚠ DEADLOCK RECOVERY: A-Core stalled 200 cycles, force clearing
+[963370000] [UTIL-TEST] Phase 3: A-Core saturation workload...
+[963975000] [MQ-SCHEDULER] ⚠ A-CORE STALLED: 190 cycles, checking for cross-domain deps
+[964075000] [MQ-SCHEDULER] ⚠ DEADLOCK RECOVERY: A-Core stalled 200 cycles, force clearing
+[965770000] [UTIL-TEST] Phase 3 complete: 0 A ops sent, A_Busy=6476 (delta: 680)
+[965985000] [MQ-SCHEDULER] ⚠ A-CORE STALLED: 190 cycles, checking for cross-domain deps
+[966085000] [MQ-SCHEDULER] ⚠ DEADLOCK RECOVERY: A-Core stalled 200 cycles, force clearing
+[967770000] [UTIL-TEST] Phase 4: NPU workload...
+[967775000] [MEM] >>> READ START | addr=0x000 | access#56
+[967995000] [MQ-SCHEDULER] ⚠ A-CORE STALLED: 190 cycles, checking for cross-domain deps
+[968095000] [MQ-SCHEDULER] ⚠ DEADLOCK RECOVERY: A-Core stalled 200 cycles, force clearing
+[968175000] [MEM] >>> READ COMPLETE | addr=0x000 | data=0x00000000000000000000000000000000000000000000000020575231deadbeef | latency=40 cycles
+[968195000] [MEM] >>> READ START | addr=0x1c0 | access#57
+[968595000] [MEM] >>> READ COMPLETE | addr=0x1c0 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[968615000] [MEM] >>> READ START | addr=0x380 | access#58
+[968970000] [UTIL-TEST] Phase 4 complete: 20 N ops sent, N_Busy=0 (delta: 0)
+[969015000] [MEM] >>> READ COMPLETE | addr=0x380 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[970005000] [MQ-SCHEDULER] ⚠ A-CORE STALLED: 190 cycles, checking for cross-domain deps
+[970105000] [MQ-SCHEDULER] ⚠ DEADLOCK RECOVERY: A-Core stalled 200 cycles, force clearing
+[971970000] [UTIL-TEST] Phase 5: Mixed concurrent (all cores simultaneously)...
+[971975000] [MEM] >>> READ START | addr=0x000 | access#59
+[972015000] [MQ-SCHEDULER] ⚠ A-CORE STALLED: 190 cycles, checking for cross-domain deps
+[972115000] [MQ-SCHEDULER] ⚠ DEADLOCK RECOVERY: A-Core stalled 200 cycles, force clearing
+[972375000] [MEM] >>> READ COMPLETE | addr=0x000 | data=0x00000000000000000000000000000000000000000000000020575231deadbeef | latency=40 cycles
+[972415000] [MEM] >>> READ START | addr=0x180 | access#60
+[972815000] [MEM] >>> READ COMPLETE | addr=0x180 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[972855000] [MEM] >>> READ START | addr=0x300 | access#61
+[973255000] [MEM] >>> READ COMPLETE | addr=0x300 | data=0x0000000000000000000000000000000000000000000000000000000000000000 | latency=40 cycles
+[973295000] [MEM] >>> READ START | addr=0x080 | access#62
+[973695000] [MEM] >>> READ COMPLETE | addr=0x080 | data=0x00000000000000000000000000000000ffffeeeeddddccccbbbbaaaa99998888 | latency=40 cycles
+[974025000] [MQ-SCHEDULER] ⚠ A-CORE STALLED: 190 cycles, checking for cross-domain deps
+[974125000] [MQ-SCHEDULER] ⚠ DEADLOCK RECOVERY: A-Core stalled 200 cycles, force clearing
+[976035000] [MQ-SCHEDULER] ⚠ A-CORE STALLED: 190 cycles, checking for cross-domain deps
+[976135000] [MQ-SCHEDULER] ⚠ DEADLOCK RECOVERY: A-Core stalled 200 cycles, force clearing
+[978045000] [MQ-SCHEDULER] ⚠ A-CORE STALLED: 190 cycles, checking for cross-domain deps
+[978145000] [MQ-SCHEDULER] ⚠ DEADLOCK RECOVERY: A-Core stalled 200 cycles, force clearing
+[978620000] [UTIL-TEST-SUMMARY] ========================================
+[978620000] [UTIL-TEST-SUMMARY] PER-CORE UTILIZATION RESULTS:
+[978620000] [UTIL-TEST-SUMMARY]   G-Core Busy Cycles:     0 (delta: 0)
+[978620000] [UTIL-TEST-SUMMARY]   A-Core Busy Cycles:     7761 (delta: 1965)
+[978620000] [UTIL-TEST-SUMMARY]   NPU Busy Cycles:        0 (delta: 0)
+[978620000] [UTIL-TEST-SUMMARY]   Total Sim Cycles:       97842 (delta: 1965)
+[978620000] [UTIL-TEST-SUMMARY]   ─────────────────────────────────────────────
+[978620000] [UTIL-TEST-SUMMARY]   Window Utilization (Test 22 only):
+[978620000] [UTIL-TEST-SUMMARY]     G-Core: 0%, A-Core: 100%, NPU: 0%
+[978620000] [UTIL-TEST-SUMMARY]   ─────────────────────────────────────────────
+[978620000] [UTIL-TEST-SUMMARY]   GLOBAL Utilization (FULL SIM - CORRECT):
+[978620000] [UTIL-TEST-SUMMARY]     G-Core: 0% (0 / 97842 cycles)
+[978620000] [UTIL-TEST-SUMMARY]     A-Core: 7% (7761 / 97842 cycles)
+[978620000] [UTIL-TEST-SUMMARY]     NPU:    0% (0 / 97842 cycles)
+[978620000] [UTIL-TEST-SUMMARY]   ⚠️  WARN: G-Core busy cycles not tracked
+[978620000] [UTIL-TEST-SUMMARY]   ✅ PASS: A-Core busy cycles increasing (1965 cycles)
+[978620000] [UTIL-TEST-SUMMARY]   ⚠️  WARN: NPU busy cycles not tracked
+[978620000] [UTIL-TEST-SUMMARY] ========================================
+
+
+[978820000] ╔══════════════════════════════════════════════════════════╗
+[978820000] ║  AURORA-172 SIMULATION COMPLETE                          ║
+[978820000] ╚══════════════════════════════════════════════════════════╝
+[978820000] ╔══════════════════════════════════════════════════════════╗
+[978820000] ║                    FINAL REPORT                          ║
+[978820000] ╠══════════════════════════════════════════════════════════╣
+[978820000] ║ Tests Executed:           22                             ║
+[978820000] ║ Gaming Commands:          7 types (variable latency)     ║
+[978820000] ║ AI Operations:            6 types (variable latency)     ║
+[978820000] ║ NPU Inferences:           3                                 ║
+[978820000] ║ Memory Accesses:          62                                ║
+[978820000] ║   - Reads:                52                                ║
+[978820000] ║   - Writes:               10                                ║
+[978820000] ╠══════════════════════════════════════════════════════════╣
+[978820000] ║ Performance Summary (ACCUMULATING):                      ║
+[978820000] ║   G-Core Events:          13                                ║
+[978820000] ║   A-Core Events:          8                                 ║
+[978820000] ║   NPU Events:             3                                 ║
+[978820000] ╠══════════════════════════════════════════════════════════╣
+[978820000] ║ Latency Profile:                                         ║
+[978820000] ║   Gaming:               2-10 cycles (varies by op)       ║
+[978820000] ║   AI:                   4-20 cycles (varies by op)       ║
+[978820000] ║   NPU:                  5-10 cycles (inference)          ║
+[978820000] ║   Memory Write:         1 cycle (buffered)               ║
+[978820000] ║   Memory Read:          40                     cycles (actual DRAM latency) ║
+[978820000] ╠══════════════════════════════════════════════════════════╣
+[978820000] ║ Scheduler Statistics:                                      ║
+[978820000] ║   Tasks Dispatched:   28                                ║
+[978820000] ║   Tasks Completed:      28                                ║
+[978820000] ║   Total Stall Cycles: 0                                 ║
+[978820000] ║     - Resource Wait:    0                                 ║
+[978820000] ║     - Queue Contention: 0                                 ║
+[978820000] ║   Resource Conflicts:   0                                 ║
+[978820000] ║   Queue Depth (peak):   17                                ║
+[978820000] ║ Priority Levels (effective after aging):                     ║
+[978820000] ║   Gaming Priority:      0                                 ║
+[978820000] ║   AI Priority:          2                                 ║
+[978820000] ║   NPU Priority:         3                                 ║
+[978820000] ║   Note: Lower = higher priority. 0 = max boost (aging)       ║
+[978820000] ║   Base priorities: G=0, A=2, N=3 (before aging)              ║
+[978820000] ╠══════════════════════════════════════════════════════════╣
+[978820000] ║ Back-Pressure Monitoring (v3):                               ║
+[978820000] ║   Queue Full Rejections: 0                                ║
+[978820000] ║   Timeout Stalls:        1                                ║
+[978820000] ║   Total Accepted:        71                               ║
+[978820000] ║   Rejection Rate:          0                     % ║
+[978820000] ╠══════════════════════════════════════════════════════════╣
+[978820000] ║ Hazard Classification (NEW):                                 ║
+[978820000] ║   RAW Hazards:           0                                ║
+[978820000] ║   WAR Hazards:           0                                ║
+[978820000] ║   WAW Hazards:           0                                ║
+[978820000] ║   Structural Hazards:    0                                ║
+[978820000] ║   Dependency Waits:      0                                ║
+[978820000] ║   Total Conflicts:       0                                ║
+[978820000] ╠══════════════════════════════════════════════════════════╣
+[978820000] ║ Core Utilization (NEW):                                      ║
+[978820000] ║   G-Core Busy:          0                                ║
+[978820000] ║   A-Core Busy:          7781                             ║
+[978820000] ║   NPU Busy:             0                                ║
+[978820000] ║   Total Sim Cycles:     97862                            ║
+[978820000] ╠══════════════════════════════════════════════════════════╣
+[978820000] ║ Power Mode Transitions:   4 (Gaming→AI→Mixed→Save)       ║
+[978820000] ║ Interrupts Handled:       1                                ║
+[978820000] ║ Simulation Time:          978820000                         ║
+[978820000] ╚══════════════════════════════════════════════════════════╝
+
+
+[978820000] ╔══════════════════════════════════════════════════════════╗
+[978820000] ║              VERIFICATION CHECKPOINT                     ║
+[978820000] ╠══════════════════════════════════════════════════════════╣
+[978820000] [CHECK] ✓ PASS: Timeout stalls within limits (1 stalls)
+[978820000] [CHECK] ✓ PASS: Memory consistency verified
+[978820000] [CHECK] ✓ PASS: Scheduler balanced (disp=28 comp=28)
+[978820000] [CHECK] ✓ PASS: NPU functional (3 inferences)
+[978820000] [CHECK] ✓ PASS: No data hazards detected
+[978820000] [CHECK] ✓ PASS: Back-pressure under control (0 rejections)
+[978820000] [CHECK] ✓ PASS: Power Monitor active (Total Energy=2089581uJ)
+[978820000] [CHECK] ⚠ WARN: V-Cache not active
+[978820000] [CHECK] ✓ PASS: HWP active (Transitions=60)
+[978820000] [CHECK] ℹ INFO: Prefetcher monitoring active (streams require specific stride patterns)
+[978820000] [CHECK] ✓ PASS: CET Anti-Cheat active (BranchChecks=x)
+[978820000] [CHECK] ✓ PASS: Ring Bus active (G=5, A=20 packets)
+[978820000] [CHECK] ✓ PASS: Per-Core Utilization tracked (G=0, A=7781 cycles)
+[978820000] ╠══════════════════════════════════════════════════════════╣
+[978820000] ║           *** TESTS PASSED WITH 1 WARNINGS ***                  ║
+[978820000] ╚══════════════════════════════════════════════════════════╝
+[978820000] [VERIFICATION] Memory consistency:     WRITE → READ verified
+[978820000] [VERIFICATION] Performance counters:   ACCUMULATING (not snapshot)
+[978820000] [VERIFICATION] NPU integration:        ACTIVE (3 inferences)
+[978820000] [VERIFICATION] Latency profile:        VARIABLE (not flat)
+[978820000] [VERIFICATION] Scheduler arbitration:  PRIORITY-BASED (G>A>N)
+[978820000] [VERIFICATION] Stall classification:   RESOURCE vs CONTENTION
+[978820000] [VERIFICATION] Queue depth tracking:   PEAK = 17
+[978820000] [VERIFICATION] Back-pressure detection: QUEUE_FULL vs TIMEOUT (v3)
+[978820000] [VERIFICATION] Task completion accuracy: DISPATCHED == COMPLETED (v3 fix)
+[978820000] [VERIFICATION] Power Monitor (RAPL):   ENERGY=2089581uJ, PL1=0 violations
+[978820000] [VERIFICATION] V-Cache (3D):           HITS=0, HitRate=0%
+[978820000] [VERIFICATION] Speed Shift (HWP):      ACTIVE=1, Transitions=60
+[978820000] [VERIFICATION] HW Prefetcher:          Streams=x, Coverage=0
+[978820000] [VERIFICATION] CET Anti-Cheat:         OK=1, ROP=x, JOP=x
+[978820000] [VERIFICATION] Ring Bus + Chiplet:     G=5, Total=29, Local=0
+[978820000] [VERIFICATION] Per-Core Utilization:   G=0, A=7781, N=0 cycles
+
+
+
+
+[978820000] ╔══════════════════════════════════════════════════════════╗
+[978820000] ║           A/B TEST: SQ vs MQ SCHEDULER                   ║
+[978820000] ╠══════════════════════════════════════════════════════════╣
+[978820000] ║ Active Scheduler: MQ                               ║
+[978820000] ╠══════════════════════════════════════════════════════════╣
+[978820000] ║  Metric              | SQ (Single Queue)  | MQ (Multi Q)  ║
+[978820000] ╠══════════════════════╪════════════════════╪═══════════════╣
+[978820000] ║  Tasks Dispatched    |                 1 |           28 ║
+[978820000] ║  Tasks Completed     |                 0 |           28 ║
+[978820000] ║  Total Stall Cycles  |                 0 |            0 ║
+[978820000] ║  Queue Depth (peak)  |                32 |           13 ║
+[978820000] ║  Tasks Accepted      |                32 |           71 ║
+[978820000] ╠══════════════════════╪════════════════════╪═══════════════╣
+[978820000] ║  Efficiency (%)      |                0% |         100% ║
+[978820000] ║  Stall Comparison    | EQUAL                        ║
+[978820000] ╠══════════════════════════════════════════════════════════╣
+[978820000] ║  NOTE: Both schedulers received IDENTICAL workloads      ║
+[978820000] ║  SQ = Single FIFO Queue (baseline)                       ║
+[978820000] ║  MQ = Multi-Queue with WDRR + Aging (treatment)          ║
+[978820000] ╚══════════════════════════════════════════════════════════╝
+
+
+[978820000] Simulation complete
+testbench/testbench.sv:2832: $finish called at 978820000 (1ps)
+[978820000] [ASSERTIONS] Memory assertions completed
+  Total requests: 0
+  Cache hits: 0
+  Cache misses: 0

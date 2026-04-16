@@ -97,6 +97,12 @@ module global_scheduler_sq #(
     output wire [31:0]                  sched_hazard_raw,
     output wire [31:0]                  sched_hazard_war,
     output wire [31:0]                  sched_hazard_waw,
+    
+    // FAIRNESS: Task distribution monitoring
+    output wire [31:0]                  sched_g_tasks_completed,
+    output wire [31:0]                  sched_a_tasks_completed,
+    output wire [31:0]                  sched_npu_tasks_completed,
+    output wire [31:0]                  sched_fairness_violations,
     output wire [31:0]                  sched_hazard_structural,
     output wire [31:0]                  sched_hazard_dependency
 );
@@ -157,6 +163,16 @@ module global_scheduler_sq #(
     reg [7:0]               effective_priority_n;
     reg [31:0]              hazard_structural_count;
     reg [31:0]              hazard_raw_count;
+    
+    // FAIRNESS: Task distribution tracking
+    reg [31:0]              g_tasks_completed;
+    reg [31:0]              a_tasks_completed;
+    reg [31:0]              npu_tasks_completed;
+    reg [31:0]              g_tasks_starved;
+    reg [31:0]              a_tasks_starved;
+    reg [31:0]              npu_tasks_starved;
+    reg [31:0]              fairness_violations;
+    
     reg                     g_core_error_prev;
     reg                     skip_g_dispatch;
     reg [7:0]               skip_g_counter;
@@ -166,6 +182,13 @@ module global_scheduler_sq #(
     integer                 li_assert;  // For runtime assertions
     integer                 i_assert;   // For runtime assertions
     reg [15:0]              task_0_wait_counter;  // For starvation detection
+    reg [31:0]              forced_dispatch_count;  // CRITICAL FIX: Track force dispatch events
+
+    // FIX #6: Edge detection untuk prevent double-enqueue
+    // Enqueue hanya boleh terjadi di rising edge sinyal valid, bukan setiap cycle
+    reg                     g_task_valid_prev;
+    reg                     a_task_valid_prev;
+    reg                     npu_task_valid_prev;
     
     // Variables used in dispatch logic (must be declared at module level for Icarus)
     integer                 li;  // Main loop iterator
@@ -180,9 +203,11 @@ module global_scheduler_sq #(
         input [1:0] t;
         input [7:0] aging;
         case (t)
-            TASK_GAMING: calc_eff_prio = BASE_PRIORITY_G - aging;
-            TASK_AI:     calc_eff_prio = BASE_PRIORITY_A - aging;
-            TASK_NPU:    calc_eff_prio = BASE_PRIORITY_N - aging;
+            // FAIRNESS FIX: Semua task types dapat aging boost, tapi dengan rate berbeda
+            // Gaming tetap prioritas tertinggi, tapi dapat mild boost untuk fairness
+            TASK_GAMING: calc_eff_prio = (aging > 0) ? 8'd0 : BASE_PRIORITY_G;  // Minor boost
+            TASK_AI:     calc_eff_prio = (BASE_PRIORITY_A > aging) ? (BASE_PRIORITY_A - aging) : 8'd0;
+            TASK_NPU:    calc_eff_prio = (BASE_PRIORITY_N > aging) ? (BASE_PRIORITY_N - aging) : 8'd0;
             default:     calc_eff_prio = 8'd255;
         endcase
     endfunction
@@ -226,8 +251,11 @@ module global_scheduler_sq #(
 
     assign npu_dispatch_valid = (arbiter_select == 2) && active_task_valid && !npu_busy;
     
-    // NEW: Assert result_ready when A-Core complete is detected (pull from FIFO)
-    assign a_core_result_ready = a_core_complete && task_being_served && active_task_type == TASK_AI;
+    // FIX #1: a_core_result_ready decoupled dari a_core_complete.
+    // Kondisi lama (bergantung a_core_complete) menciptakan circular dependency:
+    // A-Core butuh result_ready=1 untuk exit RESULT_WAIT → complete → result_ready.
+    // Fix: Scheduler siap ambil result kapanpun pending_result slot tersedia.
+    assign a_core_result_ready = !pending_result_valid || (pending_result_type != TASK_AI);
     
     // DEBUG: Monitor active_task_valid and arbiter_select
     reg active_task_valid_prev_mon;
@@ -266,6 +294,12 @@ module global_scheduler_sq #(
     assign sched_hazard_waw           = 32'd0;
     assign sched_hazard_structural    = hazard_structural_count;
     assign sched_hazard_dependency    = 32'd0;
+    
+    // FAIRNESS: Connect task completion monitoring
+    assign sched_g_tasks_completed   = g_tasks_completed;
+    assign sched_a_tasks_completed   = a_tasks_completed;
+    assign sched_npu_tasks_completed  = npu_tasks_completed;
+    assign sched_fairness_violations  = fairness_violations;
 
     // ── Main logic ──
     always @(posedge clk or negedge rst_n) begin
@@ -274,7 +308,7 @@ module global_scheduler_sq #(
             active_task_valid <= 1'b0; active_task_type <= TASK_GAMING;
             active_task_addr <= {ADDR_WIDTH{1'b0}}; active_task_data <= 64'b0;
             task_being_served <= 1'b0; active_task_wait_counter <= 16'b0;
-            active_queue_idx <= 0; active_queue_idx_valid <= 1'b0;  // NEW: Reset active queue tracking
+            active_queue_idx <= 0; active_queue_idx_valid <= 1'b0;
             pending_result_valid <= 1'b0; pending_result <= {DATA_WIDTH{1'b0}};
             pending_result_type <= TASK_GAMING;
             arbiter_select <= 0;
@@ -289,14 +323,26 @@ module global_scheduler_sq #(
             effective_priority_a <= BASE_PRIORITY_A;
             effective_priority_n <= BASE_PRIORITY_N;
             hazard_structural_count <= 32'b0; hazard_raw_count <= 32'b0;
+            
+            // FAIRNESS: Initialize tracking counters
+            g_tasks_completed <= 32'b0; a_tasks_completed <= 32'b0; npu_tasks_completed <= 32'b0;
+            g_tasks_starved <= 32'b0; a_tasks_starved <= 32'b0; npu_tasks_starved <= 32'b0;
+            fairness_violations <= 32'b0;
+            
             g_core_error_prev <= 1'b0; skip_g_dispatch <= 1'b0; skip_g_counter <= 8'b0;
             g_core_complete_prev <= 1'b0; a_core_complete_prev <= 1'b0; npu_complete_prev <= 1'b0;
+            // FIX #6: Reset edge detection registers
+            g_task_valid_prev <= 1'b0; a_task_valid_prev <= 1'b0; npu_task_valid_prev <= 1'b0;
             for (li = 0; li < QUEUE_DEPTH; li = li + 1) begin
                 queue_valid[li] <= 1'b0; queue_dispatched[li] <= 1'b0;
                 queue_type[li] <= 2'b0; queue_addr[li] <= {ADDR_WIDTH{1'b0}};
                 queue_data[li] <= 64'b0; queue_aging[li] <= 8'b0; queue_wait_cycles[li] <= 8'b0;
             end
         end else begin
+            // FIX #6: Update edge detection prev registers setiap cycle
+            g_task_valid_prev   <= g_task_valid;
+            a_task_valid_prev   <= a_task_valid;
+            npu_task_valid_prev <= npu_task_valid;
             // Edge detection
             g_core_complete_prev <= g_core_complete;
             a_core_complete_prev <= a_core_complete;
@@ -318,46 +364,51 @@ module global_scheduler_sq #(
             end
 
             // ── ENQUEUE ──
+            // FIX #6: Gunakan rising-edge detection (valid && !prev_valid)
+            // Sebelumnya enqueue terjadi setiap cycle selama valid=1, menyebabkan
+            // double/triple enqueue saat SCHED mendispatch tanpa de-assert valid.
             if (queue_count < QUEUE_DEPTH) begin
-                if (g_task_valid) begin
-                    queue_type[tail_idx]      <= TASK_GAMING;
-                    queue_addr[tail_idx]      <= g_task_addr;
-                    queue_data[tail_idx]      <= {32'b0, g_task_data};
-                    queue_valid[tail_idx]     <= 1'b1;
-                    queue_dispatched[tail_idx]<= 1'b0;
-                    queue_aging[tail_idx]     <= 8'b0;
+                if (g_task_valid && !g_task_valid_prev) begin
+                    queue_type[tail_idx]       <= TASK_GAMING;
+                    queue_addr[tail_idx]       <= g_task_addr;
+                    queue_data[tail_idx]       <= {32'b0, g_task_data};
+                    queue_valid[tail_idx]      <= 1'b1;
+                    queue_dispatched[tail_idx] <= 1'b0;
+                    queue_aging[tail_idx]      <= 8'b0;
                     queue_wait_cycles[tail_idx]<= 8'b0;
-                    tail_idx <= (tail_idx == QUEUE_DEPTH-1) ? 0 : tail_idx + 1;
+                    tail_idx    <= (tail_idx == QUEUE_DEPTH-1) ? 0 : tail_idx + 1;
                     queue_count <= queue_count + 1;
                     bp_actual_accepts <= bp_actual_accepts + 1;
                     $display("[%0t] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=%0d", $time, queue_count+1);
-                end else if (a_task_valid) begin
-                    queue_type[tail_idx]      <= TASK_AI;
-                    queue_addr[tail_idx]      <= a_task_addr;
-                    queue_data[tail_idx]      <= a_task_data;
-                    queue_valid[tail_idx]     <= 1'b1;
-                    queue_dispatched[tail_idx]<= 1'b0;
-                    queue_aging[tail_idx]     <= 8'b0;
+                end else if (a_task_valid && !a_task_valid_prev) begin
+                    queue_type[tail_idx]       <= TASK_AI;
+                    queue_addr[tail_idx]       <= a_task_addr;
+                    queue_data[tail_idx]       <= a_task_data;
+                    queue_valid[tail_idx]      <= 1'b1;
+                    queue_dispatched[tail_idx] <= 1'b0;
+                    queue_aging[tail_idx]      <= 8'b0;
                     queue_wait_cycles[tail_idx]<= 8'b0;
-                    tail_idx <= (tail_idx == QUEUE_DEPTH-1) ? 0 : tail_idx + 1;
+                    tail_idx    <= (tail_idx == QUEUE_DEPTH-1) ? 0 : tail_idx + 1;
                     queue_count <= queue_count + 1;
                     bp_actual_accepts <= bp_actual_accepts + 1;
                     $display("[%0t] [SQ-SCHEDULER] 📥 Enqueued A task, queue_count=%0d", $time, queue_count+1);
-                end else if (npu_task_valid) begin
-                    queue_type[tail_idx]      <= TASK_NPU;
-                    queue_addr[tail_idx]      <= {ADDR_WIDTH{1'b0}};
-                    queue_data[tail_idx]      <= 64'b0;  // NPU tasks don't carry data to A-Core
-                    queue_valid[tail_idx]     <= 1'b1;
-                    queue_dispatched[tail_idx]<= 1'b0;
-                    queue_aging[tail_idx]     <= 8'b0;
+                end else if (npu_task_valid && !npu_task_valid_prev) begin
+                    queue_type[tail_idx]       <= TASK_NPU;
+                    queue_addr[tail_idx]       <= {ADDR_WIDTH{1'b0}};
+                    queue_data[tail_idx]       <= 64'b0;
+                    queue_valid[tail_idx]      <= 1'b1;
+                    queue_dispatched[tail_idx] <= 1'b0;
+                    queue_aging[tail_idx]      <= 8'b0;
                     queue_wait_cycles[tail_idx]<= 8'b0;
-                    tail_idx <= (tail_idx == QUEUE_DEPTH-1) ? 0 : tail_idx + 1;
+                    tail_idx    <= (tail_idx == QUEUE_DEPTH-1) ? 0 : tail_idx + 1;
                     queue_count <= queue_count + 1;
                     bp_actual_accepts <= bp_actual_accepts + 1;
                     $display("[%0t] [SQ-SCHEDULER] 📥 Enqueued NPU task, queue_count=%0d", $time, queue_count+1);
                 end
             end else begin
-                if (g_task_valid || a_task_valid || npu_task_valid)
+                if ((g_task_valid && !g_task_valid_prev) ||
+                    (a_task_valid && !a_task_valid_prev) ||
+                    (npu_task_valid && !npu_task_valid_prev))
                     bp_queue_full_rejections <= bp_queue_full_rejections + 1;
             end
 
@@ -365,9 +416,40 @@ module global_scheduler_sq #(
             for (li = 0; li < QUEUE_DEPTH; li = li + 1) begin
                 if (queue_valid[li] && !queue_dispatched[li]) begin
                     queue_wait_cycles[li] <= queue_wait_cycles[li] + 1;
-                    if (queue_wait_cycles[li] >= AGING_RATE && queue_aging[li] < MAX_AGING) begin
-                        queue_aging[li] <= queue_aging[li] + 1;
-                        aging_boosted_tasks <= aging_boosted_tasks + 1;
+                    
+                    // FAIRNESS FIX: Task-specific aging rates
+                    case (queue_type[li])
+                        TASK_GAMING: begin
+                            // Gaming tasks age slower (already high priority)
+                            if (queue_wait_cycles[li] >= (AGING_RATE * 2) && queue_aging[li] < 8'd1) begin
+                                queue_aging[li] <= queue_aging[li] + 1;
+                                aging_boosted_tasks <= aging_boosted_tasks + 1;
+                                if (li == 0 && queue_aging[li] == 8'd1)  // Debug first gaming task
+                                    $display("[%0t] [SQ-SCHEDULER] FAIRNESS: Gaming task got aging boost", $time);
+                            end
+                        end
+                        TASK_AI: begin
+                            // AI tasks age at normal rate
+                            if (queue_wait_cycles[li] >= AGING_RATE && queue_aging[li] < MAX_AGING) begin
+                                queue_aging[li] <= queue_aging[li] + 1;
+                                aging_boosted_tasks <= aging_boosted_tasks + 1;
+                            end
+                        end
+                        TASK_NPU: begin
+                            // NPU tasks age faster (prevent starvation)
+                            if (queue_wait_cycles[li] >= (AGING_RATE / 2) && queue_aging[li] < MAX_AGING) begin
+                                queue_aging[li] <= queue_aging[li] + 1;
+                                aging_boosted_tasks <= aging_boosted_tasks + 1;
+                            end
+                        end
+                    endcase
+                    
+                    // ANTI-STARVATION: Force dispatch if waiting too long
+                    if (queue_wait_cycles[li] > 8'd200) begin  // 200 cycles = too long
+                        if (li == 0)  // Debug only first occurrence
+                            $display("[%0t] [SQ-SCHEDULER] ANTI-STARVATION: Task type=%0d waited %0d cycles, forcing priority", 
+                                    $time, queue_type[li], queue_wait_cycles[li]);
+                        queue_aging[li] <= MAX_AGING;  // Force maximum priority
                     end
                 end
             end
@@ -377,6 +459,7 @@ module global_scheduler_sq #(
             // FIXED QUEUE DE-SYNC: Clear queue_valid and queue_dispatched for completed entry
             if (g_core_complete && !g_core_complete_prev && task_being_served && active_task_type == TASK_GAMING) begin
                 counter_completed <= counter_completed + 1;
+                g_tasks_completed <= g_tasks_completed + 1;  // FAIRNESS: Track gaming completions
                 pending_result <= g_core_result; pending_result_valid <= 1'b1;
                 pending_result_type <= TASK_GAMING;
                 active_task_valid <= 1'b0; task_being_served <= 1'b0;
@@ -391,6 +474,7 @@ module global_scheduler_sq #(
             if (a_core_complete && !a_core_complete_prev && task_being_served && active_task_type == TASK_AI) begin
                 $display("[%0t] [SQ-SCHEDULER] ✓ A-Core completion detected! Pulling result from FIFO", $time);
                 counter_completed <= counter_completed + 1;
+                a_tasks_completed <= a_tasks_completed + 1;  // FAIRNESS: Track AI completions
                 pending_result <= a_core_result; pending_result_valid <= 1'b1;
                 pending_result_type <= TASK_AI;
                 active_task_valid <= 1'b0; task_being_served <= 1'b0;
@@ -404,6 +488,7 @@ module global_scheduler_sq #(
             end
             if (npu_complete && !npu_complete_prev && task_being_served && active_task_type == TASK_NPU) begin
                 counter_completed <= counter_completed + 1;
+                npu_tasks_completed <= npu_tasks_completed + 1;  // FAIRNESS: Track NPU completions
                 pending_result <= npu_result; pending_result_valid <= 1'b1;
                 pending_result_type <= TASK_NPU;
                 active_task_valid <= 1'b0; task_being_served <= 1'b0;
@@ -444,12 +529,46 @@ module global_scheduler_sq #(
                     end
                 end
                 if (best_idx >= 0) begin
+                    // CRITICAL FIX: Debug dispatch conditions
                     case (queue_type[best_idx])
-                        TASK_GAMING: can_dispatch = !g_core_busy && !skip_g_dispatch;
-                        TASK_AI:     can_dispatch = !a_core_busy;
-                        TASK_NPU:    can_dispatch = !npu_busy;
+                        TASK_GAMING: begin
+                            can_dispatch = !g_core_busy && !skip_g_dispatch;
+                            $display("[%0t] [SQ-SCHEDULER] DISPATCH CHECK: GAMING valid=%b busy=%b skip=%b -> can=%b", 
+                                    $time, queue_valid[best_idx], g_core_busy, skip_g_dispatch, can_dispatch);
+                            if (!can_dispatch) begin
+                                $display("[%0t] [SQ-SCHEDULER] STARVATION: G-Core has 1 pending tasks but not dispatching (busy=%b, skip=%b)", 
+                                        $time, g_core_busy, skip_g_dispatch);
+                            end
+                        end
+                        TASK_AI: begin
+                            can_dispatch = !a_core_busy;
+                            $display("[%0t] [SQ-SCHEDULER] DISPATCH CHECK: AI valid=%b busy=%b -> can=%b", 
+                                    $time, queue_valid[best_idx], a_core_busy, can_dispatch);
+                            if (!can_dispatch) begin
+                                $display("[%0t] [SQ-SCHEDULER] STARVATION: AI-Core has pending tasks but not dispatching (busy=%b)", 
+                                        $time, a_core_busy);
+                            end
+                        end
+                        TASK_NPU: begin
+                            can_dispatch = !npu_busy;
+                            $display("[%0t] [SQ-SCHEDULER] DISPATCH CHECK: NPU valid=%b busy=%b -> can=%b", 
+                                    $time, queue_valid[best_idx], npu_busy, can_dispatch);
+                            if (!can_dispatch) begin
+                                $display("[%0t] [SQ-SCHEDULER] STARVATION: NPU has pending tasks but not dispatching (busy=%b)", 
+                                        $time, npu_busy);
+                            end
+                        end
                         default:     can_dispatch = 1'b0;
                     endcase
+                    
+                    // CRITICAL FIX: Force dispatch if starving too long
+                    if (!can_dispatch && queue_aging[best_idx] > 8'd100) begin
+                        $display("[%0t] [SQ-SCHEDULER] FORCE DISPATCH: Task aging=%0d > 100, forcing dispatch", 
+                                $time, queue_aging[best_idx]);
+                        can_dispatch = 1'b1;
+                        forced_dispatch_count <= forced_dispatch_count + 1;
+                    end
+                    
                     if (can_dispatch) begin
                         active_task_valid  <= 1'b1;
                         active_task_type   <= queue_type[best_idx];

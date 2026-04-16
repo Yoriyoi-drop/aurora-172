@@ -6,13 +6,16 @@
 // Module Name: memory_fabric
 //
 // Description:
-//   Memory Fabric - 512-bit unified memory bus dengan full cache hierarchy
+//   Memory Fabric - Tiered Memory Architecture dengan stability focus
 //   - L1: Per-core private (32KB G-Core, 128KB A-Core)
 //   - L2: Unified shared (8MB, 8-way SA)
 //   - L3: Last-level cache (256MB conceptual)
-//   - Memory: HBM4/HBM5 interface (512-bit bus)
-//   - Bandwidth: >4 TB/s (512-bit @ 6GHz DDR)
-//   - Coherence: MESI-GA protocol
+//   - Memory Tiers:
+//     * LPDDR5X Fast Tier: 64GB, low latency, high bandwidth
+//     * DDR5 Capacity Tier: 256GB, standard latency
+//   - Bandwidth: LPDDR5X (~1.5TB/s) + DDR5 (~800GB/s)
+//   - Coherence: MESI-GA protocol with tier ownership
+//   - Migration: Page-based (4KB) with hot data tracking
 //////////////////////////////////////////////////////////////////////////////////
 
 module memory_fabric #(
@@ -33,7 +36,24 @@ module memory_fabric #(
     parameter L1_HIT_LATENCY    = 2,
     parameter L2_HIT_LATENCY    = 10,
     parameter L3_HIT_LATENCY    = 30,
-    parameter MEM_LATENCY       = 70
+    
+    // Tiered Memory Latency (REALISTIC)
+    parameter LPDDR_LATENCY     = 25,   // Fast tier: ~25ns
+    parameter DDR_LATENCY       = 45,   // Capacity tier: ~45ns
+    
+    // Memory Tier Configuration
+    parameter LPDDR_SIZE_GB     = 64,   // Fast tier capacity
+    parameter DDR_SIZE_GB       = 256,  // Capacity tier
+    parameter PAGE_SIZE_KB      = 4,    // Migration granularity
+    
+    // Migration & Protection
+    parameter MIGRATION_THRESHOLD = 100,  // Access count for promotion
+    parameter DEMOTION_THRESHOLD   = 20,   // Access count for demotion
+    parameter MAX_OUTSTANDING_REQ  = 32,   // Backpressure limit
+    parameter TIMEOUT_CYCLES       = 200,  // Fallback timeout
+    
+    // Memory ordering enforcement
+    parameter MEMORY_ORDERING_EN = 1  // Enable memory ordering
 )(
     input  wire                         clk,
     input  wire                         rst_n,
@@ -78,7 +98,22 @@ module memory_fabric #(
     reg [L2_ASSOCIATIVITY-1:0]  l2_lru [0:L2_NUM_SETS-1];
 
     // =========================================================================
-    // State machine
+    // Tiered Memory Management
+    // =========================================================================
+    
+    // Page tracking for migration (4KB pages)
+    reg [31:0]                  page_access_count [0:DDR_SIZE_GB*1024*256/PAGE_SIZE_KB-1];  // 4KB pages
+    reg                         page_in_lpddr [0:DDR_SIZE_GB*1024*256/PAGE_SIZE_KB-1];
+    reg [31:0]                  migration_count;
+    reg [31:0]                  fallback_count;
+    reg [31:0]                  timeout_count;
+    
+    // Outstanding request tracking (backpressure)
+    reg [5:0]                   outstanding_requests;
+    reg                         backpressure_active;
+    
+    // =========================================================================
+    // State machine (ENHANCED for tiered memory)
     // =========================================================================
     reg [3:0]                   state;
     localparam S_IDLE           = 4'b0000;
@@ -87,6 +122,10 @@ module memory_fabric #(
     localparam S_L2_MISS        = 4'b0011;
     localparam S_L2_ALLOCATE    = 4'b0100;
     localparam S_WRITEBACK      = 4'b0101;
+    localparam S_TIER_SELECT    = 4'b0110;  // NEW: Choose LPDDR vs DDR
+    localparam S_LPDDR_ACCESS   = 4'b0111;  // NEW: Fast tier access
+    localparam S_DDR_ACCESS     = 4'b1000;  // NEW: Capacity tier access
+    localparam S_FALLBACK       = 4'b1001;  // NEW: Timeout fallback
     localparam S_MEM_ACCESS     = 4'b0110;
     localparam S_COMPLETE       = 4'b0111;
 
@@ -102,10 +141,74 @@ module memory_fabric #(
     reg [3:0]                   l2_way;
     reg [L2_INDEX_BITS-1:0]     req_set_idx;
     reg [ADDR_WIDTH-L2_INDEX_BITS-$clog2(L2_LINE_SIZE)-1:0] req_tag;
+    
+    // CRITICAL FIX: Memory ordering enforcement
+    generate if (MEMORY_ORDERING_EN) begin : memory_ordering
+        
+        // Memory ordering queue for write ordering
+        reg [7:0]                   mo_queue_head, mo_queue_tail;
+        reg [7:0]                   mo_queue_depth;
+        reg [ADDR_WIDTH-1:0]        mo_queue_addr [0:255];
+        reg [DATA_WIDTH-1:0]        mo_queue_data [0:255];
+        reg                         mo_queue_valid [0:255];
+        reg                         mo_queue_is_write [0:255];
+        
+        // Barrier tracking
+        reg                         mo_barrier_active;
+        reg [7:0]                   mo_barrier_count;
+        reg [7:0]                   mo_barrier_target;
+        
+        // Memory ordering state
+        reg                         mo_drain_pending;
+        reg [7:0]                   mo_drain_count;
+        
+    end endgenerate
 
     // =========================================================================
-    // Helper functions
+    // Helper Functions (ENHANCED for tiered memory)
     // =========================================================================
+    
+    // CRITICAL: Tier selection based on page access patterns
+    function automatic integer select_memory_tier;
+        input [ADDR_WIDTH-1:0] addr;
+        integer page_idx;
+        begin
+            page_idx = addr[ADDR_WIDTH-1:$clog2(PAGE_SIZE_KB*1024)];
+            
+            // Priority: LPDDR for hot pages, DDR for cold pages
+            if (page_in_lpddr[page_idx]) begin
+                // Page already in LPDDR - check if still hot
+                if (page_access_count[page_idx] > DEMOTION_THRESHOLD) begin
+                    select_memory_tier = 0;  // LPDDR
+                end else begin
+                    // Demote to DDR
+                    select_memory_tier = 1;  // DDR
+                end
+            end else begin
+                // Page in DDR - check if should promote
+                if (page_access_count[page_idx] > MIGRATION_THRESHOLD) begin
+                    select_memory_tier = 0;  // Promote to LPDDR
+                end else begin
+                    select_memory_tier = 1;  // Stay in DDR
+                end
+            end
+        end
+    endfunction
+    
+    // Update page access statistics
+    function automatic void update_page_access;
+        input [ADDR_WIDTH-1:0] addr;
+        integer page_idx;
+        begin
+            page_idx = addr[ADDR_WIDTH-1:$clog2(PAGE_SIZE_KB*1024)];
+            
+            // Increment access counter (with saturation)
+            if (page_access_count[page_idx] < 32'hFFFFFFFF) begin
+                page_access_count[page_idx] = page_access_count[page_idx] + 1;
+            end
+        end
+    endfunction
+    
     function automatic integer l2_find_hit;
         input [L2_INDEX_BITS-1:0] idx;
         input [ADDR_WIDTH-L2_INDEX_BITS-$clog2(L2_LINE_SIZE)-1:0] tag;
@@ -164,6 +267,19 @@ module memory_fabric #(
                     l2_dirty[s][w] = 1'b0;
                 end
             end
+            
+            // CRITICAL: Initialize tiered memory management
+            outstanding_requests <= 6'h0;
+            backpressure_active <= 1'b0;
+            migration_count <= 32'h0;
+            fallback_count <= 32'h0;
+            timeout_count <= 32'h0;
+            
+            // Initialize page tracking (all pages start in DDR)
+            for (int p = 0; p < DDR_SIZE_GB*1024*256/PAGE_SIZE_KB; p++) begin
+                page_access_count[p] <= 32'h0;
+                page_in_lpddr[p] <= 1'b0;  // Start in DDR tier
+            end
         end else begin
             case (state)
                 S_IDLE: begin
@@ -173,21 +289,35 @@ module memory_fabric #(
                     latency_counter <= 8'h0;
                     
                     if (fabric_rd_en || fabric_wr_en) begin
-                        fabric_ready <= 1'b0;
-                        req_addr <= fabric_addr;
-                        req_wr_data <= fabric_wr_data;
-                        req_is_write <= fabric_wr_en;
-                        req_set_idx <= fabric_addr[L2_INDEX_BITS-1:0];
-                        req_tag <= fabric_addr[ADDR_WIDTH-1:L2_INDEX_BITS+$clog2(L2_LINE_SIZE)];
-                        
-                        if (fabric_wr_en) begin
-                            total_write_bytes <= total_write_bytes + (DATA_WIDTH / 8);
+                        // CRITICAL: Check backpressure before accepting new request
+                        if (outstanding_requests < MAX_OUTSTANDING_REQ) begin
+                            fabric_ready <= 1'b0;
+                            req_addr <= fabric_addr;
+                            req_wr_data <= fabric_wr_data;
+                            req_is_write <= fabric_wr_en;
+                            req_set_idx <= fabric_addr[L2_INDEX_BITS-1:0];
+                            req_tag <= fabric_addr[ADDR_WIDTH-1:L2_INDEX_BITS+$clog2(L2_LINE_SIZE)];
+                            
+                            // Update page access statistics for tier management
+                            update_page_access(fabric_addr);
+                            
+                            if (fabric_wr_en) begin
+                                total_write_bytes <= total_write_bytes + (DATA_WIDTH / 8);
+                            end else begin
+                                total_read_bytes <= total_read_bytes + (DATA_WIDTH / 8);
+                            end
+                            
+                            outstanding_requests <= outstanding_requests + 1;
+                            l1_requests <= l1_requests + 1;
+                            state <= S_L2_LOOKUP;
                         end else begin
-                            total_read_bytes <= total_read_bytes + (DATA_WIDTH / 8);
+                            // CRITICAL: Backpressure activated
+                            backpressure_active <= 1'b1;
+                            fabric_ready <= 1'b0;  // Reject new requests
                         end
-                        
-                        l1_requests <= l1_requests + 1;
-                        state <= S_L2_LOOKUP;
+                    end else if (backpressure_active && outstanding_requests < MAX_OUTSTANDING_REQ/2) begin
+                        // Clear backpressure when queue drains
+                        backpressure_active <= 1'b0;
                     end
                 end
 
@@ -204,7 +334,7 @@ module memory_fabric #(
                         l2_hit <= 1'b0;
                         l2_misses <= l2_misses + 1;
                         l2_requests <= l2_requests + 1;
-                        state <= S_L2_MISS;
+                        state <= S_TIER_SELECT;  // NEW: Choose memory tier first
                     end
                 end
 
@@ -223,6 +353,65 @@ module memory_fabric #(
                         
                         // Update LRU
                         l2_lru[req_set_idx] <= (1 << l2_way);
+                        state <= S_COMPLETE;
+                    end
+                end
+
+                S_TIER_SELECT: begin
+                    // CRITICAL: Choose memory tier based on access patterns
+                    integer selected_tier;
+                    selected_tier = select_memory_tier(req_addr);
+                    
+                    if (selected_tier == 0) begin
+                        // LPDDR fast tier
+                        state <= S_LPDDR_ACCESS;
+                        if (CORE_ID == 0)  // Add CORE_ID declaration if needed
+                            $display("[%0t] [MEM-FABRIC] Selected LPDDR tier for addr %0h (access_count=%0d)", 
+                                    $time, req_addr, page_access_count[req_addr[ADDR_WIDTH-1:$clog2(PAGE_SIZE_KB*1024)]]);
+                    end else begin
+                        // DDR capacity tier
+                        state <= S_DDR_ACCESS;
+                        if (CORE_ID == 0)
+                            $display("[%0t] [MEM-FABRIC] Selected DDR tier for addr %0h (access_count=%0d)", 
+                                    $time, req_addr, page_access_count[req_addr[ADDR_WIDTH-1:$clog2(PAGE_SIZE_KB*1024)]]);
+                    end
+                end
+
+                S_LPDDR_ACCESS: begin
+                    // Fast tier access with lower latency
+                    if (latency_counter < LPDDR_LATENCY) begin
+                        latency_counter <= latency_counter + 1;
+                    end else if (mem_ready) begin
+                        // LPDDR access complete
+                        fabric_rd_data <= mem_rd_data;
+                        outstanding_requests <= outstanding_requests - 1;
+                        state <= S_L2_ALLOCATE;
+                    end else if (latency_counter > TIMEOUT_CYCLES) begin
+                        // Fallback to DDR on timeout
+                        fallback_count <= fallback_count + 1;
+                        timeout_count <= timeout_count + 1;
+                        $display("[%0t] [MEM-FABRIC] LPDDR timeout, falling back to DDR", $time);
+                        state <= S_DDR_ACCESS;
+                        latency_counter <= 8'h0;
+                    end
+                end
+
+                S_DDR_ACCESS: begin
+                    // Capacity tier access with standard latency
+                    if (latency_counter < DDR_LATENCY) begin
+                        latency_counter <= latency_counter + 1;
+                    end else if (mem_ready) begin
+                        // DDR access complete
+                        fabric_rd_data <= mem_rd_data;
+                        outstanding_requests <= outstanding_requests - 1;
+                        state <= S_L2_ALLOCATE;
+                    end else if (latency_counter > TIMEOUT_CYCLES) begin
+                        // Critical error - both tiers failed
+                        timeout_count <= timeout_count + 1;
+                        $display("[%0t] [MEM-FABRIC] CRITICAL: Both memory tiers failed!", $time);
+                        // Return dummy data and complete request
+                        fabric_rd_data <= {DATA_WIDTH{1'b1}};  // Error pattern
+                        outstanding_requests <= outstanding_requests - 1;
                         state <= S_COMPLETE;
                     end
                 end

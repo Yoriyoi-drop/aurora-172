@@ -34,7 +34,7 @@ module tb_aurora_172_enhanced;
     localparam DATA_WIDTH     = 64;
     localparam ADDR_WIDTH     = 48;
     localparam INST_WIDTH     = 128;
-    localparam CACHE_LINE_WIDTH = 172;
+    localparam CACHE_LINE_WIDTH = 512;  // FIXED: Match top.sv
 
     // Reduced core counts untuk simulasi
     localparam NUM_G_CORES       = 4;

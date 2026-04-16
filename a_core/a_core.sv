@@ -645,10 +645,10 @@ module a_core #(
                         // Counter reached target AND this is first cycle - start MAC
                         mac_compute_started <= 1'b1;
                         a_exec_counter <= a_exec_target_cycles;
-                        // Start MAC operation - advance to stage 1 IMMEDIATELY
-                        stage_counter <= 6'd1;
+                        // CRITICAL FIX: Start at stage 0 where MAC computation actually begins!
+                        stage_counter <= 6'd0;
                         if (CORE_ID == 0)
-                            $display("[%0t] [A-CORE#%0d] MAC_COMPUTE: Starting MAC ops, stage_counter -> 1", $time, CORE_ID);
+                            $display("[%0t] [A-CORE#%0d] MAC_COMPUTE: Starting MAC ops, stage_counter -> 0", $time, CORE_ID);
                     end else begin
                         // Counter at target AND mac_compute_started already set
                         a_exec_counter <= a_exec_target_cycles;

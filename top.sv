@@ -3,6 +3,11 @@
 // verilator lint_off DECLFILENAME
 // verilator lint_off PINCONNECTEMPTY
 
+// ========================================================================
+// AURORA Interfaces and Assertions
+// Note: Files are included via iv_compile.f file list
+// ========================================================================
+
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
 // Engineer: Architecture Team
@@ -48,6 +53,7 @@ module aurora_172_top #(
     output wire                         ai_cmd_ready,
     output wire [DATA_WIDTH-1:0]        ai_result,
     output wire                         ai_result_valid,
+    input  wire                         ai_result_ready,  // CRITICAL: Add ready signal for handshake
     
     // System interface
     input  wire                         sys_interrupt,
@@ -83,6 +89,18 @@ module aurora_172_top #(
     output wire [31:0]                  sched_rr_rotations,
     output wire [31:0]                  sched_queue_avoidance,
     output wire [31:0]                  sched_watchdog_resets,
+
+    // FAIRNESS: Task distribution monitoring
+    output wire [31:0]                  sched_g_tasks_completed,
+    output wire [31:0]                  sched_a_tasks_completed,
+    output wire [31:0]                  sched_npu_tasks_completed,
+    output wire [31:0]                  sched_fairness_violations,
+
+    // Ring bus interface untuk scheduler load balancing
+    output wire [31:0]                  ring_bus_g_packets,
+    output wire [31:0]                  ring_bus_a_packets,
+    output wire [31:0]                  ring_bus_contention,
+    output wire                         ring_bus_congested,
 
     // Back-pressure monitoring (v3)
     output wire [31:0]                  sched_bp_queue_full_rejections,
@@ -300,6 +318,215 @@ module aurora_172_top #(
     wire [CACHE_LINE_WIDTH-1:0]         l2_mem_rd_data;    // 512-bit
     wire                                l2_mem_ready;
 
+    // =========================================================================
+    // Internal signals and registers
+    // =========================================================================
+    
+    // Clock and reset
+    wire clk_internal;
+    wire rst_n_internal;
+    
+    // CRITICAL FIX: Reset synchronization to prevent metastability
+    reg [2:0] rst_sync_ff;
+    wire rst_n_sync;
+    
+    // Reset synchronizer - 3-stage synchronizer
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            rst_sync_ff <= 3'b000;
+        end else begin
+            rst_sync_ff <= {rst_sync_ff[1:0], 1'b1};
+        end
+    end
+    assign rst_n_sync = rst_sync_ff[2];
+    
+    // ========================================================================
+    // CLOCK DOMAIN CROSSING (CDC) SYNCHRONIZERS
+    // ========================================================================
+    
+    // CDC for gaming interface (async inputs)
+    wire game_cmd_valid_sync;
+    wire game_cmd_ready_sync;
+    
+    cdc_synchronizer #(.RESET_VALUE(1'b0)) u_game_cmd_valid_cdc (
+        .src_clk(clk),
+        .dst_clk(clk),
+        .src_rst_n(rst_n),
+        .dst_rst_n(rst_n_sync),
+        .src_data(game_cmd_valid),
+        .dst_data(game_cmd_valid_sync)
+    );
+    
+    cdc_synchronizer #(.RESET_VALUE(1'b0)) u_game_cmd_ready_cdc (
+        .src_clk(clk),
+        .dst_clk(clk),
+        .src_rst_n(rst_n),
+        .dst_rst_n(rst_n_sync),
+        .src_data(game_cmd_ready),
+        .dst_data(game_cmd_ready_sync)
+    );
+    
+    // CDC for AI interface (async inputs)
+    wire ai_cmd_valid_sync;
+    wire ai_cmd_ready_sync;
+    
+    cdc_synchronizer #(.RESET_VALUE(1'b0)) u_ai_cmd_valid_cdc (
+        .src_clk(clk),
+        .dst_clk(clk),
+        .src_rst_n(rst_n),
+        .dst_rst_n(rst_n_sync),
+        .src_data(ai_cmd_valid),
+        .dst_data(ai_cmd_valid_sync)
+    );
+    
+    cdc_synchronizer #(.RESET_VALUE(1'b0)) u_ai_cmd_ready_cdc (
+        .src_clk(clk),
+        .dst_clk(clk),
+        .src_rst_n(rst_n),
+        .dst_rst_n(rst_n_sync),
+        .src_data(ai_cmd_ready),
+        .dst_data(ai_cmd_ready_sync)
+    );
+    
+    // CDC for system interface (async inputs)
+    wire sys_interrupt_sync;
+    
+    cdc_synchronizer #(.RESET_VALUE(1'b0)) u_sys_interrupt_cdc (
+        .src_clk(clk),
+        .dst_clk(clk),
+        .src_rst_n(rst_n),
+        .dst_rst_n(rst_n_sync),
+        .src_data(sys_interrupt),
+        .dst_data(sys_interrupt_sync)
+    );
+    
+    // CDC for memory interface (async inputs)
+    wire mem_ready_sync;
+    
+    cdc_synchronizer #(.RESET_VALUE(1'b0)) u_mem_ready_cdc (
+        .src_clk(clk),
+        .dst_clk(clk),
+        .src_rst_n(rst_n),
+        .dst_rst_n(rst_n_sync),
+        .src_data(mem_ready),
+        .dst_data(mem_ready_sync)
+    );
+
+    // ========================================================================
+    // AURORA Interface Instances
+    // ========================================================================
+    
+    // Memory interface untuk memory fabric monitoring
+    // Note: Interface instances declared for future use
+    // Currently using direct signal connections for assertions
+    
+    // AXI interface untuk high-performance memory access (optional)
+    // Note: Interface instance declared for future expansion
+    axi_if #(
+        .DATA_WIDTH(DATA_WIDTH),
+        .ADDR_WIDTH(ADDR_WIDTH),
+        .ID_WIDTH(8),
+        .STRB_WIDTH(DATA_WIDTH/8)
+    ) axi_mem_if ();
+    
+    // ========================================================================
+    // Memory Assertions Instance
+    // ========================================================================
+    
+    // Cache hierarchy signals untuk assertions
+    wire [1:0]                       mesi_state;
+    wire                             l1_hit, l2_hit, l3_hit;
+    wire [31:0]                      total_requests, cache_hits, cache_misses;
+    
+    // ========================================================================
+    // Cache Signal Monitoring untuk Assertions
+    // ========================================================================
+    
+    // Simple cache hit detection (L1/L2 ready indicates hit)
+    assign l1_hit = g_l1_l2_ready_any || a_l1_l2_ready;
+    assign l2_hit = l2_mem_ready;  // L2 ready indicates L2 hit
+    assign l3_hit = mem_ready;     // Memory ready indicates L3 hit (main memory)
+    
+    // Simple MESI state tracking (simplified)
+    reg [1:0]                       mesi_state_reg;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            mesi_state_reg <= 2'b00;  // Invalid state
+        end else begin
+            // Simple state machine: Modified → Exclusive → Shared → Invalid
+            if (l2_mem_wr_en) begin
+                mesi_state_reg <= 2'b11;  // Modified
+            end else if (l2_mem_rd_en && l2_mem_ready) begin
+                mesi_state_reg <= 2'b01;  // Shared
+            end else if (!l2_mem_rd_en && !l2_mem_wr_en) begin
+                mesi_state_reg <= 2'b00;  // Invalid
+            end else begin
+                mesi_state_reg <= 2'b10;  // Exclusive
+            end
+        end
+    end
+    assign mesi_state = mesi_state_reg;
+    
+    // Performance counters
+    reg [31:0]                      total_requests_reg;
+    reg [31:0]                      cache_hits_reg;
+    reg [31:0]                      cache_misses_reg;
+    
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            total_requests_reg <= 32'b0;
+            cache_hits_reg <= 32'b0;
+            cache_misses_reg <= 32'b0;
+        end else begin
+            // Count total requests
+            if (l2_mem_rd_en || l2_mem_wr_en) begin
+                total_requests_reg <= total_requests_reg + 1;
+            end
+            
+            // Count hits (L1/L2 hits)
+            if ((l2_mem_rd_en || l2_mem_wr_en) && (l1_hit || l2_hit)) begin
+                cache_hits_reg <= cache_hits_reg + 1;
+            end
+            
+            // Count misses (go to main memory)
+            if ((l2_mem_rd_en || l2_mem_wr_en) && l3_hit) begin
+                cache_misses_reg <= cache_misses_reg + 1;
+            end
+        end
+    end
+    
+    assign total_requests = total_requests_reg;
+    assign cache_hits = cache_hits_reg;
+    assign cache_misses = cache_misses_reg;
+    
+    // Memory assertions untuk memory fabric verification
+    memory_assertions #(
+        .DATA_WIDTH(CACHE_LINE_WIDTH),
+        .ADDR_WIDTH(ADDR_WIDTH),
+        .CACHE_LINE_WIDTH(CACHE_LINE_WIDTH)
+    ) u_memory_assertions (
+        .clk(clk),
+        .rst_n(rst_n),
+        
+        // Memory interface signals
+        .mem_addr(l2_mem_addr),
+        .mem_rd_en(l2_mem_rd_en),
+        .mem_wr_en(l2_mem_wr_en),
+        .mem_wr_data(l2_mem_wr_data),
+        .mem_ready(l2_mem_ready),
+        
+        // Cache signals (simplified for top-level)
+        .l1_hit(l1_hit),
+        .l2_hit(l2_hit),
+        .l3_hit(l3_hit),
+        .cache_state(mesi_state),
+        
+        // Performance signals
+        .total_requests(total_requests),
+        .cache_hits(cache_hits),
+        .cache_misses(cache_misses)
+    );
+
     // ─────────────────────────────────────────────────────────────
     // Global Scheduler signals (MQ = active scheduler by default)
     // ─────────────────────────────────────────────────────────────
@@ -342,9 +569,15 @@ module aurora_172_top #(
     wire [31:0]                         mq_sched_bp_timeout_stalls;
     wire [31:0]                         mq_sched_bp_actual_accepts;
     wire [31:0]                         mq_sched_admission_rejections;
-    wire [31:0]                         mq_sched_hazard_raw;
-    wire [31:0]                         mq_sched_hazard_war;
-    wire [31:0]                         mq_sched_hazard_waw;
+    wire [31:0]                         sq_sched_hazard_raw;
+    wire [31:0]                         sq_sched_hazard_war;
+    wire [31:0]                         sq_sched_hazard_waw;
+    
+    // FAIRNESS: Task distribution monitoring
+    wire [31:0]                         sq_sched_g_tasks_completed;
+    wire [31:0]                         sq_sched_a_tasks_completed;
+    wire [31:0]                         sq_sched_npu_tasks_completed;
+    wire [31:0]                         sq_sched_fairness_violations;
     wire [31:0]                         mq_sched_hazard_structural;
     wire [31:0]                         mq_sched_hazard_dependency;
     wire [31:0]                         mq_sched_hazard_dependency_stalls;
@@ -505,26 +738,56 @@ module aurora_172_top #(
     // FIX: ai_cmd_ready assigned at line 775 (from scheduler, not direct A-Core)
     // REMOVED: assign ai_cmd_ready = a0_cmd_ready; (was conflicting with scheduler path)
 
-    // G-Core #1 to #15 (workers) - NOW ALL ENABLED WITH COMMAND ROUTING
+    // G-Core #1 to #15 (workers) - FIXED MULTI-DRIVER IMPLEMENTATION
     wire [NUM_G_CORES-1:0] g_core_cmd_ready;
     
-    // G-Core command broadcast bus (NEW - enables all cores)
-    wire [ADDR_WIDTH-1:0]   g_core_broadcast_addr;
-    wire [31:0]             g_core_broadcast_data;
-    wire                    g_core_broadcast_valid;
-    wire [NUM_G_CORES-1:0]  g_core_cmd_accepted;  // Which core accepted the command
+    // G-Core command arbitration - FIXED: No multi-driver
+    reg [ADDR_WIDTH-1:0]    g_core_selected_addr;
+    reg [31:0]              g_core_selected_data;
+    reg                     g_core_selected_valid;
+    reg [$clog2(NUM_G_CORES)-1:0] g_core_selected_idx;
+    
+    // Command selection logic - only ONE core gets command
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            g_core_selected_addr <= {ADDR_WIDTH{1'b0}};
+            g_core_selected_data <= 32'b0;
+            g_core_selected_valid <= 1'b0;
+            g_core_selected_idx <= 0;
+        end else begin
+            // Find next available core using round-robin
+            if (sched_g_core_cmd_valid && !g_core_selected_valid) begin
+                integer found_core;
+                found_core = -1;
+                
+                // Search for available core starting from current index
+                for (int i = 0; i < NUM_G_CORES && found_core == -1; i++) begin
+                    int candidate = (g_core_rr_index + i) % NUM_G_CORES;
+                    if (!g_core_busy_internal[candidate]) begin
+                        found_core = candidate;
+                    end
+                end
+                
+                if (found_core != -1) begin
+                    g_core_selected_addr <= sched_g_core_cmd_addr;
+                    g_core_selected_data <= sched_g_core_cmd_data;
+                    g_core_selected_valid <= 1'b1;
+                    g_core_selected_idx <= found_core;
+                    g_core_rr_index <= (found_core + 1) % NUM_G_CORES;
+                end
+            end else begin
+                g_core_selected_valid <= 1'b0;
+            end
+        end
+    end
 
     genvar g_idx;
     generate
-        // CRITICAL FIX #1: Start from 2 (G0 and G1 are standalone instances)
-        // G0 and G1 are instantiated separately below to avoid generate block conflicts
+        // FIXED: Each core gets command ONLY when selected
         for (g_idx = 2; g_idx < NUM_G_CORES; g_idx = g_idx + 1) begin : g_core_array
-            // COMPLETE FIX: Edge-triggered dispatch prevents multi-cycle broadcast
-            // Only ONE core receives each command (on the first dispatch cycle)
-            wire g_core_per_core_valid = (g_idx == g_core_rr_index) &&
-                                         !g_core_busy_internal[g_idx] &&
-                                         sched_g_core_cmd_valid &&
-                                         g_dispatch_active;
+            // CRITICAL FIX: Only selected core receives command
+            wire g_core_per_core_valid = (g_idx == g_core_selected_idx) &&
+                                         g_core_selected_valid;
             
             g_core #(
                 .CORE_ID(g_idx),
@@ -533,10 +796,10 @@ module aurora_172_top #(
                 .INST_WIDTH(INST_WIDTH)
             ) u_g_core (
                 .clk(clk),
-                .rst_n(rst_n),
+                .rst_n(rst_n_sync),
                 // Command interface - only if this core is selected
-                .cmd_addr(g_core_broadcast_addr),
-                .cmd_data(g_core_broadcast_data),
+                .cmd_addr(g_core_selected_addr),
+                .cmd_data(g_core_selected_data),
                 .cmd_valid(g_core_per_core_valid),
                 .cmd_ready(g_core_cmd_ready[g_idx]),
                 .result(g_core_result[DATA_WIDTH*(g_idx+1)-1:DATA_WIDTH*g_idx]),
@@ -642,22 +905,14 @@ module aurora_172_top #(
         end
     end
 
-    // Broadcast address/data (same for all)
-    assign g_core_broadcast_addr = sched_g_core_cmd_addr;
-    assign g_core_broadcast_data = sched_g_core_cmd_data;
-
-    // CRITICAL FIX #3: Generate block uses per-core valid gating
-    // Each G-Core (2..NUM_G_CORES-1) receives command ONLY when:
-    // - It matches the RR index (g_idx == g_core_rr_index)
-    // - It's not busy (!g_core_busy_internal[g_idx])
-    // - Scheduler has valid command (sched_g_core_cmd_valid)
-    // - Dispatch is active for this cycle only (g_dispatch_active)
-    // See generate block above for dispatch_mask logic
+    // FIXED: G0 and G1 use same arbitration logic as array
+    assign g0_cmd_addr = g_core_selected_addr;
+    assign g0_cmd_data = g_core_selected_data;
+    assign g0_cmd_valid = (g_core_selected_idx == 0) && g_core_selected_valid;
     
-    // Load Balancer: G1 - RR SELECTOR (with edge-triggered dispatch)
-    assign g1_cmd_addr = g_core_broadcast_addr;
-    assign g1_cmd_data = g_core_broadcast_data;
-    assign g1_cmd_valid = (g_core_rr_index == 1) && !g1_busy && sched_g_core_cmd_valid && g_dispatch_active;
+    assign g1_cmd_addr = g_core_selected_addr;
+    assign g1_cmd_data = g_core_selected_data;
+    assign g1_cmd_valid = (g_core_selected_idx == 1) && g_core_selected_valid;
     
     // Combined G-Core signals for scheduler - ALL CORES
     wire combined_g_result_valid = g0_complete || g1_complete || |g_core_complete[NUM_G_CORES-1:1];
@@ -666,8 +921,9 @@ module aurora_172_top #(
                                              g_core_result[DATA_WIDTH*2-1:DATA_WIDTH] : g0_result;
 
     // FIXED: Scheduler sees "busy" if ANY core is busy
-    wire combined_g_busy = g0_busy || g1_busy || |g_core_busy_internal[NUM_G_CORES-1:1];
-    wire combined_g_complete = g0_complete || g1_complete || |g_core_complete[NUM_G_CORES-1:1];
+    // CRITICAL FIX: Only use assigned indices (0 and 1), not undefined array bounds
+    wire combined_g_busy = g0_busy || g1_busy;
+    wire combined_g_complete = g0_complete || g1_complete;
     
     // =========================================================================
     // H-CORE Array (32 cores untuk General Purpose) — MULTI-INSTANCE BY DESIGN
@@ -810,8 +1066,6 @@ module aurora_172_top #(
     // =========================================================================
     // A-CORE Array (64 cores untuk AI/Tensor Compute)
     // =========================================================================
-    wire                        a0_busy;
-    wire                        a0_complete;
     wire                        a0_cmd_ready;  // FIX: A-Core ready signal for backpressure
     
     // DEBUG: Track a0_busy
@@ -840,13 +1094,14 @@ module aurora_172_top #(
             if (|npu_busy && !npu_busy_prev) begin
                 $display("[%0t] [TOP] npu_busy went HIGH (NPU started)", $time);
             end
-            if (!|npu_busy && npu_busy_prev) begin
+            if (!(|npu_busy) && npu_busy_prev) begin
                 $display("[%0t] [TOP] npu_busy went LOW (NPU finished)", $time);
             end
         end
     end
 
-    wire [DATA_WIDTH-1:0]       a0_result;
+    // FIX: a0_result_ready driven dari a_core_result_ready_int (deklarasi forward-ref)
+    // Dipakai di debug display baris 937. Sebelumnya undriven → ready=z di log.
     wire                        a0_result_ready;  // Phase 3: Scheduler pull signal
 
     // A-Core #0 (master - direct connect from testbench, bypass scheduler)
@@ -875,41 +1130,76 @@ module aurora_172_top #(
     
     wire a_core_cmd_valid_edge = a_core_cmd_valid_mux && !a_core_cmd_valid_prev;
     
-    always @(posedge clk) begin
-        if (a_core_cmd_valid_edge)
-            $display("[%0t] [TOP] 📤 Sending command to A-Core #0, addr=0x%h", $time, a_core_cmd_addr_mux);
-    end
-
     // FIX: cmd_ready goes to scheduler, testbench gets a_task_ready from scheduler
-    assign ai_cmd_ready = a_task_ready_int;  // Route scheduler ready back to testbench
+    assign ai_cmd_ready = a_task_ready_int;  // Route scheduler AI task ready signal - a_task_ready_int declared above (line 357)
 
-    // Phase 3: Result ready - pulse untuk pop FIFO setelah result_valid terlihat
-    // Ini memungkinkan testbench melihat result_valid sebelum di-pop
-    reg a0_result_ready_reg;
+    // CRITICAL FIX: Make ai_result_valid a LEVEL signal, not pulse
+    // Testbench needs persistent valid until result is consumed
+    reg a0_result_consumed;
+    reg [DATA_WIDTH-1:0] a0_result_latched;
+    reg a0_complete_prev;  // Previous value for edge detection
+    
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            a0_result_ready_reg <= 1'b0;
-        end else begin
-            // Default: result_ready = 0 (tahan result di FIFO)
-            // Pulse 1 cycle untuk pop setelah result_valid terlihat
-            a0_result_ready_reg <= 1'b0;
-        end
-    end
-
-    // FIX: Buat result_ready selalu 1 KECUALI saat baru push
-    // Ini memungkinkan result_valid bertahan 1 cycle sebelum di-pop
-    reg a0_complete_prev;
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
+            a0_result_consumed <= 1'b0;
+            a0_result_latched <= {DATA_WIDTH{1'b0}};
             a0_complete_prev <= 1'b0;
         end else begin
+            // Latch new result when available
+            if (a0_result_valid && !a0_result_consumed) begin
+                a0_result_latched <= a0_result;
+                a0_result_consumed <= 1'b0;  // Mark as not consumed yet
+            end
+            
+            // Mark as consumed when testbench pulls result
+            if (a_core_result_ready_int && a0_result_consumed == 1'b0) begin
+                a0_result_consumed <= 1'b1;
+            end
+            
+            // Update edge detection
             a0_complete_prev <= a0_complete;
         end
     end
 
-    // result_ready = 1 KECUALI pada cycle ketika a0_complete baru muncul
-    // Ini memberi 1 cycle bagi testbench untuk melihat result_valid
-    assign a0_result_ready = a0_complete_prev;
+    // CRITICAL FIX: Use external ai_result_ready for handshake
+    assign ai_result_direct = a0_result_latched;
+    assign ai_result_valid_direct = a0_result_valid && !a0_result_consumed;
+    
+    // Connect external ready signal to internal consumption logic
+    assign a_core_result_ready_int = ai_result_ready;
+    
+    // DEBUG: Monitor result consumption
+    always @(posedge clk) begin
+        if (a0_result_valid && !a0_result_consumed) begin
+            $display("[%0t] [A-RSLT] RESULT_READY: data=0x%h, waiting_for_consumer", $time, a0_result);
+        end
+        if (a_core_result_ready_int && a0_result_consumed == 1'b0) begin
+            $display("[%0t] [A-RSLT] RESULT_CONSUMED: data=0x%h", $time, a0_result_latched);
+        end
+        
+        // CRITICAL: Monitor ring bus response generation
+        if (u_ring_bus_a.node_resp_valid[2]) begin
+            $display("[%0t] [RING-BUS] RESPONSE_GENERATED: Node 2, valid=1, ready=%b", $time, u_ring_bus_a.node_resp_ready[2]);
+        end
+        if (u_ring_bus_a.node_resp_valid[0]) begin
+            $display("[%0t] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=%b", $time, u_ring_bus_a.node_resp_ready[0]);
+        end
+    end
+
+    // DEBUG: Monitor A-Core result path (CRITICAL for backlog fix)
+    always @(posedge clk) begin
+        if (a0_result_valid) begin
+            $display("[%0t] [A-RSLT] 📤 RESULT_VALID: data=0x%h, ready=%b, consumer_ready=%b", 
+                     $time, a0_result, a0_result_ready, a_core_result_ready_int);
+        end
+        if (a0_complete && !a0_complete_prev) begin
+            $display("[%0t] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=%b, fifo_drain=%b", 
+                     $time, a0_result_ready, a_core_result_ready_int);
+        end
+        if (a0_busy && a0_result_valid && !a0_result_ready) begin
+            $display("[%0t] [A-RSLT] ⚠️ STALL: result_valid=1 but ready=0 (FIFO will fill!)", $time);
+        end
+    end
 
     a_core #(
         .CORE_ID(0),
@@ -935,7 +1225,7 @@ module aurora_172_top #(
         .l2_wr_en(a_l1_l2_wr_en),
         .l2_rd_data(a_l1_l2_rd_data),
         .l2_ready(a_l1_l2_ready),
-        // FIFO metrics (unused)
+        // FIFO metrics
         .fifo_occupancy(),
         .fifo_full_warn(),
         // Memory fabric interface (unused - using L1→L2)
@@ -946,6 +1236,9 @@ module aurora_172_top #(
         .fabric_wr_data(),
         .fabric_ready()
     );
+
+    // FIX: a0_result_ready driven setelah a_core_result_ready_int ter-declare di baris 1344
+    assign a0_result_ready = a_core_result_ready_int;
     
     // A-Core #1 to #63 (workers) - DISABLED: Using A-Core #0 only for now
     // TODO: Implement proper single-target dispatch instead of broadcast
@@ -1184,7 +1477,13 @@ module aurora_172_top #(
         .sched_hazard_war(sq_sched_hazard_war),
         .sched_hazard_waw(sq_sched_hazard_waw),
         .sched_hazard_structural(sq_sched_hazard_structural),
-        .sched_hazard_dependency(sq_sched_hazard_dependency)
+        .sched_hazard_dependency(sq_sched_hazard_dependency),
+        
+        // FAIRNESS: Task distribution monitoring
+        .sched_g_tasks_completed(sq_sched_g_tasks_completed),
+        .sched_a_tasks_completed(sq_sched_a_tasks_completed),
+        .sched_npu_tasks_completed(sq_sched_npu_tasks_completed),
+        .sched_fairness_violations(sq_sched_fairness_violations)
     );
 
     // ── Multi Queue (MQ) Instance ──
@@ -1232,6 +1531,8 @@ module aurora_172_top #(
         .a_core_busy(a0_busy),
         .a_core_complete(a0_complete),  // Revert: Use level-triggered, scheduler does edge detection
         .a_core_result(a0_result),
+        .a_core_result_valid(a0_result_valid),  // CRITICAL FIX: Connect A-Core result valid
+        .a_core_result_ready(mq_a_core_result_ready),  // CRITICAL FIX: Connect scheduler ready signal
         .npu_dispatch_valid(mq_npu_dispatch_valid),
         .npu_busy(|npu_busy),
         .npu_complete(|npu_complete),
@@ -1270,7 +1571,13 @@ module aurora_172_top #(
         .sched_hq_dq_decoded(mq_sched_hq_dq_decoded),
         .sched_hq_eq_dispatched(mq_sched_hq_eq_dispatched),
         .sched_hq_rq_committed(mq_sched_hq_rq_committed),
-        .sched_hq_cq_completed(mq_sched_hq_cq_completed)
+        .sched_hq_cq_completed(mq_sched_hq_cq_completed),
+
+        // Ring bus interface for load balancing
+        .ring_bus_g_packets(cg_packets),
+        .ring_bus_a_packets(ca_packets),
+        .ring_bus_contention(ring_bus_contention),
+        .ring_bus_congested(ring_bus_congested)
     );
 
     // =========================================================================
@@ -1293,11 +1600,12 @@ module aurora_172_top #(
     assign g_task_ready_int = (sched_select) ? mq_g_task_ready : sq_g_task_ready;
     assign a_task_ready_int = (sched_select) ? mq_a_task_ready : sq_a_task_ready;
 
-    // CRITICAL FIX: A-Core result ready MUX
-    // MQ scheduler consumes result on completion (level-triggered)
-    // SQ scheduler has explicit result_ready signal
-    wire mq_a_core_result_ready;
-    assign mq_a_core_result_ready = a0_complete && sched_select;  // MQ pulls result when complete
+    // FIX #1 (top.sv): mq_a_core_result_ready adalah OUTPUT dari MQ scheduler (line 112 MQ).
+    // Jangan di-assign di top.sv — akan menyebabkan multi-driver conflict → x.
+    // MQ scheduler men-drive sinyal ini via:
+    //   assign a_core_result_ready = !pending_result_valid || (pending_result_type != TASK_AI);
+    // Cukup deklarasi wire, biarkan MQ module yang drive.
+    wire mq_a_core_result_ready;  // Driven by MQ scheduler output port
     wire a_core_result_ready_int = (sched_select) ? mq_a_core_result_ready : sq_a_core_result_ready;
 
     // CRITICAL FIX: Wire game_cmd_ready to scheduler ready signal
@@ -1354,6 +1662,12 @@ module aurora_172_top #(
     assign sched_rr_rotations           = (sched_select) ? mq_sched_rr_rotations : 32'b0;
     assign sched_queue_avoidance        = (sched_select) ? mq_sched_queue_avoidance : 32'b0;
     assign sched_watchdog_resets        = (sched_select) ? mq_sched_watchdog_resets : 32'b0;
+
+    // FAIRNESS: Connect task distribution monitoring
+    assign sched_g_tasks_completed      = (sched_select) ? 32'b0 : sq_sched_g_tasks_completed;  // Only SQ has this
+    assign sched_a_tasks_completed      = (sched_select) ? 32'b0 : sq_sched_a_tasks_completed;
+    assign sched_npu_tasks_completed     = (sched_select) ? 32'b0 : sq_sched_npu_tasks_completed;
+    assign sched_fairness_violations     = (sched_select) ? 32'b0 : sq_sched_fairness_violations;
 
     // FIX #3: Back-pressure counters - wire to output ports
     assign sched_bp_queue_full_rejections = (sched_select) ? mq_sched_bp_queue_full_rejections : sq_sched_bp_queue_full_rejections;
@@ -2211,7 +2525,55 @@ module aurora_172_top #(
     assign hwp_response_cycles = hwp_resp_int;
 
     // =========================================================================
-    // 7. Hardware Prefetcher (Intel) — MULTI-INSTANCE: 4 instances (per core cluster)
+    // 7. Power Management Integration
+    // =========================================================================
+    
+    // Power management signals
+    wire [10:0]                   g_core_voltage_mv, a_core_voltage_mv, h_core_voltage_mv, npu_voltage_mv;
+    wire [NUM_G_CORES-1:0]        g_core_power_gate;
+    wire [NUM_H_CORES-1:0]        h_core_power_gate;
+    wire [NUM_A_CORES-1:0]        a_core_power_gate;
+    wire [NUM_NPU_CLUSTERS-1:0]   npu_power_gate;
+    wire [31:0]                   total_power_mw;
+    wire                          thermal_throttle;
+    
+    power_management #(
+        .NUM_G_CORES(NUM_G_CORES),
+        .NUM_H_CORES(NUM_H_CORES),
+        .NUM_A_CORES(NUM_A_CORES),
+        .NUM_NPU_CLUSTERS(NUM_NPU_CLUSTERS)
+    ) u_power_management (
+        .clk(clk),
+        .rst_n(rst_n_sync),
+        
+        // Core busy signals for power gating
+        .g_core_busy(g_core_busy_internal),
+        .h_core_busy(h_core_busy_internal),
+        .a_core_busy(a_core_busy),
+        .npu_busy(npu_busy_internal),
+        
+        // Power mode control
+        .power_mode(sys_power_mode[3:0]),
+        
+        // Voltage and frequency control
+        .g_core_voltage_mv(g_core_voltage_mv),
+        .a_core_voltage_mv(a_core_voltage_mv),
+        .h_core_voltage_mv(h_core_voltage_mv),
+        .npu_voltage_mv(npu_voltage_mv),
+        
+        // Power gating control
+        .g_core_power_gate(g_core_power_gate),
+        .h_core_power_gate(h_core_power_gate),
+        .a_core_power_gate(a_core_power_gate),
+        .npu_power_gate(npu_power_gate),
+        
+        // Power monitoring
+        .total_power_mw(total_power_mw),
+        .thermal_throttle(thermal_throttle)
+    );
+
+    // =========================================================================
+    // 8. Hardware Prefetcher (Intel) - MULTI-INSTANCE: 4 instances (per core cluster)
     // Setiap cluster punya prefetcher sendiri untuk pattern detection yang lebih akurat
     // =========================================================================
     localparam NUM_PREFETCHERS = 4;
@@ -2425,26 +2787,78 @@ module aurora_172_top #(
     // =========================================================================
     wire [31:0] cg_packets, ca_packets, ch_packets, cnpu_packets, chits;
 
-    // FINAL FIX: Disable Ring Bus completely - use direct connection (working perfectly)
-    wire [ADDR_WIDTH-1:0] rb_addr_0 = {ADDR_WIDTH{1'b0}};  // DISABLED
-    wire [DATA_WIDTH-1:0] rb_data_0 = {DATA_WIDTH{1'b0}};  // DISABLED
-    wire                  rb_valid_0 = 1'b0;                 // DISABLED
+    // FIX: Enable Ring Bus and connect to scheduler for load balancing
+    // Node 0: Gaming Core 0
+    wire [ADDR_WIDTH-1:0] rb_addr_0 = sched_g_core_cmd_addr;  // Connect to scheduler
+    // CRITICAL FIX: Form proper packet for ring bus with direction field
+    wire [DATA_WIDTH-1:0] rb_data_0;
+    wire                  rb_valid_0 = sched_g_core_cmd_valid && !game_cmd_ready; // Use ring when direct not ready
     wire                  rb_ready_0;
     wire [DATA_WIDTH-1:0] rb_resp_0;
+    
+    // Packet formation for gaming traffic (Node 0 -> Node 2 for AI core)
+    localparam G_PKT_SRC  = 8'd0;  // Gaming Core is node 0
+    localparam G_PKT_DEST = 8'd2;  // Destination is AI core
+    localparam G_PKT_DIR  = 2'b10; // CCW direction (0->2 is shorter CCW)
+    localparam G_PKT_QOS  = 2'b11; // Highest priority for gaming
+    
+    assign rb_data_0 = {sched_g_core_cmd_addr, // 48 bits
+                        G_PKT_SRC,            // 8 bits  
+                        G_PKT_DEST,           // 8 bits
+                        sched_g_core_cmd_data,// 128 bits
+                        G_PKT_QOS,            // 2 bits
+                        G_PKT_DIR,            // 2 bits
+                        8'h00,                // 8 bits hops
+                        32'h00000000};       // 32 bits timestamp
     wire                  rb_rvalid_0;
 
-    wire [ADDR_WIDTH-1:0] rb_addr_1 = {ADDR_WIDTH{1'b0}};
-    wire [DATA_WIDTH-1:0] rb_data_1 = {DATA_WIDTH{1'b0}};
-    wire                  rb_valid_1 = 1'b0;
+    // Node 1: Gaming Core 1 (backup)
+    wire [ADDR_WIDTH-1:0] rb_addr_1 = game_cmd_addr;  // Direct from testbench
+    // CRITICAL FIX: Form proper packet for ring bus with direction field
+    wire [DATA_WIDTH-1:0] rb_data_1;
+    wire                  rb_valid_1 = game_cmd_valid && rb_ready_1; // Use ring when ready
     wire                  rb_ready_1;
     wire [DATA_WIDTH-1:0] rb_resp_1;
+    
+    // Packet formation for backup gaming traffic (Node 1 -> Node 2 for AI core)
+    localparam G1_PKT_SRC  = 8'd1;  // Gaming Core 1 is node 1
+    localparam G1_PKT_DEST = 8'd2;  // Destination is AI core
+    localparam G1_PKT_DIR  = 2'b01; // CW direction (1->2 is shorter CW)
+    localparam G1_PKT_QOS  = 2'b10; // High priority
+    
+    assign rb_data_1 = {game_cmd_addr,       // 48 bits
+                        G1_PKT_SRC,          // 8 bits  
+                        G1_PKT_DEST,         // 8 bits
+                        game_cmd_data,       // 128 bits
+                        G1_PKT_QOS,          // 2 bits
+                        G1_PKT_DIR,          // 2 bits
+                        8'h00,               // 8 bits hops
+                        32'h00000000};      // 32 bits timestamp
     wire                  rb_rvalid_1;
 
-    wire [ADDR_WIDTH-1:0] rb_addr_2 = {ADDR_WIDTH{1'b0}};
-    wire [DATA_WIDTH-1:0] rb_data_2 = {DATA_WIDTH{1'b0}};
-    wire                  rb_valid_2 = 1'b0;
+    // Node 2: AI Core
+    wire [ADDR_WIDTH-1:0] rb_addr_2 = ai_cmd_addr;   // AI traffic
+    // CRITICAL FIX: Form proper packet for ring bus with direction field
+    wire [DATA_WIDTH-1:0] rb_data_2;
+    wire                  rb_valid_2 = ai_cmd_valid && rb_ready_2; // Use ring when ready
     wire                  rb_ready_2;
     wire [DATA_WIDTH-1:0] rb_resp_2;
+    
+    // Packet formation for AI traffic (Node 2 -> Node 0 for gaming cores)
+    localparam AI_PKT_SRC  = 8'd2;  // AI Core is node 2
+    localparam AI_PKT_DEST = 8'd0;  // Destination is gaming core 0
+    localparam AI_PKT_DIR  = 2'b01; // CW direction (2->0 is shorter CW)
+    localparam AI_PKT_QOS  = 2'b10; // High priority for AI traffic
+    
+    assign rb_data_2 = {ai_cmd_addr,        // 48 bits
+                        AI_PKT_SRC,         // 8 bits  
+                        AI_PKT_DEST,        // 8 bits
+                        ai_cmd_data,        // 128 bits
+                        AI_PKT_QOS,         // 2 bits
+                        AI_PKT_DIR,         // 2 bits
+                        8'h00,             // 8 bits hops
+                        32'h00000000};      // 32 bits timestamp
+                        // Total: 48+8+8+128+2+2+8+32 = 236 bits (fits in 512-bit bus)
     wire                  rb_rvalid_2;
 
     wire [ADDR_WIDTH-1:0] rb_addr_3 = {ADDR_WIDTH{1'b0}};
@@ -2491,6 +2905,11 @@ module aurora_172_top #(
     wire [3:0] rb_resp_ready_arr;
     assign rb_resp_ready_arr = 4'b1111;
 
+    // Ring bus response routing
+    wire ring_bus_g_busy, ring_bus_a_busy;
+    assign ring_bus_g_busy = (cg_packets > 32'd50);  // Congestion threshold
+    assign ring_bus_a_busy = (ca_packets > 32'd25);  // Lower threshold for A-Core
+
     ring_bus #(
         .DATA_WIDTH(DATA_WIDTH),
         .ADDR_WIDTH(ADDR_WIDTH),
@@ -2510,20 +2929,24 @@ module aurora_172_top #(
 
         .gaming_mode(gaming_mode_active),
         .node_priority(4'b1111),
+        .node_congested({ring_bus_g_busy, ring_bus_g_busy, ring_bus_g_busy, 1'b0}),
 
         .ring_total_packets(cg_packets),
         .ring_avg_latency(),
-        .ring_contention_count(),
+        .ring_contention_count(ring_bus_contention),
+        .ring_adaptive_routing_count(),
+        .ring_cw_packets(),
+        .ring_ccw_packets(),
         .node_activity_mask()
     );
 
     // A-Core ring bus (2 nodes)
-    wire [ADDR_WIDTH-1:0] ra_addr_arr [0:1];
-    wire [DATA_WIDTH-1:0] ra_data_arr [0:1];
-    wire                  ra_valid_arr [0:1];
-    wire                  ra_ready_arr [0:1];
-    wire [DATA_WIDTH-1:0] ra_resp_arr [0:1];
-    wire                  ra_rvalid_arr [0:1];
+    wire [ADDR_WIDTH-1:0] ra_addr_arr [0:2];
+    wire [DATA_WIDTH-1:0] ra_data_arr [0:2];
+    wire                  ra_valid_arr [0:2];
+    wire                  ra_ready_arr [0:2];
+    wire [DATA_WIDTH-1:0] ra_resp_arr [0:2];
+    wire                  ra_rvalid_arr [0:2];
 
     assign ra_addr_arr[0] = sched_a_core_cmd_addr;
     assign ra_data_arr[0] = sched_a_core_cmd_data;
@@ -2531,15 +2954,33 @@ module aurora_172_top #(
     assign ra_addr_arr[1] = {ADDR_WIDTH{1'b0}};
     assign ra_data_arr[1] = {DATA_WIDTH{1'b0}};
     assign ra_valid_arr[1] = 1'b0;
+    // Node 2: A-Core direct path (backup/reroute)
+    assign ra_addr_arr[2] = a_core_cmd_addr_mux;
+    assign ra_data_arr[2] = a_core_cmd_data_mux;
+    assign ra_valid_arr[2] = a_core_cmd_valid_mux && !a0_cmd_ready;  // Use ring when direct not ready
 
-    wire [1:0] ra_resp_ready_arr;
-    assign ra_resp_ready_arr = 2'b11;
+    // CRITICAL FIX: Connect A-Core result to ring bus response path
+    wire [2:0] ra_resp_ready_arr;
+    // Node 0: Scheduler response (always ready)
+    // Node 1: A-Core result response (wait for scheduler consumption)
+    // Node 2: A-Core command response (always ready)
+    assign ra_resp_ready_arr[0] = 1'b1;  // Scheduler always ready
+    assign ra_resp_ready_arr[1] = mq_a_core_result_ready;  // CRITICAL: Wait for scheduler!
+    assign ra_resp_ready_arr[2] = 1'b1;  // Command response always ready
+    
+    // Connect A-Core result to ring bus response (credit return path)
+    assign ra_resp_arr[0] = {DATA_WIDTH{1'b0}};  // Scheduler response (unused)
+    assign ra_resp_arr[1] = {DATA_WIDTH{1'b0}};  // Unused node
+    assign ra_resp_arr[2] = a0_result;           // A-Core result -> ring bus response
+    assign ra_rvalid_arr[0] = 1'b0;              // Scheduler response (unused)
+    assign ra_rvalid_arr[1] = 1'b0;              // Unused node
+    assign ra_rvalid_arr[2] = a0_result_valid;    // A-Core result valid -> ring bus response valid
 
     ring_bus #(
         .DATA_WIDTH(DATA_WIDTH),
         .ADDR_WIDTH(ADDR_WIDTH),
-        .NUM_NODES(2),
-        .BUFFER_DEPTH(8)  // FIX: Increase from 4 to 8 for A-Core ring
+        .NUM_NODES(3),  // CRITICAL FIX: Node 2 exists! Prevent out-of-bounds
+        .BUFFER_DEPTH(16)  // FIX: Increase to 16 to match G-Core ring
     ) u_ring_bus_a (
         .clk(clk),
         .rst_n(rst_n),
@@ -2554,10 +2995,14 @@ module aurora_172_top #(
 
         .gaming_mode(1'b0),
         .node_priority(2'b11),
+        .node_congested({ring_bus_a_busy, 1'b0}),
 
         .ring_total_packets(ca_packets),
         .ring_avg_latency(),
         .ring_contention_count(),
+        .ring_adaptive_routing_count(),
+        .ring_cw_packets(),
+        .ring_ccw_packets(),
         .node_activity_mask()
     );
 
@@ -2597,5 +3042,8 @@ module aurora_172_top #(
     assign ring_npu_packets     = ring_npu_pkt_cnt;
     assign chiplet_total_packets = cg_packets + ca_packets + ring_h_pkt_cnt + ring_npu_pkt_cnt;
     assign chiplet_local_hits   = chiplet_hit_cnt;
+    
+    // Ring bus congestion signals for scheduler
+    assign ring_bus_congested   = ring_bus_g_busy || ring_bus_a_busy;
 
 endmodule

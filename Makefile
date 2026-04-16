@@ -49,18 +49,12 @@ VERILATOR_OPTS := \
 	--cc --exe --build \
 	--build-jobs 8 \
 	--verilate-jobs 8 \
-	--no-timing \
-	--no-decoration \
-	--output-split 50000 \
-	--trace-fst \
-	--trace-structs \
-	-MMD \
-	-Wno-fatal \
-	-Wno-STMTDLY \
+	--no-timing --no-decoration \
+	--output-split 50000 --trace-fst --trace-structs \
+	-MMD -Wno-fatal -Wno-STMTDLY \
 	--timescale 1ns/1ps \
 	--CFLAGS "-std=c++17 -O3 -march=native -flto" \
-	--LDFLAGS "-lstdc++" \
-	--no-inline-small-functions
+	--LDFLAGS "-lstdc++"
 
 # FAST mode optimization (for sim_fast target)
 VERILATOR_OPTS_FAST := \
@@ -112,7 +106,11 @@ SRC_FILES := \
 	interconnect/global_scheduler_mq.sv \
 	interconnect/global_scheduler_sq.sv \
 	rt_engine/rt_engine.sv \
-	testbench/perf_profiler_v2.sv
+	testbench/perf_profiler_v2.sv \
+	testbench/testbench.sv \
+	interfaces/axi_if.sv \
+	interfaces/memory_if.sv \
+	assertions/memory_assertions.sv
 
 TB_FILES := \
 	testbench/testbench.sv
@@ -461,7 +459,7 @@ $(BIN_DIR)/aurora_sim: iv_compile.f | $(BIN_DIR)
 	cd $(CURDIR) && $(IVERILOG) $(IVERILOG_G) \
 		-f $(CURDIR)/iv_compile.f \
 		-s $(TB_MODULE) \
-		-o $(CURDIR)/$(BIN_DIR)/aurora_sim 2>&1 | tail -n 20
+		-o $(CURDIR)/$(BIN_DIR)/aurora_sim
 	@echo "[OK] Icarus Verilog compilation successful"
 
 # Run simulation dengan Icarus Verilog

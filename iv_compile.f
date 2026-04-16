@@ -39,6 +39,13 @@ memory_fabric/vcache.sv
 memory_fabric/speed_shift_hwp.sv
 memory_fabric/hw_prefetcher.sv
 
+//interfaces
+interfaces/axi_if.sv
+interfaces/memory_if.sv
+
+//assertions
+assertions/memory_assertions.sv
+
 // Interconnect
 interconnect/ring_bus.sv
 interconnect/chiplet_interconnect.sv

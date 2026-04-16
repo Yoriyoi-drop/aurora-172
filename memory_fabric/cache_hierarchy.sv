@@ -24,9 +24,9 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module cache_hierarchy #(
-    parameter DATA_WIDTH        = 128,  // OPTIMIZED: 64→128 for wider data path
+    parameter DATA_WIDTH        = 64,   // FIXED: Match top.sv
     parameter ADDR_WIDTH        = 48,
-    parameter CACHE_LINE_WIDTH  = 256,  // OPTIMIZED: 172→256 (power of 2)
+    parameter CACHE_LINE_WIDTH  = 512,  // FIXED: Match top.sv standard
     parameter NUM_G_CORES       = 1,
     parameter NUM_A_CORES       = 1
 )(

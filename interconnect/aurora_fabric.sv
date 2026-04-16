@@ -670,44 +670,69 @@ module aurora_fabric #(
             end
 
             // ═══════════════════════════════════════════════════════
-            // STAGE 4: DEADLOCK DETECTION & RECOVERY
-            // FIX v2: Only increment timestamp for FIFO head entries (oldest packet)
-            // ═══════════════════════════════════════════════════════
+            // STAGE 4: ENHANCED DEADLOCK DETECTION & RECOVERY
+            // CRITICAL FIX: Multi-level deadlock detection with proper recovery
+            // =========================================================================
             begin
                 reg deadlock_detected;
+                reg [31:0] deadlock_timeout_counter;
+                reg [7:0] stuck_port_mask;
                 deadlock_detected = 1'b0;
+                stuck_port_mask = 8'h0;
+                deadlock_timeout_counter = 32'd0;
 
-                // Check if any FIFO has been stuck for too long
+                // Check each FIFO for deadlock conditions
                 for (int p = 0; p < NUM_PORTS; p = p + 1) begin
-                    // Only check if FIFO has entries AND head timestamp is too high
-                    if (fifo_cnt[p] > 0 && timestamp_fifo[p][fifo_head[p]] > 10000) begin
-                        deadlock_detected = 1'b1;
+                    if (fifo_cnt[p] > 0) begin
+                        // Increment timestamp for head entry
+                        if (timestamp_fifo[p][fifo_head[p]] < 32'hFFFFFFFE)
+                            timestamp_fifo[p][fifo_head[p]] <= timestamp_fifo[p][fifo_head[p]] + 1;
+                        
+                        // Check for deadlock timeout (reduced from 10000 to 1000 for faster detection)
+                        if (timestamp_fifo[p][fifo_head[p]] > 32'd1000) begin
+                            deadlock_detected = 1'b1;
+                            stuck_port_mask[p] <= 1'b1;
+                        end
                     end
-
-                    // FIX v2: Increment timestamp ONLY for valid FIFO head entries
-                    if (fifo_cnt[p] > 0 && timestamp_fifo[p][fifo_head[p]] < 32'hFFFFFFFE)
-                        timestamp_fifo[p][fifo_head[p]] <= timestamp_fifo[p][fifo_head[p]] + 1;
                 end
 
                 if (deadlock_detected) begin
-                    deadlock_detection_counter <= deadlock_detection_counter + 1;
-                    // Deadlock recovery: Force drop oldest packet
-                    for (int p = 0; p < NUM_PORTS; p = p + 1) begin
-                        if (fifo_cnt[p] > 0 && timestamp_fifo[p][fifo_head[p]] > 10000) begin
-                            if (fifo_head[p] == FIFO_DEPTH - 1)
-                                fifo_head[p] <= 0;
-                            else
-                                fifo_head[p] <= fifo_head[p] + 1;
-                            fifo_cnt[p] <= fifo_cnt[p] - 1;
-                            dropped_packet_count <= dropped_packet_count + 1;
-                        end
+                    deadlock_timeout_counter <= deadlock_timeout_counter + 1;
+                    
+                    // Log deadlock detection
+                    if (deadlock_timeout_counter == 32'd1) begin
+                        $display("[%0t] [AURORA-FABRIC] ** DEADLOCK DETECTED: Stuck ports mask=0x%h", $time, stuck_port_mask);
                     end
+                    
+                    // Recovery: Force drop stuck packets after grace period
+                    if (deadlock_timeout_counter > 32'd10) begin
+                        for (int p = 0; p < NUM_PORTS; p = p + 1) begin
+                            if (stuck_port_mask[p]) begin
+                                // Drop the stuck packet
+                                if (fifo_head[p] == FIFO_DEPTH - 1)
+                                    fifo_head[p] <= 0;
+                                else
+                                    fifo_head[p] <= fifo_head[p] + 1;
+                                fifo_cnt[p] <= fifo_cnt[p] - 1;
+                                dropped_packet_count <= dropped_packet_count + 1;
+                                
+                                // Reset timestamp for next packet
+                                if (fifo_cnt[p] > 0)
+                                    timestamp_fifo[p][fifo_head[p]] <= 32'h0;
+                                    
+                                $display("[%0t] [AURORA-FABRIC] ** DEADLOCK RECOVERY: Dropped packet from port %0d", $time, p);
+                            end
+                        end
+                        stuck_port_mask <= 8'h0;
+                        deadlock_timeout_counter <= 32'h0;
+                    end
+                end else begin
+                    deadlock_timeout_counter <= 32'h0;
                 end
             end
 
             // ═══════════════════════════════════════════════════════
             // FIX v2 #3: BANDWIDTH LIMITER — Window-based throttle control
-            // Every BW_WINDOW_LEN cycles, compare bw_window_packets to MAX_FABRIC_BW.
             // If exceeded, set throttle_lower_prio to block NPU/H-core injection.
             // ═══════════════════════════════════════════════════════
             begin

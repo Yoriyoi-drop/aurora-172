@@ -28,7 +28,7 @@ module tb_aurora_172_advanced;
     localparam SIM_CLK_PERIOD = 10;   // 100 MHz untuk simulasi
     localparam DATA_WIDTH     = 64;
     localparam ADDR_WIDTH     = 48;
-    localparam CACHE_LINE_WIDTH = 172;
+    localparam CACHE_LINE_WIDTH = 512;  // FIXED: Match top.sv
     localparam NUM_TESTS      = 100;  // Number of random tests
     
     // =========================================================================

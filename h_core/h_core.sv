@@ -230,21 +230,31 @@ module h_core #(
                 end
 
                 DECODE: begin
-                    // BUG-3 FIX: Check ROB not full before writing to prevent overflow
-                    // ROB can hold ROB_SIZE entries, check if tail - head < ROB_SIZE
-                    if ((rob_tail - rob_head) < ROB_SIZE) begin
+                    // CRITICAL FIX: Enhanced ROB overflow protection
+                    // Use proper circular buffer arithmetic to handle wrap-around
+                    localparam ROB_SIZE_MINUS_1 = ROB_SIZE - 1;
+                    wire [5:0] rob_used = (rob_tail >= rob_head) ? 
+                                        (rob_tail - rob_head) : 
+                                        (rob_tail + ROB_SIZE - rob_head);
+                    
+                    if (rob_used < ROB_SIZE_MINUS_1) begin
+                        // ROB has space - accept new instruction
                         busy <= 1'b1;
                         rob_addr[rob_tail] <= saved_cmd_addr;
                         rob_data[rob_tail] <= saved_cmd_data;
                         rob_valid[rob_tail] <= 1'b1;
-                        rob_tail <= rob_tail + 1;
+                        rob_tail <= (rob_tail + 1) % ROB_SIZE;  // Wrap-around
                         pipeline_state <= EXECUTE;
+                        if (CORE_ID == 0)
+                            $display("[%0t] [H-CORE#%0d] DECODE: ROB entry %0d allocated (used=%0d/%0d)", 
+                                    $time, CORE_ID, rob_tail, rob_used + 1, ROB_SIZE);
                     end else begin
                         // ROB full - stall and wait for retirement
                         busy <= 1'b1;
                         pipeline_state <= DECODE;  // Stay in DECODE
                         if (CORE_ID == 0)
-                            $display("[%0t] [H-CORE#%0d] WARNING: ROB full, stalling", $time, CORE_ID);
+                            $display("[%0t] [H-CORE#%0d] ** ROB OVERFLOW: ROB full (used=%0d/%0d), stalling", 
+                                    $time, CORE_ID, rob_used, ROB_SIZE);
                     end
                 end
 
@@ -318,25 +328,34 @@ module h_core #(
                 end
 
                 RETIRE: begin
-                    // FIXED BUG #4: Retire ALL completed entries quickly
+                    // CRITICAL FIX: Enhanced retirement with proper wrap-around
                     // Use combinational logic to find how many we can retire
                     integer retire_count;
                     retire_count = 0;
+                    integer current_head;
+                    current_head = rob_head;
                     
-                    // Count consecutive valid entries from head
+                    // Count consecutive valid entries from head (with wrap-around)
                     while (retire_count < ROB_SIZE && 
-                           rob_head + retire_count != rob_tail && 
-                           rob_valid[rob_head + retire_count]) begin
+                           current_head != rob_tail && 
+                           rob_valid[current_head]) begin
                         retire_count = retire_count + 1;
+                        current_head = (current_head + 1) % ROB_SIZE;
                     end
                     
                     // Retire all at once (unroll in hardware)
                     if (retire_count > 0) begin
                         integer i;
+                        integer retire_pos;
+                        retire_pos = rob_head;
                         for (i = 0; i < retire_count; i = i + 1) begin
-                            rob_valid[rob_head + i] <= 1'b0;
+                            rob_valid[retire_pos] <= 1'b0;
+                            retire_pos = (retire_pos + 1) % ROB_SIZE;
                         end
-                        rob_head <= rob_head + retire_count;
+                        rob_head <= (rob_head + retire_count) % ROB_SIZE;  // Wrap-around
+                        if (CORE_ID == 0)
+                            $display("[%0t] [H-CORE#%0d] RETIRE: Retired %0d entries (head=%0d->%0d)", 
+                                    $time, CORE_ID, retire_count, rob_head, (rob_head + retire_count) % ROB_SIZE);
                         result_valid <= 1'b1;
                         complete <= 1'b1;
                     end

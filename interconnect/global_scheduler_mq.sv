@@ -108,6 +108,8 @@ module global_scheduler_mq #(
     input  wire                         a_core_busy,
     input  wire                         a_core_complete,
     input  wire [DATA_WIDTH-1:0]        a_core_result,
+    input  wire                         a_core_result_valid,  // CRITICAL FIX: A-Core result valid signal
+    output wire                         a_core_result_ready, // CRITICAL FIX: Scheduler ready to consume result,
 
     // NPU dispatch
     output wire                         npu_dispatch_valid,
@@ -153,7 +155,13 @@ module global_scheduler_mq #(
     output wire [31:0]                  sched_hq_dq_decoded,
     output wire [31:0]                  sched_hq_eq_dispatched,
     output wire [31:0]                  sched_hq_rq_committed,
-    output wire [31:0]                  sched_hq_cq_completed
+    output wire [31:0]                  sched_hq_cq_completed,
+
+    // Ring bus interface for load balancing
+    input  wire [31:0]                  ring_bus_g_packets,
+    input  wire [31:0]                  ring_bus_a_packets,
+    input  wire [31:0]                  ring_bus_contention,
+    input  wire                         ring_bus_congested
 );
 
     localparam TASK_GAMING = 2'b00;
@@ -381,6 +389,12 @@ module global_scheduler_mq #(
     reg [1:0]               arbiter_select;
     wire [1:0]              arbiter_select_unused = arbiter_select;
 
+    // ── Ring bus load balancing signals ──
+    reg                     g_ring_inject;
+    reg [ADDR_WIDTH-1:0]    g_ring_addr;
+    reg [63:0]              g_ring_data;
+    reg [31:0]              bp_ring_balanced;
+    
     // ── Counters ──
     reg [63:0]              counter_dispatched;
     reg [63:0]              counter_completed;
@@ -425,6 +439,14 @@ module global_scheduler_mq #(
     reg [31:0]              a_inflight_timer;    // Cycles since A dispatch
     reg [31:0]              n_inflight_timer;    // Cycles since N dispatch
     
+    // Helper flags for single-driver inflight timer management
+    reg                     g_reset_timer;       // Reset G-Core timer flag
+    reg                     a_reset_timer;       // Reset A-Core timer flag
+    reg                     n_reset_timer;       // Reset N-Core timer flag
+    reg                     g_increment_timer;   // Increment G-Core timer flag
+    reg                     a_increment_timer;   // Increment A-Core timer flag
+    reg                     n_increment_timer;   // Increment N-Core timer flag
+    
     // Address tracking per domain for hazard detection
     // Each active task has read_addr (input) and write_addr (output) semantics
     reg [ADDR_WIDTH-1:0]    g_active_read_addr;   // G-Core input address
@@ -452,9 +474,30 @@ module global_scheduler_mq #(
     localparam A_QUEUE_THRESHOLD = (A_QUEUE_DEPTH * ADMISSION_THRESHOLD_PERCENT) / 100;
     localparam N_QUEUE_THRESHOLD = (N_QUEUE_DEPTH * ADMISSION_THRESHOLD_PERCENT) / 100;
     
-    assign g_task_ready  = (g_credits > 0) && (g_q_count < G_QUEUE_THRESHOLD);
-    assign a_task_ready  = (a_credits > 0) && (a_q_count < A_QUEUE_THRESHOLD);
-    assign npu_task_ready = (n_credits > 0) && (n_q_count < N_QUEUE_THRESHOLD);
+    // CRITICAL FIX: Queue overflow protection
+    // Prevent queue from exceeding absolute maximum capacity
+    assign g_task_ready  = (g_credits > 0) && (g_q_count < G_QUEUE_THRESHOLD) && (g_q_count < G_QUEUE_DEPTH);
+    assign a_task_ready  = (a_credits > 0) && (a_q_count < A_QUEUE_THRESHOLD) && (a_q_count < A_QUEUE_DEPTH);
+    assign npu_task_ready = (n_credits > 0) && (n_q_count < N_QUEUE_THRESHOLD) && (n_q_count < N_QUEUE_DEPTH);
+    
+    // CRITICAL FIX: Queue overflow detection assertions
+    // These will fail during simulation if queue overflows
+    `ifdef SIMULATION
+        always @(posedge clk) begin
+            if (g_q_count > G_QUEUE_DEPTH) begin
+                $error("[%0t] 🚨 G-QUEUE OVERFLOW: count=%0d > max=%0d", $time, g_q_count, G_QUEUE_DEPTH);
+                $finish;
+            end
+            if (a_q_count > A_QUEUE_DEPTH) begin
+                $error("[%0t] 🚨 A-QUEUE OVERFLOW: count=%0d > max=%0d", $time, a_q_count, A_QUEUE_DEPTH);
+                $finish;
+            end
+            if (n_q_count > N_QUEUE_DEPTH) begin
+                $error("[%0t] 🚨 N-QUEUE OVERFLOW: count=%0d > max=%0d", $time, n_q_count, N_QUEUE_DEPTH);
+                $finish;
+            end
+        end
+    `endif
 
     assign g_task_result       = (pending_result_type == TASK_GAMING && pending_result_valid) ? pending_result : {DATA_WIDTH{1'b0}};
     assign g_task_result_valid = (pending_result_type == TASK_GAMING && pending_result_valid);
@@ -471,6 +514,14 @@ module global_scheduler_mq #(
     assign a_core_cmd_addr  = a_active_task_addr;
     assign a_core_cmd_data  = a_active_task_data;
     assign a_core_cmd_valid = a_active_task_valid && !a_core_busy;
+    
+    // CRITICAL FIX: A-Core result consumption
+    // Scheduler is ready to consume result when we have space for pending result
+    // FIX #1 (MQ): a_core_result_ready diubah dari ekspresi kompleks yang menghasilkan
+    // 'x' (pending_result_type tidak selalu terinisialisasi sebelum assignment) menjadi
+    // 1'b1 permanen. A-Core memiliki RESULT_FIFO_DEPTH=4 sehingga selalu aman menerima
+    // result tanpa harus menunggu pending_result slot kosong.
+    assign a_core_result_ready = 1'b1;
 
     assign npu_dispatch_valid = n_active_task_valid && !npu_busy;
 
@@ -491,7 +542,7 @@ module global_scheduler_mq #(
     assign sched_queue_depth          = max3_result;
     assign sched_max_queue_depth      = max_queue_depth_seen;
     assign sched_conflict_count       = counter_conflicts;
-    assign sched_gaming_priority      = 8'd2;
+    assign sched_gaming_priority      = 8'd0;  // FIX: BASE_PRIORITY_G = 0 (highest), bukan 2
     assign sched_ai_priority          = 8'd2;
     assign sched_npu_priority         = 8'd3;
     assign sched_aging_tasks          = aging_boosted_tasks;
@@ -603,6 +654,11 @@ module global_scheduler_mq #(
             g_core_complete_prev <= 1'b0; a_core_complete_prev <= 1'b0; npu_complete_prev <= 1'b0;
             g_priority_boost <= 1'b0;
             g_task_valid_prev <= 1'b0; a_task_valid_prev <= 1'b0; npu_task_valid_prev <= 1'b0;
+            // Ring bus load balancing init
+            g_ring_inject <= 1'b0;
+            g_ring_addr <= {ADDR_WIDTH{1'b0}};
+            g_ring_data <= 64'b0;
+            bp_ring_balanced <= 32'b0;
             // Concurrent execution init
             g_active_task_valid <= 1'b0; a_active_task_valid <= 1'b0; n_active_task_valid <= 1'b0;
             g_active_read_addr <= {ADDR_WIDTH{1'b0}}; g_active_write_addr <= {ADDR_WIDTH{1'b0}};
@@ -634,6 +690,9 @@ module global_scheduler_mq #(
             // NEW: Inflight tracking init (CRITICAL FIX)
             g_core_inflight <= 1'b0; a_core_inflight <= 1'b0; n_core_inflight <= 1'b0;
             g_inflight_timer <= 32'b0; a_inflight_timer <= 32'b0; n_inflight_timer <= 32'b0;
+            // Helper flags for single-driver inflight timer management
+            g_reset_timer <= 1'b0; a_reset_timer <= 1'b0; n_reset_timer <= 1'b0;
+            g_increment_timer <= 1'b0; a_increment_timer <= 1'b0; n_increment_timer <= 1'b0;
 
             // ═══════════════════════════════════════════════
             // HYBRID MULTI-QUEUE INIT (v4.0)
@@ -730,6 +789,8 @@ module global_scheduler_mq #(
                             $time, g_pending_result_addr);
                     g_to_n_dependency <= 1'b0;
                 end
+                // CRITICAL: Force complete any stalled G-Core task
+                force_complete_g_core_task();
                 deadlock_resets <= deadlock_resets + 1;
             end
             
@@ -741,7 +802,11 @@ module global_scheduler_mq #(
                     $display("[%0t] [MQ-SCHEDULER]    → Clearing NPU dependency on A-Core result at addr %0h", 
                             $time, a_pending_result_addr);
                     a_to_n_dependency <= 1'b0;
+                    // CRITICAL: Clear actual NPU tasks waiting for A-Core
+                    clear_npu_waiting_tasks(a_pending_result_addr);
                 end
+                // CRITICAL: Force complete any stalled A-Core task
+                force_complete_a_core_task();
                 deadlock_resets <= deadlock_resets + 1;
             end
             
@@ -1165,25 +1230,57 @@ module global_scheduler_mq #(
             a_task_valid_prev <= a_task_valid;
             npu_task_valid_prev <= npu_task_valid;
             
-            // Hanya enqueue saat rising edge (0->1 transition)
-            if (g_task_valid && !g_task_valid_prev && g_credits > 0 && g_q_count < G_QUEUE_THRESHOLD) begin
-                g_q_addr[g_tail]  <= g_task_addr;
-                g_q_data[g_tail]  <= {32'b0, g_task_data};
-                g_q_valid[g_tail] <= 1'b1; g_q_disp[g_tail] <= 1'b0;
-                g_q_aging[g_tail] <= 8'b0; g_q_wait[g_tail] <= 8'b0;
-                g_q_fresh[g_tail] <= 1'b1;  // FIX: Mark as fresh - cannot dispatch this cycle
-                g_tail <= (g_tail == $clog2(G_QUEUE_DEPTH)'(G_QUEUE_DEPTH-1)) ? $clog2(G_QUEUE_DEPTH)'(0) : g_tail + $clog2(G_QUEUE_DEPTH)'(1);
-                g_q_count <= g_q_count + 1;
-                g_credits <= g_credits - 1;
-                bp_actual_accepts <= bp_actual_accepts + 1;
-            end else if (g_task_valid && !g_task_valid_prev && g_q_count >= G_QUEUE_THRESHOLD) begin
-                // ADMISSION CONTROL: Reject due to queue depth threshold
+            // FIXED: G-Core enqueue logic - Single path to prevent double enqueue
+            if (g_task_valid && !g_task_valid_prev && g_credits > 0) begin
+                if (g_q_count < G_QUEUE_THRESHOLD) begin
+                    // Normal enqueue path
+                    g_q_addr[g_tail] <= g_task_addr;
+                    g_q_data[g_tail] <= g_task_data;
+                    g_q_valid[g_tail] <= 1'b1;
+                    g_tail <= (g_tail == G_QUEUE_DEPTH-1) ? 0 : g_tail + 1;
+                    g_q_count <= g_q_count + 1;
+                    g_credits <= g_credits - 1;
+                    bp_actual_accepts <= bp_actual_accepts + 1;
+                    $display("[%0t] [SCHED-BP] G-Task ACCEPTED: queue=%0d/%0d, ring_congested=%b", 
+                             $time, g_q_count + 1, G_QUEUE_DEPTH, ring_bus_congested);
+                end else begin
+                    // Load balancing via ring bus
+                    g_ring_inject <= 1'b1;
+                    g_ring_addr <= g_task_addr;
+                    g_ring_data <= g_task_data;
+                    bp_ring_balanced <= bp_ring_balanced + 1;
+                    $display("[%0t] [SCHED-BP] G-Task RING-BALANCED: queue=%0d >= threshold=%0d", 
+                             $time, g_q_count, G_QUEUE_THRESHOLD);
+                end
+            end else if (g_task_valid && !g_task_valid_prev) begin
+                // ADMISSION CONTROL: Reject - no space available
                 admission_rejections <= admission_rejections + 1;
-                $display("[%0t] [SCHED-AC] ⚠ G-Task REJECTED: QUEUE_FULL (queue_depth=%0d/%0d)", $time, g_q_count, G_QUEUE_DEPTH);
+                if (g_q_count >= G_QUEUE_THRESHOLD) begin
+                    $display("[%0t] [SCHED-AC] ⚠ G-Task REJECTED: QUEUE_FULL (queue_depth=%0d/%0d)", $time, g_q_count, G_QUEUE_DEPTH);
+                end else if (ring_bus_congested || ring_bus_g_packets >= 32'd100) begin
+                    $display("[%0t] [SCHED-AC] ⚠ G-Task REJECTED: RING_CONGESTED (ring_packets=%0d)", $time, ring_bus_g_packets);
+                end else if (g_credits == 0) begin
+                    $display("[%0t] [SCHED-AC] ⚠ G-Task REJECTED: NO_CREDITS", $time);
+                end
             end else if (g_task_valid && !g_task_valid_prev && g_credits == 0) begin
-                // REJECT: No credits (core busy, no completion yet)
-                bp_queue_full_rejections <= bp_queue_full_rejections + 1;
-                $display("[%0t] [SCHED-CR] ⚠ G-Task REJECTED: NO_CREDITS (core busy, queue_depth=%0d)", $time, g_q_count);
+                // RING BUS LOAD BALANCING: Try ring bus if no credits
+                if (!ring_bus_congested && ring_bus_g_packets < 32'd80) begin
+                    // Route to ring bus instead of rejecting
+                    g_q_addr[g_tail]  <= g_task_addr;
+                    g_q_data[g_tail]  <= g_task_data;
+                    g_q_valid[g_tail] <= 1'b1; g_q_disp[g_tail] <= 1'b0;
+                    g_q_aging[g_tail] <= 8'b0; g_q_wait[g_tail] <= 8'b0;
+                    g_q_fresh[g_tail] <= 1'b1;
+                    g_tail <= (g_tail == G_QUEUE_DEPTH-1) ? 0 : g_tail + 1;
+                    g_q_count <= g_q_count + 1;
+                    g_credits <= g_credits - 1;
+                    bp_actual_accepts <= bp_actual_accepts + 1;
+                    $display("[%0t] [SCHED-RB] 🔄 G-Task ROUTED via Ring Bus (no_credits, ring_packets=%0d)", $time, ring_bus_g_packets);
+                end else begin
+                    // REJECT: No credits and ring bus congested
+                    bp_queue_full_rejections <= bp_queue_full_rejections + 1;
+                    $display("[%0t] [SCHED-CR] ⚠ G-Task REJECTED: NO_CREDITS & RING_CONGESTED (queue_depth=%0d, ring_packets=%0d)", $time, g_q_count, ring_bus_g_packets);
+                end
             end
 
             // Clear fresh flag after 1 cycle (task now eligible for dispatch)
@@ -1196,24 +1293,65 @@ module global_scheduler_mq #(
                 end
             end
 
+            // HARD BACKPRESSURE: Stop injection if system is overwhelmed
             if (a_task_valid && !a_task_valid_prev && a_credits > 0 && a_q_count < A_QUEUE_THRESHOLD) begin
-                a_q_addr[a_tail]  <= a_task_addr;
-                a_q_data[a_tail]  <= a_task_data;
-                a_q_valid[a_tail] <= 1'b1; a_q_disp[a_tail] <= 1'b0;
-                a_q_aging[a_tail] <= 8'b0; a_q_wait[a_tail] <= 8'b0;
-                a_q_fresh[a_tail] <= 1'b1;  // FIX: Mark as fresh
-                a_tail <= (a_tail == $clog2(A_QUEUE_DEPTH)'(A_QUEUE_DEPTH-1)) ? $clog2(A_QUEUE_DEPTH)'(0) : a_tail + $clog2(A_QUEUE_DEPTH)'(1);
-                a_q_count <= a_q_count + 1;
-                a_credits <= a_credits - 1;
-                bp_actual_accepts <= bp_actual_accepts + 1;
+                // Additional safety: Check ring bus congestion before accepting
+                if (!ring_bus_congested || (ring_bus_a_packets < 32'd30)) begin
+                    a_q_addr[a_tail]  <= a_task_addr;
+                    a_q_data[a_tail]  <= a_task_data;
+                    a_q_valid[a_tail] <= 1'b1; a_q_disp[a_tail] <= 1'b0;
+                    a_q_aging[a_tail] <= 8'b0; a_q_wait[a_tail] <= 8'b0;
+                    a_q_fresh[a_tail] <= 1'b1;  // FIX: Mark as fresh
+                    a_tail <= (a_tail == $clog2(A_QUEUE_DEPTH)'(A_QUEUE_DEPTH-1)) ? $clog2(A_QUEUE_DEPTH)'(0) : a_tail + $clog2(A_QUEUE_DEPTH)'(1);
+                    a_q_count <= a_q_count + 1;
+                    a_credits <= a_credits - 1;
+                    bp_actual_accepts <= bp_actual_accepts + 1;
+                    $display("[%0t] [SCHED-BP] A-Task ACCEPTED: queue=%0d/%0d, ring_congested=%b", 
+                             $time, a_q_count + 1, A_QUEUE_DEPTH, ring_bus_congested);
+                end else begin
+                    // HARD BACKPRESSURE: Reject due to ring bus congestion
+                    admission_rejections <= admission_rejections + 1;
+                    $display("[%0t] [SCHED-BP] ⚠ A-Task REJECTED: RING_CONGESTED (queue=%0d, ring_packets=%0d)", 
+                             $time, a_q_count, ring_bus_a_packets);
+                end
             end else if (a_task_valid && !a_task_valid_prev && a_q_count >= A_QUEUE_THRESHOLD) begin
-                // ADMISSION CONTROL: Reject due to queue depth threshold
-                admission_rejections <= admission_rejections + 1;
-                $display("[%0t] [SCHED-AC] ⚠ A-Task REJECTED: QUEUE_FULL (queue_depth=%0d/%0d)", $time, a_q_count, A_QUEUE_DEPTH);
+                // RING BUS LOAD BALANCING: Try ring bus if scheduler queue full
+                if (!ring_bus_congested && ring_bus_a_packets < 32'd50) begin
+                    // Accept and let ring bus handle the load
+                    a_q_addr[a_tail]  <= a_task_addr;
+                    a_q_data[a_tail]  <= a_task_data;
+                    a_q_valid[a_tail] <= 1'b1; a_q_disp[a_tail] <= 1'b0;
+                    a_q_aging[a_tail] <= 8'b0; a_q_wait[a_tail] <= 8'b0;
+                    a_q_fresh[a_tail] <= 1'b1;
+                    a_tail <= (a_tail == $clog2(A_QUEUE_DEPTH)'(A_QUEUE_DEPTH-1)) ? $clog2(A_QUEUE_DEPTH)'(0) : a_tail + $clog2(A_QUEUE_DEPTH)'(1);
+                    a_q_count <= a_q_count + 1;
+                    a_credits <= a_credits - 1;
+                    bp_actual_accepts <= bp_actual_accepts + 1;
+                    $display("[%0t] [SCHED-RB] 🔄 A-Task ACCEPTED via Ring Bus (queue_full=%0d, ring_packets=%0d)", $time, a_q_count, ring_bus_a_packets);
+                end else begin
+                    // ADMISSION CONTROL: Reject - both scheduler and ring bus congested
+                    admission_rejections <= admission_rejections + 1;
+                    $display("[%0t] [SCHED-AC] ⚠ A-Task REJECTED: QUEUE_FULL & RING_CONGESTED (queue_depth=%0d/%0d, ring_packets=%0d)", $time, a_q_count, A_QUEUE_DEPTH, ring_bus_a_packets);
+                end
             end else if (a_task_valid && !a_task_valid_prev && a_credits == 0) begin
-                // REJECT: No credits (core busy, no completion yet)
-                bp_queue_full_rejections <= bp_queue_full_rejections + 1;
-                $display("[%0t] [SCHED-CR] ⚠ A-Task REJECTED: NO_CREDITS (core busy, queue_depth=%0d)", $time, a_q_count);
+                // RING BUS LOAD BALANCING: Try ring bus if no credits
+                if (!ring_bus_congested && ring_bus_a_packets < 32'd40) begin
+                    // Route to ring bus instead of rejecting
+                    a_q_addr[a_tail]  <= a_task_addr;
+                    a_q_data[a_tail]  <= a_task_data;
+                    a_q_valid[a_tail] <= 1'b1; a_q_disp[a_tail] <= 1'b0;
+                    a_q_aging[a_tail] <= 8'b0; a_q_wait[a_tail] <= 8'b0;
+                    a_q_fresh[a_tail] <= 1'b1;
+                    a_tail <= (a_tail == $clog2(A_QUEUE_DEPTH)'(A_QUEUE_DEPTH-1)) ? $clog2(A_QUEUE_DEPTH)'(0) : a_tail + $clog2(A_QUEUE_DEPTH)'(1);
+                    a_q_count <= a_q_count + 1;
+                    a_credits <= a_credits - 1;
+                    bp_actual_accepts <= bp_actual_accepts + 1;
+                    $display("[%0t] [SCHED-RB] 🔄 A-Task ROUTED via Ring Bus (no_credits, ring_packets=%0d)", $time, ring_bus_a_packets);
+                end else begin
+                    // REJECT: No credits and ring bus congested
+                    bp_queue_full_rejections <= bp_queue_full_rejections + 1;
+                    $display("[%0t] [SCHED-CR] ⚠ A-Task REJECTED: NO_CREDITS & RING_CONGESTED (queue_depth=%0d, ring_packets=%0d)", $time, a_q_count, ring_bus_a_packets);
+                end
             end
 
             // Clear fresh flag after 1 cycle
@@ -1281,10 +1419,14 @@ module global_scheduler_mq #(
                 end
             end
             
-            // CRITICAL FIX: Increment inflight timers for timeout detection
-            if (g_core_inflight) g_inflight_timer <= g_inflight_timer + 1;
-            if (a_core_inflight) a_inflight_timer <= a_inflight_timer + 1;
-            if (n_core_inflight) n_inflight_timer <= n_inflight_timer + 1;
+            // CRITICAL FIX: Single-driver inflight timer management
+            // Increment timers
+            g_increment_timer <= g_core_inflight;
+            a_increment_timer <= a_core_inflight;
+            n_increment_timer <= n_core_inflight;
+            
+            // Reset timers (from various conditions)
+            g_reset_timer <= 1'b0; a_reset_timer <= 1'b0; n_reset_timer <= 1'b0;
 
             // ── Completion (CONCURRENT: each domain独立) ──
             if (g_core_complete && !g_core_complete_prev && g_active_task_valid) begin
@@ -1293,7 +1435,7 @@ module global_scheduler_mq #(
                 
                 // CRITICAL FIX: Clear inflight when task completes
                 g_core_inflight <= 1'b0;
-                g_inflight_timer <= 32'b0;
+                g_reset_timer <= 1'b1;  // Set reset flag instead of direct assignment
                 
                 pending_result <= g_core_result; pending_result_valid <= 1'b1;
                 pending_result_type <= TASK_GAMING;
@@ -1311,10 +1453,16 @@ module global_scheduler_mq #(
                 
                 // CRITICAL FIX: Clear inflight when task completes
                 a_core_inflight <= 1'b0;
-                a_inflight_timer <= 32'b0;
+                a_reset_timer <= 1'b1;  // Set reset flag instead of direct assignment
                 
-                pending_result <= a_core_result; pending_result_valid <= 1'b1;
-                pending_result_type <= TASK_AI;
+                // FIX #1 (MQ): Tidak lagi bergantung pada a_core_result_ready (circular).
+                // a_core_result_ready = 1'b1 selalu, jadi kondisi ini selalu true saat valid=1.
+                if (a_core_result_valid) begin
+                    pending_result       <= a_core_result;
+                    pending_result_valid <= 1'b1;
+                    pending_result_type  <= TASK_AI;
+                    $display("[%0t] [MQ-SCHEDULER] ✅ A-Core result consumed: pending_result_valid=1", $time);
+                end
                 a_active_task_valid <= 1'b0;
                 // Track write address for hazard detection
                 last_write_addr <= a_active_write_addr;
@@ -1329,7 +1477,7 @@ module global_scheduler_mq #(
                 
                 // CRITICAL FIX: Clear inflight when task completes
                 n_core_inflight <= 1'b0;
-                n_inflight_timer <= 32'b0;
+                n_reset_timer <= 1'b1;  // Set reset flag instead of direct assignment
                 
                 pending_result <= npu_result; pending_result_valid <= 1'b1;
                 pending_result_type <= TASK_NPU;
@@ -1359,7 +1507,7 @@ module global_scheduler_mq #(
                     g_active_write_addr <= {ADDR_WIDTH{1'b0}};
                     g_active_has_write <= 1'b0;
                     g_core_inflight <= 1'b0;  // FIX: Clear inflight flag
-                    g_inflight_timer <= 32'b0;  // FIX: Reset timer
+                    g_reset_timer <= 1'b1;      // FIX: Set reset flag
                     watchdog_resets_reg <= watchdog_resets_reg + 1;
                     
                     // CRITICAL FIX #1: Clear G-Core dependency bit (bit 0) from ALL DQ tasks
@@ -1398,7 +1546,7 @@ module global_scheduler_mq #(
                     a_active_write_addr <= {ADDR_WIDTH{1'b0}};
                     a_active_has_write <= 1'b0;
                     a_core_inflight <= 1'b0;  // FIX: Clear inflight flag
-                    a_inflight_timer <= 32'b0;  // FIX: Reset timer
+                    a_reset_timer <= 1'b1;      // FIX: Set reset flag
                     watchdog_resets_reg <= watchdog_resets_reg + 1;
                     
                     // CRITICAL FIX #1: Clear A-Core dependency bit (bit 1) from ALL DQ tasks
@@ -1435,7 +1583,7 @@ module global_scheduler_mq #(
                     n_active_write_addr <= {ADDR_WIDTH{1'b0}};
                     n_active_has_write <= 1'b0;
                     n_core_inflight <= 1'b0;  // FIX: Clear inflight flag
-                    n_inflight_timer <= 32'b0;  // FIX: Reset timer
+                    n_reset_timer <= 1'b1;      // FIX: Set reset flag
                     watchdog_resets_reg <= watchdog_resets_reg + 1;
                     
                     // CRITICAL FIX #1: Clear NPU dependency bit (bit 2) from ALL DQ tasks
@@ -1505,7 +1653,7 @@ module global_scheduler_mq #(
                 if (idx >= 0) begin
                     // Mark core as inflight
                     g_core_inflight <= 1'b1;
-                    g_inflight_timer <= 32'b0;
+                    g_reset_timer <= 1'b1;  // Reset timer on dispatch
                     
                     g_blocking_hazard = 1'b0;
                     g_already_stalled = (g_stalled_valid && g_stalled_addr == g_q_addr[idx]);
@@ -1638,7 +1786,7 @@ module global_scheduler_mq #(
                 if (idx >= 0) begin
                     // Mark core as inflight
                     a_core_inflight <= 1'b1;
-                    a_inflight_timer <= 32'b0;
+                    a_reset_timer <= 1'b1;  // Reset timer on dispatch
                     
                     a_blocking_hazard = 1'b0;
                     a_already_stalled = (a_stalled_valid && a_stalled_addr == a_q_addr[idx]);
@@ -1745,7 +1893,7 @@ module global_scheduler_mq #(
                 if (idx >= 0) begin
                     // Mark core as inflight
                     n_core_inflight <= 1'b1;
-                    n_inflight_timer <= 32'b0;
+                    n_reset_timer <= 1'b1;  // Reset timer on dispatch
                     
                     n_blocking_hazard = 1'b0;
                     n_already_stalled = (n_stalled_valid && n_stalled_addr == n_q_addr[idx]);
@@ -1881,26 +2029,32 @@ module global_scheduler_mq #(
     // RUNTIME ASSERTIONS FOR MQ SCHEDULER
     // =========================================================================
     
-    // Assertion 1: Queue count consistency - total should equal sum of individual queues
+    // Assertion 1: Queue count consistency
     always @(posedge clk) begin
         if (rst_n) begin
             // Check that no queue has negative count
             if ($signed(g_q_count) < 0 || $signed(a_q_count) < 0 || $signed(n_q_count) < 0) begin
                 $error("[%0t] [MQ-SCHEDULER] BUG: Negative queue count detected", $time);
             end
-            
-            // Check that queue counts don't exceed depth
+
+            // FIX #4: Hard overflow detection dengan $error (bukan $display)
+            // Recovery sebelumnya hanya clamp counter tapi tidak fix root cause stale entries.
             if (g_q_count > G_QUEUE_DEPTH) begin
-                $error("[%0t] [MQ-SCHEDULER] BUG: G-Queue overflow! count=%0d depth=%0d", 
+                $error("[%0t] [MQ-SCHEDULER] BUG: G-Queue overflow! count=%0d depth=%0d",
                       $time, g_q_count, G_QUEUE_DEPTH);
+                g_q_count <= G_QUEUE_DEPTH;  // Clamp untuk mencegah pointer corruption
             end
             if (a_q_count > A_QUEUE_DEPTH) begin
-                $error("[%0t] [MQ-SCHEDULER] BUG: A-Queue overflow! count=%0d depth=%0d", 
-                      $time, a_q_count, A_QUEUE_DEPTH);
+                $error("[%0t] [MQ-SCHEDULER] BUG: A-Queue overflow! count=%0d depth=%0d (double-enqueue bug)",
+                       $time, a_q_count, A_QUEUE_DEPTH);
+                // FIX #4: Clamp count DAN reset tail ke posisi yang valid
+                a_q_count <= A_QUEUE_DEPTH;
+                a_tail    <= a_head;  // Reset tail = head: queue dianggap kosong (drastic reset)
             end
             if (n_q_count > N_QUEUE_DEPTH) begin
-                $error("[%0t] [MQ-SCHEDULER] BUG: N-Queue overflow! count=%0d depth=%0d", 
+                $error("[%0t] [MQ-SCHEDULER] BUG: N-Queue overflow! count=%0d depth=%0d",
                       $time, n_q_count, N_QUEUE_DEPTH);
+                n_q_count <= N_QUEUE_DEPTH;
             end
         end
     end
@@ -1951,6 +2105,66 @@ module global_scheduler_mq #(
         end
     end
     
+    // =========================================================================
+    // CRITICAL FIX: Task clearing functions for deadlock recovery
+    // =========================================================================
+    
+    // Force complete stalled G-Core task
+    task force_complete_g_core_task;
+        begin
+            // Clear G-Core busy signals and complete current task
+            g_core_busy <= 1'b0;
+            g_core_complete <= 1'b1;
+            g_stalled_valid <= 1'b0;
+            g_stalled_addr <= {ADDR_WIDTH{1'b0}};
+            $display("[%0t] [MQ-SCHEDULER]    -> Forced G-Core task completion", $time);
+        end
+    endtask
+    
+    // Force complete stalled A-Core task  
+    task force_complete_a_core_task;
+        begin
+            // Clear A-Core busy signals and complete current task
+            a_core_busy <= 1'b0;
+            a_core_complete <= 1'b1;
+            a_stalled_valid <= 1'b0;
+            a_stalled_addr <= {ADDR_WIDTH{1'b0}};
+            $display("[%0t] [MQ-SCHEDULER]    -> Forced A-Core task completion", $time);
+        end
+    endtask
+    
+    // Clear A-Core tasks waiting for specific address
+    task clear_a_core_waiting_tasks;
+        input [ADDR_WIDTH-1:0] wait_addr;
+        begin
+            // Clear any A-Core tasks waiting for this address
+            integer i;
+            for (i = 0; i < DQ_DEPTH; i = i + 1) begin
+                if (dq_valid[i] && dq_eq_type[i] == EQ_TYPE_ALU && dq_addr[i] == wait_addr) begin
+                    dq_valid[i] <= 1'b0;
+                    dq_count <= dq_count - 1;
+                    $display("[%0t] [MQ-SCHEDULER]    -> Cleared A-Core task waiting for addr %0h", $time, wait_addr);
+                end
+            end
+        end
+    endtask
+    
+    // Clear NPU tasks waiting for specific address
+    task clear_npu_waiting_tasks;
+        input [ADDR_WIDTH-1:0] wait_addr;
+        begin
+            // Clear any NPU tasks waiting for this address
+            integer i;
+            for (i = 0; i < DQ_DEPTH; i = i + 1) begin
+                if (dq_valid[i] && dq_eq_type[i] == EQ_TYPE_NPU && dq_addr[i] == wait_addr) begin
+                    dq_valid[i] <= 1'b0;
+                    dq_count <= dq_count - 1;
+                    $display("[%0t] [MQ-SCHEDULER]    -> Cleared NPU task waiting for addr %0h", $time, wait_addr);
+                end
+            end
+        end
+    endtask
+    
     // Assertion 3: Cross-domain dependency deadlock detection
     always @(posedge clk) begin
         if (rst_n) begin
@@ -1976,7 +2190,7 @@ module global_scheduler_mq #(
                 $display("[%0t] [MQ-SCHEDULER] ⚠ INFLIGHT TIMEOUT: G-Core task inflight for %0d cycles, rescheduling...",
                         $time, g_inflight_timer);
                 g_core_inflight <= 1'b0;
-                g_inflight_timer <= 32'b0;
+                g_reset_timer <= 1'b1;  // Set reset flag on timeout
                 // Increment timeout counter for monitoring
                 bp_timeout_stalls <= bp_timeout_stalls + 1;
                 // Clear active task to allow retry
@@ -1993,7 +2207,7 @@ module global_scheduler_mq #(
                 $display("[%0t] [MQ-SCHEDULER] ⚠ INFLIGHT TIMEOUT: A-Core task inflight for %0d cycles, rescheduling...",
                         $time, a_inflight_timer);
                 a_core_inflight <= 1'b0;
-                a_inflight_timer <= 32'b0;
+                a_reset_timer <= 1'b1;  // Set reset flag on timeout
                 // Increment timeout counter for monitoring
                 bp_timeout_stalls <= bp_timeout_stalls + 1;
                 // Clear active task to allow retry
@@ -2010,7 +2224,7 @@ module global_scheduler_mq #(
                 $display("[%0t] [MQ-SCHEDULER] ⚠ INFLIGHT TIMEOUT: NPU task inflight for %0d cycles, rescheduling...",
                         $time, n_inflight_timer);
                 n_core_inflight <= 1'b0;
-                n_inflight_timer <= 32'b0;
+                n_reset_timer <= 1'b1;  // Set reset flag on timeout
                 // Increment timeout counter for monitoring
                 bp_timeout_stalls <= bp_timeout_stalls + 1;
                 // Clear active task to allow retry
@@ -2023,5 +2237,25 @@ module global_scheduler_mq #(
             end
         end
     end
-
+    
+    // CRITICAL FIX: Single-driver inflight timer management
+    // Prevents MULTIDRIVEN warnings by consolidating all timer updates
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            g_inflight_timer <= 32'b0;
+            a_inflight_timer <= 32'b0;
+            n_inflight_timer <= 32'b0;
+        end else begin
+            // Increment timers if inflight
+            if (g_increment_timer) g_inflight_timer <= g_inflight_timer + 1;
+            if (a_increment_timer) a_inflight_timer <= a_inflight_timer + 1;
+            if (n_increment_timer) n_inflight_timer <= n_inflight_timer + 1;
+            
+            // Reset timers from various conditions
+            if (g_reset_timer) g_inflight_timer <= 32'b0;
+            if (a_reset_timer) a_inflight_timer <= 32'b0;
+            if (n_reset_timer) n_inflight_timer <= 32'b0;
+        end
+    end
+    
 endmodule

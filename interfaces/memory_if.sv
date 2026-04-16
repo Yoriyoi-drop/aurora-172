@@ -50,15 +50,7 @@ interface memory_if #(
         input  valid
     );
     
-    // Clocking block untuk testbench
-    clocking cb @(posedge clk);
-        input  addr;
-        input  rd_en;
-        input  wr_en;
-        input  wr_data;
-        output rd_data;
-        output ready;
-        input  valid;
-    endclocking
+    // Note: Clocking block removed for Icarus Verilog compatibility
+    // Use direct signal connections in testbench instead
     
 endinterface

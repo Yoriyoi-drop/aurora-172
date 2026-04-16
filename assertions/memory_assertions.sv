@@ -41,142 +41,178 @@ module memory_assertions #(
 );
 
     // ========================================================================
-    // Helper sequences
+    // Helper functions (Icarus Verilog Compatible)
     // ========================================================================
     
-    // Read request sequence
-    sequence read_req_seq;
-        mem_rd_en && !mem_wr_en;
-    endsequence
+    // Read request detection
+    function read_req_seq;
+        input mem_rd_en, mem_wr_en;
+        begin
+            read_req_seq = mem_rd_en && !mem_wr_en;
+        end
+    endfunction
     
-    // Write request sequence
-    sequence write_req_seq;
-        !mem_rd_en && mem_wr_en;
-    endsequence
+    // Write request detection
+    function write_req_seq;
+        input mem_rd_en, mem_wr_en;
+        begin
+            write_req_seq = !mem_rd_en && mem_wr_en;
+        end
+    endfunction
     
-    // Cache hit sequence
-    sequence cache_hit_seq;
-        l1_hit || l2_hit || l3_hit;
-    endsequence
+    // Cache hit detection
+    function cache_hit_seq;
+        input l1_hit, l2_hit, l3_hit;
+        begin
+            cache_hit_seq = l1_hit || l2_hit || l3_hit;
+        end
+    endfunction
     
     // ========================================================================
-    // Protocol Assertions
+    // Protocol Assertions (Icarus Verilog Compatible)
     // ========================================================================
     
     // A1: Read and write should not be asserted simultaneously
-    property no_simultaneous_rw;
-        @(posedge clk) 
-        disable iff (!rst_n)
-        !(mem_rd_en && mem_wr_en);
-    endproperty
+    always @(posedge clk) begin
+        if (rst_n && (mem_rd_en && mem_wr_en)) begin
+            $error("[%0t] ASSERTION VIOLATION: Simultaneous read and write", $time);
+        end
+    end
     
-    assert property (no_simultaneous_rw) 
-        else $error("[%0t] ASSERTION VIOLATION: Simultaneous read and write", $time);
+    // A2: Memory ready timeout detection
+    integer ready_timeout_counter;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            ready_timeout_counter <= 0;
+        end else begin
+            if (mem_rd_en || mem_wr_en) begin
+                if (ready_timeout_counter < 10) begin
+                    ready_timeout_counter <= ready_timeout_counter + 1;
+                end else if (!mem_ready) begin
+                    $error("[%0t] ASSERTION VIOLATION: Memory not ready within 10 cycles", $time);
+                end
+            end else begin
+                ready_timeout_counter <= 0;
+            end
+        end
+    end
     
-    // A2: Memory ready should be asserted when request is active
-    property ready_on_request;
-        @(posedge clk)
-        disable iff (!rst_n)
-        (mem_rd_en || mem_wr_en) |-> ##[1:10] mem_ready;
-    endproperty
-    
-    assert property (ready_on_request)
-        else $error("[%0t] ASSERTION VIOLATION: Memory not ready within 10 cycles", $time);
-    
-    // A3: Cache hit should result in faster response
-    property cache_hit_faster;
-        @(posedge clk)
-        disable iff (!rst_n)
-        read_req_seq && cache_hit_seq |-> ##[1:3] mem_ready;
-    endproperty
-    
-    assert property (cache_hit_faster)
-        else $error("[%0t] ASSERTION VIOLATION: Cache hit response too slow", $time);
-    
-    // ========================================================================
-    // Cache Coherency Assertions
-    // ========================================================================
-    
-    // C1: MESI state transitions should be valid
-    property valid_mesi_transition;
-        @(posedge clk)
-        disable iff (!rst_n)
-        $stable(cache_state) || 
-        (cache_state == 2'b00 && $past(cache_state) != 2'b00) || // Invalid transition
-        (cache_state == 2'b01 && $past(cache_state) != 2'b01) || // Shared transition
-        (cache_state == 2'b10 && $past(cache_state) != 2'b10) || // Exclusive transition
-        (cache_state == 2'b11 && $past(cache_state) != 2'b11);   // Modified transition
-    endproperty
-    
-    assert property (valid_mesi_transition)
-        else $error("[%0t] ASSERTION VIOLATION: Invalid MESI state transition", $time);
-    
-    // C2: Write should only happen in Modified or Exclusive state
-    property write_only_m_e;
-        @(posedge clk)
-        disable iff (!rst_n)
-        write_req_seq |-> (cache_state == 2'b11 || cache_state == 2'b10);
-    endproperty
-    
-    assert property (write_only_m_e)
-        else $error("[%0t] ASSERTION VIOLATION: Write in non-M/E state", $time);
+    // A3: Cache hit response time monitoring
+    integer cache_hit_timeout_counter;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            cache_hit_timeout_counter <= 0;
+        end else begin
+            if (read_req_seq(mem_rd_en, mem_wr_en) && cache_hit_seq(l1_hit, l2_hit, l3_hit)) begin
+                if (cache_hit_timeout_counter < 3) begin
+                    cache_hit_timeout_counter <= cache_hit_timeout_counter + 1;
+                end else if (!mem_ready) begin
+                    $error("[%0t] ASSERTION VIOLATION: Cache hit response too slow", $time);
+                end
+            end else begin
+                cache_hit_timeout_counter <= 0;
+            end
+        end
+    end
     
     // ========================================================================
-    // Performance Assertions
+    // Cache Coherency Assertions (Icarus Verilog Compatible)
     // ========================================================================
     
-    // P1: Cache hit rate should be reasonable (>80%)
-    property cache_hit_rate;
-        @(posedge clk)
-        disable iff (!rst_n)
-        (total_requests > 32'd100) |-> 
-        ((cache_hits * 32'd100) / total_requests >= 32'd80);
-    endproperty
+    // C1: MESI state transition validation
+    reg [1:0] cache_state_prev;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            cache_state_prev <= 2'b00;
+        end else begin
+            // Check for invalid transitions
+            if (cache_state != cache_state_prev) begin
+                case (cache_state)
+                    2'b00: if (cache_state_prev != 2'b00) $display("[%0t] [ASSERTION] MESI: Invalid -> Invalid", $time);
+                    2'b01: if (cache_state_prev != 2'b01) $display("[%0t] [ASSERTION] MESI: Transition to Shared", $time);
+                    2'b10: if (cache_state_prev != 2'b10) $display("[%0t] [ASSERTION] MESI: Transition to Exclusive", $time);
+                    2'b11: if (cache_state_prev != 2'b11) $display("[%0t] [ASSERTION] MESI: Transition to Modified", $time);
+                endcase
+            end
+            cache_state_prev <= cache_state;
+        end
+    end
     
-    assert property (cache_hit_rate)
-        else $warning("[%0t] PERFORMANCE WARNING: Cache hit rate below 80%%", $time);
-    
-    // P2: No request should take more than 50 cycles
-    property max_latency;
-        @(posedge clk)
-        disable iff (!rst_n)
-        read_req_seq |-> ##[1:50] mem_ready;
-    endproperty
-    
-    assert property (max_latency)
-        else $error("[%0t] PERFORMANCE VIOLATION: Request latency > 50 cycles", $time);
+    // C2: Write state validation
+    always @(posedge clk) begin
+        if (rst_n && write_req_seq(mem_rd_en, mem_wr_en)) begin
+            if (!(cache_state == 2'b11 || cache_state == 2'b10)) begin
+                $error("[%0t] ASSERTION VIOLATION: Write in non-M/E state", $time);
+            end
+        end
+    end
     
     // ========================================================================
-    // Cover Properties for Verification Coverage
+    // Performance Assertions (Icarus Verilog Compatible)
     // ========================================================================
     
-    // Cover all cache states
-    property cover_mesi_states;
-        @(posedge clk)
-        disable iff (!rst_n)
-        cache_state == 2'b00 || cache_state == 2'b01 || 
-        cache_state == 2'b10 || cache_state == 2'b11;
-    endproperty
+    // P1: Cache hit rate monitoring
+    always @(posedge clk) begin
+        if (rst_n && total_requests > 32'd100) begin
+            if (((cache_hits * 32'd100) / total_requests) < 32'd80) begin
+                $warning("[%0t] PERFORMANCE WARNING: Cache hit rate below 80%%", $time);
+            end
+        end
+    end
     
-    cover property (cover_mesi_states);
+    // P2: Maximum latency monitoring
+    integer max_latency_counter;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            max_latency_counter <= 0;
+        end else begin
+            if (read_req_seq(mem_rd_en, mem_wr_en)) begin
+                if (max_latency_counter < 50) begin
+                    max_latency_counter <= max_latency_counter + 1;
+                end else if (!mem_ready) begin
+                    $error("[%0t] PERFORMANCE VIOLATION: Request latency > 50 cycles", $time);
+                end
+            end else begin
+                max_latency_counter <= 0;
+            end
+        end
+    end
     
-    // Cover read and write operations
-    property cover_operations;
-        @(posedge clk)
-        disable iff (!rst_n)
-        read_req_seq || write_req_seq;
-    endproperty
+    // ========================================================================
+    // Coverage Monitoring (Icarus Verilog Compatible)
+    // ========================================================================
     
-    cover property (cover_operations);
+    // Coverage counters
+    reg [31:0] cover_mesi_states_count[0:3];
+    reg [31:0] cover_read_ops, cover_write_ops;
+    reg [31:0] cover_hit_ops, cover_miss_ops;
     
-    // Cover cache hit and miss scenarios
-    property cover_cache_scenarios;
-        @(posedge clk)
-        disable iff (!rst_n)
-        cache_hit_seq || (!cache_hit_seq);
-    endproperty
-    
-    cover property (cover_cache_scenarios);
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            cover_mesi_states_count[0] <= 0;
+            cover_mesi_states_count[1] <= 0;
+            cover_mesi_states_count[2] <= 0;
+            cover_mesi_states_count[3] <= 0;
+            cover_read_ops <= 0;
+            cover_write_ops <= 0;
+            cover_hit_ops <= 0;
+            cover_miss_ops <= 0;
+        end else begin
+            // Cover MESI states
+            if (cache_state == 2'b00) cover_mesi_states_count[0] <= cover_mesi_states_count[0] + 1;
+            if (cache_state == 2'b01) cover_mesi_states_count[1] <= cover_mesi_states_count[1] + 1;
+            if (cache_state == 2'b10) cover_mesi_states_count[2] <= cover_mesi_states_count[2] + 1;
+            if (cache_state == 2'b11) cover_mesi_states_count[3] <= cover_mesi_states_count[3] + 1;
+            
+            // Cover operations
+            if (read_req_seq(mem_rd_en, mem_wr_en)) cover_read_ops <= cover_read_ops + 1;
+            if (write_req_seq(mem_rd_en, mem_wr_en)) cover_write_ops <= cover_write_ops + 1;
+            
+            // Cover cache scenarios
+            if (cache_hit_seq(l1_hit, l2_hit, l3_hit)) cover_hit_ops <= cover_hit_ops + 1;
+            if (!cache_hit_seq(l1_hit, l2_hit, l3_hit) && (mem_rd_en || mem_wr_en)) cover_miss_ops <= cover_miss_ops + 1;
+        end
+    end
     
     // ========================================================================
     // Assertion Statistics
