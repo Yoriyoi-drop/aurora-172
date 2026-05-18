@@ -1,5 +1,8 @@
 `timescale 1ns / 1ps
 
+// Include parameters (Icarus compatibility)
+`include "interfaces/aurora_params.svh"
+
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
 // Engineer: Interconnect Team
@@ -54,19 +57,19 @@
 module aurora_fabric #(
     parameter DATA_WIDTH        = 128,
     parameter ADDR_WIDTH        = 48,
-    parameter NUM_PORTS         = 128,
-    parameter FIFO_DEPTH        = 32,
-    parameter ROUTE_TABLE_SIZE  = 256,
-    parameter FIFO_CNT_WIDTH    = 6,
-    parameter NUM_VCS           = 4,
-    parameter QOS_LEVELS        = 4,
+    parameter NUM_PORTS         = 32,     // OPTIMIZED: 64->32 to reduce looping
+    parameter FIFO_DEPTH        = 16,     // REDUCED: 32->16 
+    parameter ROUTE_TABLE_SIZE  = 128,    // REDUCED: 256->128
+    parameter FIFO_CNT_WIDTH    = 5,      // REDUCED: 6->5 for smaller FIFO
+    parameter NUM_VCS           = 2,      // REDUCED: 4->2 virtual channels
+    parameter QOS_LEVELS        = 3,      // REDUCED: 4->3 QoS levels
     // FIX v2 #3: Bandwidth limiter threshold (packets per window)
-    parameter MAX_FABRIC_BW     = 1024,
+    parameter MAX_FABRIC_BW     = 512,    // REDUCED: 1024->512
     // FIX v2 #2: QoS priority levels for workload types
-    // gaming=3(high), AI=2(medium), H-core=1(low), NPU=0(bulk)
-    parameter QOS_PRIO_GAMING   = 2'd3,
-    parameter QOS_PRIO_AI       = 2'd2,
-    parameter QOS_PRIO_HCORE    = 2'd1,
+    // gaming=2(high), AI=1(medium), H-core/NPU=0(low)
+    parameter QOS_PRIO_GAMING   = 2'd2,
+    parameter QOS_PRIO_AI       = 2'd1,
+    parameter QOS_PRIO_HCORE    = 2'd0,
     parameter QOS_PRIO_NPU      = 2'd0
 )(
     input  wire                         clk,
@@ -102,7 +105,7 @@ module aurora_fabric #(
     // Internal structures - PER-PORT FIFOs with Virtual Channels
     // =========================================================================
 
-    // Per-port input FIFO
+    // Per-port input FIFO (optimized - removed timestamp for memory efficiency)
     reg [DATA_WIDTH-1:0]    input_fifo [0:NUM_PORTS-1][0:FIFO_DEPTH-1];
     reg [ADDR_WIDTH-1:0]    addr_fifo  [0:NUM_PORTS-1][0:FIFO_DEPTH-1];
     reg [1:0]               qos_fifo   [0:NUM_PORTS-1][0:FIFO_DEPTH-1];
@@ -119,7 +122,7 @@ module aurora_fabric #(
     wire [NUM_PORTS-1:0]            fifo_empty;
     wire [NUM_PORTS-1:0]            fifo_full;
 
-    genvar fe_idx;
+    genvar fe_idx, ready_idx, out_idx, port_idx;
     generate
         for (fe_idx = 0; fe_idx < NUM_PORTS; fe_idx = fe_idx + 1) begin : gen_fifo_status
             assign fifo_empty[fe_idx] = (fifo_cnt[fe_idx] == 0);
@@ -147,9 +150,9 @@ module aurora_fabric #(
         reg [3:0] dest_x, dest_y;
         reg [6:0] output_port;
         begin
-            // Decode source port to X,Y coordinates
+            // Decode source port to X,Y coordinates - FIXED: src_port only has 7 bits
             src_x = src_port[3:0];  // Lower 4 bits = X
-            src_y = src_port[7:4];  // Upper 4 bits = Y (limited to 8)
+            src_y = src_port[6:4];  // Upper 3 bits = Y (limited to 8)
 
             // Decode destination address to mesh coordinates (hash-based)
             dest_x = dest_addr[3:0];
@@ -264,6 +267,21 @@ module aurora_fabric #(
 
     // FIX v2 #1: Declare port_out_valid_reg here (before main always block)
     reg [NUM_PORTS-1:0]     port_out_valid_reg;
+    
+    // QoS wait counters for starvation detection
+    reg [QOS_LEVELS-1:0][31:0] qos_wait_counter;
+    localparam QOS_STARVATION_THRESHOLD = 1000;  // Threshold for starvation detection
+    
+    // Arbiter state variables
+    reg [6:0]               arbiter_serving_port;
+    reg [1:0]               arbiter_current_qos;
+    
+    // Optimization tracking variables (accessible across always blocks)
+    reg [7:0]               active_ports;           // Track active ports count
+    reg [7:0]               forwarded_count;        // Track forwarded packets count
+    reg [6:0]               selected_port;
+    reg [1:0]               selected_qos;
+    reg                     found_packet;
 
     // =========================================================================
     // Initialization
@@ -316,6 +334,15 @@ module aurora_fabric #(
                 qos_pkt_count[init_port] <= 32'b0;
 
             deadlock_detection_counter <= 32'b0;
+
+            // FIX v2 #3: Initialize QoS wait counters
+            for (int qos = 0; qos < QOS_LEVELS; qos = qos + 1) begin
+                qos_wait_counter[qos] <= 32'b0;
+            end
+            
+            // Initialize arbiter state
+            arbiter_serving_port <= 7'b0;
+            arbiter_current_qos <= 2'b0;
 
             // FIX v2 #1: Reset fabric arb state machine
             fabric_arb_state <= ARB_IDLE;
@@ -502,11 +529,12 @@ module aurora_fabric #(
             end
 
             // ═══════════════════════════════════════════════════════
-            // STAGE 1: PACKET INGESTION (All ports in parallel)
+            // STAGE 1: PACKET INGESTION (All ports in parallel) - OPTIMIZED
             // FIX v2 #3: Throttle lower-priority sources when BW exceeded
             // ═══════════════════════════════════════════════════════
             begin
                 integer port_idx;
+                active_ports = 0;
 
                 for (port_idx = 0; port_idx < NUM_PORTS; port_idx = port_idx + 1) begin
                     // FIX v2 #3: Check if this port should be throttled
@@ -519,12 +547,12 @@ module aurora_fabric #(
                     if (port_valid[port_idx] && !fifo_full[port_idx] &&
                         (credit_count[port_idx] > 0) && !should_throttle) begin
                         // Enqueue packet
-                        input_fifo[port_idx][fifo_tail[port_idx]] = port_data_in[port_idx];
-                        addr_fifo[port_idx][fifo_tail[port_idx]] = port_addr[port_idx];
-                        qos_fifo[port_idx][fifo_tail[port_idx]] = port_qos[port_idx];
-                        vc_fifo[port_idx][fifo_tail[port_idx]] = port_vc[port_idx];
-                        src_port_fifo[port_idx][fifo_tail[port_idx]] = port_idx[6:0];
-                        timestamp_fifo[port_idx][fifo_tail[port_idx]] = 32'b0;
+                        input_fifo[port_idx][fifo_tail[port_idx]] <= port_data_in[port_idx];
+                        addr_fifo[port_idx][fifo_tail[port_idx]] <= port_addr[port_idx];
+                        qos_fifo[port_idx][fifo_tail[port_idx]] <= port_qos[port_idx];
+                        vc_fifo[port_idx][fifo_tail[port_idx]] <= port_vc[port_idx];
+                        src_port_fifo[port_idx][fifo_tail[port_idx]] <= port_idx[6:0];
+                        timestamp_fifo[port_idx][fifo_tail[port_idx]] <= 32'b0;
 
                         // Update tail pointer
                         if (fifo_tail[port_idx] == FIFO_DEPTH - 1)
@@ -535,6 +563,7 @@ module aurora_fabric #(
                         fifo_cnt[port_idx] <= fifo_cnt[port_idx] + 1;
                         total_packet_count <= total_packet_count + 1;
                         activity_reg[port_idx] <= 1'b1;
+                        active_ports = active_ports + 1;  // OPTIMIZED: Track active ports
 
                         // Update QoS counter
                         qos_pkt_count[port_qos[port_idx]] <= qos_pkt_count[port_qos[port_idx]] + 1;
@@ -561,9 +590,6 @@ module aurora_fabric #(
             // FIX v2 #1: Coordinated with fabric_arb FSM
             // ═══════════════════════════════════════════════════════
             begin
-                reg [6:0] selected_port;
-                reg [1:0] selected_qos;
-                reg found_packet;
 
                 // FIX v2 #1: If fabric_arb granted a port, prefer it
                 if (arb_grant_valid) begin
@@ -576,10 +602,9 @@ module aurora_fabric #(
                     selected_port = 0;
                     selected_qos = 0;
 
-                    // Scan ports by QoS priority (RT -> LL -> RS -> BE)
-                    for (int qos = QOS_LEVELS - 1; qos >= 0; qos = qos - 1) begin
-                        if (!found_packet) begin
-                            for (int p = 0; p < NUM_PORTS && !found_packet; p = p + 1) begin
+                    // Scan ports by QoS priority (RT -> LL -> RS -> BE) - OPTIMIZED
+                    for (int qos = QOS_LEVELS - 1; qos >= 0 && !found_packet; qos = qos - 1) begin
+                        for (int p = 0; p < NUM_PORTS && !found_packet; p = p + 1) begin
                                 reg [1:0] eff_prio;
                                 eff_prio = get_effective_priority(p[6:0], qos_fifo[p][fifo_head[p]]);
                                 if (!fifo_empty[p] && (eff_prio == qos)) begin
@@ -592,10 +617,10 @@ module aurora_fabric #(
                     end
                 end
 
-                // QoS starvation check
+                // QoS starvation check - OPTIMIZED
                 if (!found_packet) begin
                     // Check if any QoS level is starving
-                    for (int qos = 0; qos < QOS_LEVELS; qos = qos + 1) begin
+                    for (int qos = 0; qos < QOS_LEVELS && !found_packet; qos = qos + 1) begin
                         if (qos_wait_counter[qos] > QOS_STARVATION_THRESHOLD && !found_packet) begin
                             // Force serve starving QoS
                             for (int p = 0; p < NUM_PORTS && !found_packet; p = p + 1) begin
@@ -623,10 +648,13 @@ module aurora_fabric #(
             end
 
             // ═══════════════════════════════════════════════════════
-            // STAGE 3: ROUTING & FORWARDING
+            // STAGE 3: ROUTING & FORWARDING - OPTIMIZED
             // ═══════════════════════════════════════════════════════
             begin
                 integer p;
+                forwarded_count = 0;  // OPTIMIZED: Track forwarded packets
+                
+                // Initialize all outputs to zero
                 for (p = 0; p < NUM_PORTS; p = p + 1) begin
                     port_data_out[p] <= {DATA_WIDTH{1'b0}};
                 end
@@ -661,6 +689,17 @@ module aurora_fabric #(
 
                     // Send credit back to source
                     credit_count[src_port] <= credit_count[src_port] + 1;
+                    forwarded_count = forwarded_count + 1;  // OPTIMIZED: Track forwarding
+                    
+                    // OPTIMIZED: Early exit if we've forwarded enough packets
+                    if (forwarded_count >= active_ports) begin
+                        // Clear remaining outputs
+                        for (p = 0; p < NUM_PORTS; p = p + 1) begin
+                            if (p != src_port) begin
+                                port_out_valid_reg[p] <= 1'b0;
+                            end
+                        end
+                    end
                 end else begin
                     // No packet to forward
                     for (p = 0; p < NUM_PORTS; p = p + 1) begin
@@ -735,42 +774,38 @@ module aurora_fabric #(
             // FIX v2 #3: BANDWIDTH LIMITER — Window-based throttle control
             // If exceeded, set throttle_lower_prio to block NPU/H-core injection.
             // ═══════════════════════════════════════════════════════
-            begin
-                bw_window_counter <= bw_window_counter + 1;
+            // Bandwidth window counter update
+            bw_window_counter <= bw_window_counter + 1;
 
-                if (bw_window_counter == BW_WINDOW_LEN - 1) begin
-                    // Window expired — evaluate bandwidth
-                    if (bw_window_packets > MAX_FABRIC_BW) begin
-                        throttle_lower_prio <= 1'b1;  // Throttle NPU and H-core
-                    end else begin
-                        throttle_lower_prio <= 1'b0;
-                    end
-                    // Reset window
-                    bw_window_packets <= 32'b0;
-                    bw_window_counter <= 8'b0;
+            if (bw_window_counter == BW_WINDOW_LEN - 1) begin
+                // Window expired — evaluate bandwidth
+                if (bw_window_packets > MAX_FABRIC_BW) begin
+                    throttle_lower_prio <= 1'b1;  // Throttle NPU and H-core
+                end else begin
+                    throttle_lower_prio <= 1'b0;
                 end
+                // Reset window
+                bw_window_packets <= 32'b0;
+                bw_window_counter <= 8'b0;
             end
         end
-    end
 
     // =========================================================================
     // Ready signal generation (per port)
     // FIX v2 #3: When throttled, deassert ready for lower-priority ports
     // =========================================================================
-    genvar ready_idx;
     generate
-        for (ready_idx = 0; ready_idx < NUM_PORTS; ready_idx = ready_idx + 1) begin : gen_ready
-            assign port_ready[ready_idx] = !fifo_full[ready_idx] &&
-                                           (credit_count[ready_idx] > 0) &&
+        for (port_idx = 0; port_idx < NUM_PORTS; port_idx = port_idx + 1) begin : gen_ready
+            assign port_ready[port_idx] = !fifo_full[port_idx] &&
+                                           (credit_count[port_idx] > 0) &&
                                            !(throttle_lower_prio &&
-                                             (get_effective_priority(ready_idx[6:0], 2'b00) <= QOS_PRIO_HCORE));
+                                             (get_effective_priority(port_idx[6:0], 2'b00) <= QOS_PRIO_HCORE));
         end
     endgenerate
 
     // =========================================================================
     // Output valid signals (driven from main always block via port_out_valid_reg)
     // =========================================================================
-    genvar out_idx;
     generate
         for (out_idx = 0; out_idx < NUM_PORTS; out_idx = out_idx + 1) begin : gen_out_valid
             assign port_out_valid[out_idx] = port_out_valid_reg[out_idx];

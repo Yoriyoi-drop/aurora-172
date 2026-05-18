@@ -2,6 +2,10 @@
 
 // verilator lint_off WIDTHEXPAND
 
+// Include parameters (Icarus compatibility)
+`include "interfaces/aurora_params.svh"
+`include "interfaces/aurora_error_codes.svh"
+
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
 // Engineer: System Architecture Team
@@ -18,17 +22,18 @@
 
 module h_core #(
     parameter CORE_ID       = 0,
-    parameter DATA_WIDTH    = 64,
-    parameter ADDR_WIDTH    = 48,
-    parameter ROB_SIZE      = 64,
+    // Use standardized parameters from aurora_global_pkg
+    parameter DATA_WIDTH    = AURORA_DATA_WIDTH,   // From package
+    parameter ADDR_WIDTH    = AURORA_ADDR_WIDTH,   // From package
+    parameter ROB_SIZE      = 16,    // OPTIMIZED: smaller ROB
 
-    // Pipeline depth parameters
-    parameter H_PIPE_ALU    = 4,
-    parameter H_PIPE_MUL    = 6,
-    parameter H_PIPE_DIV    = 12,
-    parameter H_PIPE_LOAD   = 8,
-    parameter H_PIPE_STORE  = 6,
-    parameter H_PIPE_BRANCH = 5
+    // Simplified pipeline latencies from params
+    parameter H_PIPE_ALU    = AURORA_H_PIPE_ALU,    // From params
+    parameter H_PIPE_MUL    = AURORA_H_PIPE_MUL,    // From params
+    parameter H_PIPE_DIV    = AURORA_H_PIPE_DIV,    // From params
+    parameter H_PIPE_LOAD   = AURORA_H_PIPE_LOAD,   // From params
+    parameter H_PIPE_STORE  = AURORA_H_PIPE_STORE,  // From params
+    parameter H_PIPE_BRANCH = AURORA_H_PIPE_BRANCH  // From params
 )(
     input  wire                         clk,
     input  wire                         rst_n,
@@ -85,6 +90,9 @@ module h_core #(
     reg [DATA_WIDTH-1:0]    saved_cmd_data;
     reg [7:0]               saved_opcode;
 
+    // Timeout protection
+    integer                 retire_timeout;
+
     localparam IDLE         = 3'b000;
     localparam FETCH        = 3'b001;
     localparam DECODE       = 3'b010;
@@ -107,8 +115,8 @@ module h_core #(
     localparam OP_STORE     = 8'h09;
     localparam OP_BRANCH    = 8'h0A;
 
-    // Error codes
-    localparam ERR_ILLEGAL_OPCODE = 8'h01;
+    // Error codes - using standardized definitions from aurora_error_codes.svh
+    // No local error codes needed - use ERR_ILLEGAL_OPCODE from include file
 
     // =========================================================================
     // Main pipeline
@@ -135,13 +143,34 @@ module h_core #(
             h_exec_counter      <= 16'h0;
             h_exec_target_cycles <= 16'h0;
 
-            for (int i = 0; i < 32; i++)
-                register_file[i] <= {DATA_WIDTH{1'b0}};
-            for (int i = 0; i < ROB_SIZE; i++) begin
-                rob_valid[i] <= 1'b0;
-                rob_data[i] <= {DATA_WIDTH{1'b0}};
-                rob_addr[i] <= {ADDR_WIDTH{1'b0}};
-            end
+            // DEADLOCK FIX: Use explicit assignments instead of for-loop in always block
+            // Initialize register file (32 entries)
+            register_file[0] <= {DATA_WIDTH{1'b0}}; register_file[1] <= {DATA_WIDTH{1'b0}}; register_file[2] <= {DATA_WIDTH{1'b0}}; register_file[3] <= {DATA_WIDTH{1'b0}};
+            register_file[4] <= {DATA_WIDTH{1'b0}}; register_file[5] <= {DATA_WIDTH{1'b0}}; register_file[6] <= {DATA_WIDTH{1'b0}}; register_file[7] <= {DATA_WIDTH{1'b0}};
+            register_file[8] <= {DATA_WIDTH{1'b0}}; register_file[9] <= {DATA_WIDTH{1'b0}}; register_file[10] <= {DATA_WIDTH{1'b0}}; register_file[11] <= {DATA_WIDTH{1'b0}};
+            register_file[12] <= {DATA_WIDTH{1'b0}}; register_file[13] <= {DATA_WIDTH{1'b0}}; register_file[14] <= {DATA_WIDTH{1'b0}}; register_file[15] <= {DATA_WIDTH{1'b0}};
+            register_file[16] <= {DATA_WIDTH{1'b0}}; register_file[17] <= {DATA_WIDTH{1'b0}}; register_file[18] <= {DATA_WIDTH{1'b0}}; register_file[19] <= {DATA_WIDTH{1'b0}};
+            register_file[20] <= {DATA_WIDTH{1'b0}}; register_file[21] <= {DATA_WIDTH{1'b0}}; register_file[22] <= {DATA_WIDTH{1'b0}}; register_file[23] <= {DATA_WIDTH{1'b0}};
+            register_file[24] <= {DATA_WIDTH{1'b0}}; register_file[25] <= {DATA_WIDTH{1'b0}}; register_file[26] <= {DATA_WIDTH{1'b0}}; register_file[27] <= {DATA_WIDTH{1'b0}};
+            register_file[28] <= {DATA_WIDTH{1'b0}}; register_file[29] <= {DATA_WIDTH{1'b0}}; register_file[30] <= {DATA_WIDTH{1'b0}}; register_file[31] <= {DATA_WIDTH{1'b0}};
+            
+            // Initialize ROB (16 entries)
+            rob_valid[0] <= 1'b0; rob_data[0] <= {DATA_WIDTH{1'b0}}; rob_addr[0] <= {ADDR_WIDTH{1'b0}};
+            rob_valid[1] <= 1'b0; rob_data[1] <= {DATA_WIDTH{1'b0}}; rob_addr[1] <= {ADDR_WIDTH{1'b0}};
+            rob_valid[2] <= 1'b0; rob_data[2] <= {DATA_WIDTH{1'b0}}; rob_addr[2] <= {ADDR_WIDTH{1'b0}};
+            rob_valid[3] <= 1'b0; rob_data[3] <= {DATA_WIDTH{1'b0}}; rob_addr[3] <= {ADDR_WIDTH{1'b0}};
+            rob_valid[4] <= 1'b0; rob_data[4] <= {DATA_WIDTH{1'b0}}; rob_addr[4] <= {ADDR_WIDTH{1'b0}};
+            rob_valid[5] <= 1'b0; rob_data[5] <= {DATA_WIDTH{1'b0}}; rob_addr[5] <= {ADDR_WIDTH{1'b0}};
+            rob_valid[6] <= 1'b0; rob_data[6] <= {DATA_WIDTH{1'b0}}; rob_addr[6] <= {ADDR_WIDTH{1'b0}};
+            rob_valid[7] <= 1'b0; rob_data[7] <= {DATA_WIDTH{1'b0}}; rob_addr[7] <= {ADDR_WIDTH{1'b0}};
+            rob_valid[8] <= 1'b0; rob_data[8] <= {DATA_WIDTH{1'b0}}; rob_addr[8] <= {ADDR_WIDTH{1'b0}};
+            rob_valid[9] <= 1'b0; rob_data[9] <= {DATA_WIDTH{1'b0}}; rob_addr[9] <= {ADDR_WIDTH{1'b0}};
+            rob_valid[10] <= 1'b0; rob_data[10] <= {DATA_WIDTH{1'b0}}; rob_addr[10] <= {ADDR_WIDTH{1'b0}};
+            rob_valid[11] <= 1'b0; rob_data[11] <= {DATA_WIDTH{1'b0}}; rob_addr[11] <= {ADDR_WIDTH{1'b0}};
+            rob_valid[12] <= 1'b0; rob_data[12] <= {DATA_WIDTH{1'b0}}; rob_addr[12] <= {ADDR_WIDTH{1'b0}};
+            rob_valid[13] <= 1'b0; rob_data[13] <= {DATA_WIDTH{1'b0}}; rob_addr[13] <= {ADDR_WIDTH{1'b0}};
+            rob_valid[14] <= 1'b0; rob_data[14] <= {DATA_WIDTH{1'b0}}; rob_addr[14] <= {ADDR_WIDTH{1'b0}};
+            rob_valid[15] <= 1'b0; rob_data[15] <= {DATA_WIDTH{1'b0}}; rob_addr[15] <= {ADDR_WIDTH{1'b0}};
         end else begin
             error_valid <= 1'b0;
             complete <= 1'b0;
@@ -232,12 +261,13 @@ module h_core #(
                 DECODE: begin
                     // CRITICAL FIX: Enhanced ROB overflow protection
                     // Use proper circular buffer arithmetic to handle wrap-around
-                    localparam ROB_SIZE_MINUS_1 = ROB_SIZE - 1;
-                    wire [5:0] rob_used = (rob_tail >= rob_head) ? 
-                                        (rob_tail - rob_head) : 
-                                        (rob_tail + ROB_SIZE - rob_head);
+                    // FIXED: replaced localparam with local var (localparam illegal in procedural block)
+                    reg [5:0] rob_used;
+                    rob_used = (rob_tail >= rob_head) ? 
+                               (rob_tail - rob_head) : 
+                               (rob_tail + ROB_SIZE - rob_head);
                     
-                    if (rob_used < ROB_SIZE_MINUS_1) begin
+                    if (rob_used < ROB_SIZE - 1) begin
                         // ROB has space - accept new instruction
                         busy <= 1'b1;
                         rob_addr[rob_tail] <= saved_cmd_addr;
@@ -287,6 +317,8 @@ module h_core #(
                                 pipeline_state <= WRITEBACK;
                             end
                             OP_BRANCH: begin
+                                // FIXED: Don't let alu_result go stale — set to saved_cmd_addr
+                                alu_result <= saved_cmd_addr;
                                 pipeline_state <= WRITEBACK;
                             end
                             default: alu_result <= register_file[saved_cmd_data[11:7]];
@@ -321,8 +353,10 @@ module h_core #(
 
                 WRITEBACK: begin
                     fabric_wr_en <= 1'b0;
-                    // FIX v2: Write to destination register (rd from ROB entry)
-                    register_file[rob_data[rob_head][21:17]] <= alu_result;
+                    // FIXED: Only write register for non-STORE ops (STORE writes memory, not reg)
+                    if (saved_opcode != OP_STORE) begin
+                        register_file[rob_data[rob_head][21:17]] <= alu_result;
+                    end
                     result <= alu_result;
                     pipeline_state <= RETIRE;
                 end
@@ -331,16 +365,30 @@ module h_core #(
                     // CRITICAL FIX: Enhanced retirement with proper wrap-around
                     // Use combinational logic to find how many we can retire
                     integer retire_count;
-                    retire_count = 0;
                     integer current_head;
+                    retire_count = 0;
                     current_head = rob_head;
                     
                     // Count consecutive valid entries from head (with wrap-around)
+                    // CRITICAL FIX: Add timeout protection to prevent infinite loop
+                    retire_timeout = 0;
                     while (retire_count < ROB_SIZE && 
                            current_head != rob_tail && 
-                           rob_valid[current_head]) begin
+                           rob_valid[current_head] &&
+                           retire_timeout < ROB_SIZE) begin
                         retire_count = retire_count + 1;
                         current_head = (current_head + 1) % ROB_SIZE;
+                        retire_timeout = retire_timeout + 1;
+                    end
+                    
+                    // CRITICAL FIX: Force retirement if timeout detected
+                    if (retire_timeout >= ROB_SIZE) begin
+                        $display("[%0t] [H-CORE#%0d] WARNING: ROB retirement timeout - forcing retirement", $time, CORE_ID);
+                        // Force retire at least one entry to prevent deadlock
+                        if (rob_valid[rob_head]) begin
+                            retire_count = 1;
+                            rob_valid[rob_head] = 1'b0;
+                        end
                     end
                     
                     // Retire all at once (unroll in hardware)
@@ -349,7 +397,7 @@ module h_core #(
                         integer retire_pos;
                         retire_pos = rob_head;
                         for (i = 0; i < retire_count; i = i + 1) begin
-                            rob_valid[retire_pos] <= 1'b0;
+                            rob_valid[retire_pos] = 1'b0;
                             retire_pos = (retire_pos + 1) % ROB_SIZE;
                         end
                         rob_head <= (rob_head + retire_count) % ROB_SIZE;  // Wrap-around

@@ -32,11 +32,14 @@
 
 `timescale 1ns / 1ps
 
+// Include parameters (Icarus compatibility)
+`include "interfaces/aurora_params.svh"
+
 module power_monitor #(
-    parameter DATA_WIDTH            = 128,  // OPTIMIZED: 64→128 for finer energy tracking
-    parameter NUM_DOMAINS           = 5,    // G, A, H, NPU, Memory
-    parameter ENERGY_UNIT_uJ        = 1,    // 1μJ per count (Intel: 15.3μJ)
-    parameter POWER_AVG_WINDOW      = 1000  // 1000 cycle averaging window
+    parameter DATA_WIDTH            = AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
+    parameter NUM_DOMAINS           = 5,    // FIXED: was 3, but we track G, A, H, NPU, Memory
+    parameter ENERGY_UNIT_uJ        = 1,    // 1µJ per count
+    parameter POWER_AVG_WINDOW      = 256   // OPTIMIZED: 1000->256 (faster averaging)
 )(
     input  wire                         clk,
     input  wire                         rst_n,

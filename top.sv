@@ -3,6 +3,9 @@
 // verilator lint_off DECLFILENAME
 // verilator lint_off PINCONNECTEMPTY
 
+// Include parameters (Icarus compatibility)
+`include "interfaces/aurora_params.svh"
+
 // ========================================================================
 // AURORA Interfaces and Assertions
 // Note: Files are included via iv_compile.f file list
@@ -25,10 +28,10 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module aurora_172_top #(
-    parameter DATA_WIDTH        = 64,
-    parameter ADDR_WIDTH        = 48,
-    parameter INST_WIDTH        = 512,   // UPGRADED: 256→512 for wider instruction fetch & data path
-    parameter NUM_G_CORES       = 16,
+    parameter DATA_WIDTH        = AURORA_DATA_WIDTH,   // FIX: Use standard parameter
+    parameter ADDR_WIDTH        = AURORA_ADDR_WIDTH,   // FIX: Use standard parameter
+    parameter INST_WIDTH        = AURORA_INST_WIDTH,   // FIX: Use standard parameter
+    parameter NUM_G_CORES       = AURORA_NUM_G_CORES,   // FIX: Use standard parameter
     parameter NUM_H_CORES       = 32,
     parameter NUM_A_CORES       = 64,
     parameter NUM_NPU_CLUSTERS  = 8,
@@ -257,15 +260,20 @@ module aurora_172_top #(
 
     // Internal signals - H-Core interface
     wire [NUM_H_CORES-1:0]              h_core_busy;
+    wire [NUM_H_CORES-1:0]              h_core_busy_internal;
     wire [NUM_H_CORES-1:0]              h_core_complete;
 
     // Internal signals - A-Core interface
     wire [NUM_A_CORES-1:0]              a_core_busy_internal;
     wire [NUM_A_CORES-1:0]              a_core_complete;
     wire [DATA_WIDTH*NUM_A_CORES-1:0]   a_core_result;
+    wire [NUM_A_CORES-1:0]              a_core_result_valid;
+    wire [NUM_A_CORES-1:0]              a_core_cmd_ready;
+    wire                                a_core_result_ready_int;
     
     // Internal signals - NPU interface
     wire [NUM_NPU_CLUSTERS-1:0]         npu_busy;
+    wire [NUM_NPU_CLUSTERS-1:0]         npu_busy_internal;
     wire [NUM_NPU_CLUSTERS-1:0]         npu_complete;
     wire [DATA_WIDTH*NUM_NPU_CLUSTERS-1:0] npu_result;
     
@@ -281,6 +289,8 @@ module aurora_172_top #(
     wire [CACHE_LINE_WIDTH-1:0]         fabric_rd_data;
     wire [CACHE_LINE_WIDTH-1:0]         fabric_wr_data;
     wire                                fabric_ready;
+    // Separate fabric signals for A-Core to avoid multiple drivers
+    wire [CACHE_LINE_WIDTH-1:0]         a_core_fabric_addr;
 
     // ─────────────────────────────────────────────────────────────
     // Cache Hierarchy signals (L1 → L2 → Memory Fabric) - 512-BIT BUS
@@ -622,6 +632,20 @@ module aurora_172_top #(
     wire [7:0]                  g0_error_code;    // NEW: Error code
     wire                        g0_error_valid;   // NEW: Error valid pulse
 
+    // G-Core scheduler control signals (MOVED UP)
+    reg [3:0] g_core_rr_index;  // Round-robin pointer
+    reg g_dispatch_active;           // Dispatch is active (only asserted for 1 cycle)
+
+    // Missing control wires (DECLARED BEFORE USE)
+    wire mq_a_core_result_ready;
+    wire [31:0] mq_sched_hazard_raw;
+    wire [31:0] mq_sched_hazard_war;
+    wire [31:0] mq_sched_hazard_waw;
+    wire [31:0] cg_packets;
+    wire [31:0] ca_packets;
+    wire [31:0] ring_cw_pkt_cnt;
+    wire [31:0] ring_ccw_pkt_cnt;
+
     // G-Core #1 (parallel instance for throughput)
     wire [ADDR_WIDTH-1:0]       g1_cmd_addr;
     wire [31:0]                 g1_cmd_data;
@@ -646,7 +670,7 @@ module aurora_172_top #(
         // COMPLETE FIX: Only receives command if selected AND on first dispatch cycle
         .cmd_addr(sched_g_core_cmd_addr),
         .cmd_data(sched_g_core_cmd_data),
-        .cmd_valid((g_core_rr_index == 0) && !g0_busy && sched_g_core_cmd_valid && g_dispatch_active),
+        .cmd_valid((g_core_selected_idx == 0) && g_core_selected_valid),
         .cmd_ready(sched_g_core_cmd_ready),
         .result(g0_result),
         .result_valid(g0_complete),
@@ -705,21 +729,18 @@ module aurora_172_top #(
         .fabric_ready()
     );
 
-    // Load Balancer: G1 DISABLED (G0-only mode)
-    // Reason: Dual-core load balancing requires redesign with edge-triggered dispatch
-    // to prevent both cores receiving same command when sched_g_core_cmd_valid is held >1 cycle
+    // Load Balancer: G1 ENABLED with edge-triggered dispatch
+    // FIX: Edge-triggered dispatch latch prevents both cores receiving same command
+    // when sched_g_core_cmd_valid is held >1 cycle
     //
-    // Current issue: sched_g_core_cmd_valid stays high for 2+ cycles
-    // - Cycle 1: G0 accepts, busy updates (registered)
-    // - Cycle 2: G0_busy=1 visible -> G1 dispatches SAME command (race condition)
+    // Solution: g_dispatch_active signal fires only on rising edge of sched_g_core_cmd_valid
+    // and stays low until sched_g_core_cmd_valid goes low again
     //
-    // Fix requires: Edge-triggered dispatch latch that fires only on first cycle
-    // For now: G0 handles all workload efficiently (no performance bottleneck observed)
+    // G-Core selection logic (line 784) now uses g_dispatch_active to ensure
+    // only one dispatch occurs per command, preventing race condition
     //
-    // Load Balancer: G1 - signals assigned at line ~592 with RR selector
-    // No assignment here to prevent multiple drivers
-    
-    // G1 ready comes from G-Core module (line ~380)
+    // Load Balancer: G1 - signals assigned at line ~944 with RR selector
+    // G1 ready comes from G-Core module (line ~708)
 
     // A-Core result: Direct route ke testbench (bypass scheduler)
     // Karena A-Core command sudah direct-connect (MUX), result juga harus langsung
@@ -756,18 +777,20 @@ module aurora_172_top #(
             g_core_selected_idx <= 0;
         end else begin
             // Find next available core using round-robin
-            if (sched_g_core_cmd_valid && !g_core_selected_valid) begin
+            // FIX: Use g_dispatch_active to prevent multi-cycle race condition
+            if (sched_g_core_cmd_valid && !g_core_selected_valid && g_dispatch_active) begin
                 integer found_core;
                 found_core = -1;
-                
+
                 // Search for available core starting from current index
                 for (int i = 0; i < NUM_G_CORES && found_core == -1; i++) begin
-                    int candidate = (g_core_rr_index + i) % NUM_G_CORES;
+                    integer candidate;
+                    candidate = (g_core_rr_index + i) % NUM_G_CORES;
                     if (!g_core_busy_internal[candidate]) begin
                         found_core = candidate;
                     end
                 end
-                
+
                 if (found_core != -1) begin
                     g_core_selected_addr <= sched_g_core_cmd_addr;
                     g_core_selected_data <= sched_g_core_cmd_data;
@@ -847,14 +870,14 @@ module aurora_172_top #(
     //
     // SOLUTION: Dispatch latch fires ONLY on first cycle, then locks out until cmd_valid deasserts
 
-    reg [3:0] g_core_rr_index;  // Round-robin pointer
+    // g_core_rr_index moved higher up
     reg [3:0] g_core_last_selected;  // Last selected core (for uop_cache and prefetcher)
 
     // EDGE-TRIGGERED DISPATCH LATCH
     // Fires only on rising edge of sched_g_core_cmd_valid
     // Stays low until sched_g_core_cmd_valid goes low again
     reg g_dispatch_latched;          // Has dispatch been latched?
-    reg g_dispatch_active;           // Dispatch is active (only asserted for 1 cycle)
+    // g_dispatch_active moved higher up
     reg sched_g_cmd_valid_prev;      // Previous cycle valid signal
 
     wire g_dispatch_edge = sched_g_core_cmd_valid && !sched_g_cmd_valid_prev;  // Rising edge
@@ -906,6 +929,10 @@ module aurora_172_top #(
     end
 
     // FIXED: G0 and G1 use same arbitration logic as array
+    wire [ADDR_WIDTH-1:0] g0_cmd_addr;
+    wire [DATA_WIDTH-1:0] g0_cmd_data;
+    wire g0_cmd_valid;
+    
     assign g0_cmd_addr = g_core_selected_addr;
     assign g0_cmd_data = g_core_selected_data;
     assign g0_cmd_valid = (g_core_selected_idx == 0) && g_core_selected_valid;
@@ -936,6 +963,12 @@ module aurora_172_top #(
     wire [NUM_H_CORES-1:0]              h_core_error_valid;
     wire [DATA_WIDTH*NUM_H_CORES-1:0]   h_core_result;
     wire [NUM_H_CORES-1:0]              h_core_result_valid;
+
+    // A-Core L2 interface signals (additional to existing declarations)
+    wire [NUM_A_CORES*48-1:0]            a_core_l2_addr;
+    wire [NUM_A_CORES*512-1:0]           a_core_l2_wr_data;
+    wire [NUM_A_CORES-1:0]               a_core_l2_rd_en;
+    wire [NUM_A_CORES-1:0]               a_core_l2_wr_en;
 
     // H-Core command broadcast bus
     wire [ADDR_WIDTH-1:0]   h_core_broadcast_addr;
@@ -1053,7 +1086,7 @@ module aurora_172_top #(
                 .error_code(h_core_error_code[h_idx*8+:8]),
                 .error_valid(h_core_error_valid[h_idx]),
                 // Memory fabric interface
-                .fabric_addr(fabric_addr),
+                .fabric_addr(fabric_addr[47:0]),  // Use only 48 bits from 512-bit fabric_addr
                 .fabric_rd_en(fabric_rd_en),
                 .fabric_wr_en(fabric_wr_en),
                 .fabric_rd_data(fabric_rd_data),
@@ -1170,28 +1203,28 @@ module aurora_172_top #(
     
     // DEBUG: Monitor result consumption
     always @(posedge clk) begin
-        if (a0_result_valid && !a0_result_consumed) begin
-            $display("[%0t] [A-RSLT] RESULT_READY: data=0x%h, waiting_for_consumer", $time, a0_result);
-        end
-        if (a_core_result_ready_int && a0_result_consumed == 1'b0) begin
-            $display("[%0t] [A-RSLT] RESULT_CONSUMED: data=0x%h", $time, a0_result_latched);
-        end
+        // if (a0_result_valid && !a0_result_consumed) begin
+        //     $display("[%0t] [A-RSLT] RESULT_READY: data=0x%h, waiting_for_consumer", $time, a0_result);
+        // end
+        // if (a_core_result_ready_int && a0_result_consumed == 1'b0) begin
+        //     $display("[%0t] [A-RSLT] RESULT_CONSUMED: data=0x%h", $time, a0_result_latched);
+        // end
         
         // CRITICAL: Monitor ring bus response generation
-        if (u_ring_bus_a.node_resp_valid[2]) begin
-            $display("[%0t] [RING-BUS] RESPONSE_GENERATED: Node 2, valid=1, ready=%b", $time, u_ring_bus_a.node_resp_ready[2]);
-        end
-        if (u_ring_bus_a.node_resp_valid[0]) begin
-            $display("[%0t] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=%b", $time, u_ring_bus_a.node_resp_ready[0]);
-        end
+        // if (u_ring_bus_a.node_resp_valid[2]) begin
+        //     $display("[%0t] [RING-BUS] RESPONSE_GENERATED: Node 2, valid=1, ready=%b", $time, u_ring_bus_a.node_resp_ready[2]);
+        // end
+        // if (u_ring_bus_a.node_resp_valid[0]) begin
+        //     $display("[%0t] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=%b", $time, u_ring_bus_a.node_resp_ready[0]);
+        // end
     end
 
     // DEBUG: Monitor A-Core result path (CRITICAL for backlog fix)
     always @(posedge clk) begin
-        if (a0_result_valid) begin
-            $display("[%0t] [A-RSLT] 📤 RESULT_VALID: data=0x%h, ready=%b, consumer_ready=%b", 
-                     $time, a0_result, a0_result_ready, a_core_result_ready_int);
-        end
+        // if (a0_result_valid) begin
+        //     $display("[%0t] [A-RSLT] 📤 RESULT_VALID: data=0x%h, ready=%b, consumer_ready=%b", 
+        //              $time, a0_result, a0_result_ready, a_core_result_ready_int);
+        // end
         if (a0_complete && !a0_complete_prev) begin
             $display("[%0t] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=%b, fifo_drain=%b", 
                      $time, a0_result_ready, a_core_result_ready_int);
@@ -1240,81 +1273,129 @@ module aurora_172_top #(
     // FIX: a0_result_ready driven setelah a_core_result_ready_int ter-declare di baris 1344
     assign a0_result_ready = a_core_result_ready_int;
     
-    // A-Core #1 to #63 (workers) - DISABLED: Using A-Core #0 only for now
-    // TODO: Implement proper single-target dispatch instead of broadcast
-    wire [NUM_A_CORES-1:0] a_core_cmd_ready;
-
-    // A-Core command broadcast bus - DISABLED to prevent chaos
-    // Previously this broadcast to ALL cores causing all of them to process same command
-    wire [ADDR_WIDTH-1:0]   a_core_broadcast_addr;
-    wire [63:0]             a_core_broadcast_data;
-    wire                    a_core_broadcast_valid;
-    wire [NUM_A_CORES-1:0]  a_core_cmd_accepted;  // Which core accepted the command
-
+    // A-Core #1 to #63 (workers) - PROPER SINGLE-TARGET DISPATCH
+    wire [NUM_A_CORES-1:0] a_core_cmd_accepted;  // Which core accepted the command
+    
+    // A-Core command arbitration - FIXED: No multi-driver
+    reg [ADDR_WIDTH-1:0]    a_core_selected_addr;
+    reg [63:0]              a_core_selected_data;
+    reg                     a_core_selected_valid;
+    reg [$clog2(NUM_A_CORES)-1:0] a_core_selected_idx;
+    reg                     found_core;
+    
+    // Command selection logic - only ONE core gets command
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            a_core_selected_addr <= {ADDR_WIDTH{1'b0}};
+            a_core_selected_data <= 64'b0;
+            a_core_selected_valid <= 1'b0;
+            a_core_selected_idx <= {$clog2(NUM_A_CORES){1'b0}};
+            a_core_rr_index <= 6'd0;  // FIX: Initialize round-robin index
+            a_core_last_selected <= 6'd0;  // FIX: Initialize last selected
+            found_core <= 1'b0;  // FIX: Initialize found_core flag
+        end else begin
+            // Default: no command
+            a_core_selected_valid <= 1'b0;
+            
+            // Find next available A-Core using round-robin
+            if (sched_a_core_cmd_valid && !a_core_busy_internal[a_core_rr_index]) begin
+                a_core_selected_addr <= sched_a_core_cmd_addr;
+                a_core_selected_data <= sched_a_core_cmd_data;
+                a_core_selected_valid <= 1'b1;
+                a_core_selected_idx <= a_core_rr_index;
+                
+                // Update round-robin index for next command
+                a_core_rr_index <= (a_core_rr_index + 1) % NUM_A_CORES;
+            end else if (sched_a_core_cmd_valid) begin
+                // Current core busy, try next core
+                integer next_core;
+                next_core = (a_core_rr_index + 1) % NUM_A_CORES;
+                
+                // Search for available core (limited search to prevent infinite loop) - OPTIMIZED: Early exit
+                found_core <= 1'b0;
+                for (integer i = 0; i < NUM_A_CORES && !found_core; i = i + 1) begin
+                    if (!a_core_busy_internal[next_core] && !found_core) begin
+                        a_core_selected_addr <= sched_a_core_cmd_addr;
+                        a_core_selected_data <= sched_a_core_cmd_data;
+                        a_core_selected_valid <= 1'b1;
+                        a_core_selected_idx <= next_core;
+                        a_core_rr_index <= (next_core + 1) % NUM_A_CORES;
+                        found_core <= 1'b1;
+                    end
+                    next_core = (next_core + 1) % NUM_A_CORES;
+                end
+            end
+        end
+    end
+    
+    // Generate per-core command signals using decoder logic
+    reg [NUM_A_CORES-1:0] a_core_per_core_valid;
+    
+    // One-hot decoder for selected core
+    integer i;
+    always @(*) begin
+        a_core_per_core_valid = {NUM_A_CORES{1'b0}};
+        if (a_core_selected_valid) begin
+            a_core_per_core_valid[a_core_selected_idx] = 1'b1;
+        end
+    end
+    
     genvar a_idx;
     generate
-        for (a_idx = 1; a_idx < NUM_A_CORES; a_idx = a_idx + 1) begin : a_core_array
-            a_core #(
-                .CORE_ID(a_idx),
-                .DATA_WIDTH(DATA_WIDTH),
-                .ADDR_WIDTH(ADDR_WIDTH)
-            ) u_a_core (
-                .clk(clk),
-                .rst_n(rst_n),
-                // DISABLED: No longer receive broadcast commands
-                .cmd_addr(a_core_broadcast_addr),
-                .cmd_data(a_core_broadcast_data),
-                .cmd_valid(1'b0),  // DISABLED: Was causing all cores to process same command
-                .cmd_ready(a_core_cmd_ready[a_idx]),
-                .result(a_core_result[DATA_WIDTH*(a_idx+1)-1:DATA_WIDTH*a_idx]),
-                .result_valid(),  // Unused for worker cores
-                .busy(a_core_busy_internal[a_idx]),
-                .result_ready(1'b1),
-                .complete(a_core_complete[a_idx]),  // NEW: Completion signal
-                // L2 interface (unused - cores use broadcast bus)
-                .l2_addr(),
-                .l2_wr_data(),
-                .l2_rd_en(),
-                .l2_wr_en(),
-                .l2_rd_data(),
-                .l2_ready(),
-                // FIFO metrics (unused)
-                .fifo_occupancy(),
-                .fifo_full_warn(),
-                // Memory fabric interface
-                .fabric_addr(fabric_addr),
-                .fabric_rd_en(fabric_rd_en),
-                .fabric_wr_en(fabric_wr_en),
-                .fabric_rd_data(fabric_rd_data),
-                .fabric_wr_data(fabric_wr_data),
-                .fabric_ready(fabric_ready)
-            );
+        for (a_idx = 0; a_idx < NUM_A_CORES; a_idx = a_idx + 1) begin : a_core_array
+            // Core #0 is special case - connected directly to scheduler
+            if (a_idx == 0) begin : a_core_0
+                // A-Core #0 already instantiated above (line ~1237)
+                // FIXED: Removed duplicate assigns — a_core_cmd_*_mux already driven by scheduler (lines 1150-1152)
+            end else begin : a_core_workers
+                a_core #(
+                    .CORE_ID(a_idx),
+                    .DATA_WIDTH(DATA_WIDTH),
+                    .ADDR_WIDTH(ADDR_WIDTH)
+                ) u_a_core (
+                    .clk(clk),
+                    .rst_n(rst_n),
+                    // Single-target command dispatch
+                    .cmd_addr(a_core_selected_addr),
+                    .cmd_data(a_core_selected_data),
+                    .cmd_valid(a_core_per_core_valid[a_idx]),
+                    .cmd_ready(a_core_cmd_ready[a_idx]),
+                    .result(a_core_result[DATA_WIDTH*(a_idx+1)-1:DATA_WIDTH*a_idx]),
+                    .result_valid(a_core_result_valid[a_idx]),
+                    .busy(a_core_busy_internal[a_idx]),
+                    .result_ready(1'b1),
+                    .complete(a_core_complete[a_idx]),
+                    // L2 interface (properly tied off to internal signals)
+                    // FIXED: Use part-select for packed arrays (a_core_l2_addr is packed [NUM_A_CORES*48-1:0])
+                    .l2_addr(a_core_l2_addr[a_idx*48+:48]),
+                    .l2_wr_data(a_core_l2_wr_data[a_idx*512+:512]),
+                    .l2_rd_en(a_core_l2_rd_en[a_idx]),
+                    .l2_wr_en(a_core_l2_wr_en[a_idx]),
+                    .l2_rd_data(),
+                    .l2_ready(1'b0),
+                    // FIFO metrics
+                    .fifo_occupancy(),
+                    .fifo_full_warn(),
+                    // Memory fabric interface (separate to avoid multiple drivers)
+                    .fabric_addr(a_core_fabric_addr),
+                    .fabric_rd_en(fabric_rd_en),
+                    .fabric_wr_en(fabric_wr_en),
+                    .fabric_rd_data(fabric_rd_data),
+                    .fabric_wr_data(fabric_wr_data),
+                    .fabric_ready(fabric_ready)
+                );
+            end
         end
     endgenerate
 
-    // Override A-Core 0 results
+    // Override A-Core 0 results (already handled above)
     assign a_core_result[DATA_WIDTH-1:0] = a0_result;
     assign a_core_busy_internal[0] = a0_busy;
     assign a_core_complete[0] = a0_complete;
+    assign a_core_result_valid[0] = a0_result_valid;
 
-    // DISABLED: Round-robin dispatch logic (not used anymore)
-    // TODO: Re-enable when proper single-target dispatch is implemented
-    // Variables already declared at line 714, 717
-
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            a_core_rr_index <= 6'b000001;  // Start from core #1
-            a_core_last_selected <= 6'b000000;
-        end else begin
-            a_core_rr_index <= 6'b000001;
-            a_core_last_selected <= 6'b000000;
-        end
-    end
-
-    // DISABLED: Broadcast command (only A-Core #0 receives commands from scheduler now)
-    assign a_core_broadcast_addr = sched_a_core_cmd_addr;
-    assign a_core_broadcast_data = sched_a_core_cmd_data;
-    assign a_core_broadcast_valid = 1'b0;  // DISABLED: Was causing all cores to process same command
+    // Round-robin dispatch logic - PROPERLY IMPLEMENTED
+    // Variables already declared at line ~714, 717
     
     // =========================================================================
     // NPU Cluster (8 clusters untuk AI Inference) - NOW WITH COMMAND INTERFACE
@@ -1399,9 +1480,9 @@ module aurora_172_top #(
     wire [31:0]                 sq_sched_bp_timeout_stalls;
     wire [31:0]                 sq_sched_bp_actual_accepts;
     wire [31:0]                 sq_sched_admission_rejections;
-    wire [31:0]                 sq_sched_hazard_raw;
-    wire [31:0]                 sq_sched_hazard_war;
-    wire [31:0]                 sq_sched_hazard_waw;
+    // wire [31:0]                 sq_sched_hazard_raw;
+    // wire [31:0]                 sq_sched_hazard_war;
+    // wire [31:0]                 sq_sched_hazard_waw;
     wire [31:0]                 sq_sched_hazard_structural;
     wire [31:0]                 sq_sched_hazard_dependency;
 
@@ -1501,10 +1582,10 @@ module aurora_172_top #(
         .N_WEIGHT(2)
     ) u_scheduler_mq (
         .clk(clk),
-        .rst_n(sched_select ? rst_n : 1'b0),  // Disable MQ completely when SQ selected
+        .rst_n(rst_n_sync),  // Use synchronized reset for MQ scheduler
         .g_task_addr(game_cmd_addr),
         .g_task_data({32'b0, game_cmd_data}),
-        .g_task_valid(sched_select ? game_cmd_valid : 1'b0),  // Disable MQ when SQ selected
+        .g_task_valid(sched_select ? game_cmd_valid : 1'b0),  // FIX: Direct connection - same clock domain
         .g_task_ready(mq_g_task_ready),
         .g_task_result(mq_g_task_result),
         .g_task_result_valid(mq_g_task_result_valid),
@@ -1605,8 +1686,9 @@ module aurora_172_top #(
     // MQ scheduler men-drive sinyal ini via:
     //   assign a_core_result_ready = !pending_result_valid || (pending_result_type != TASK_AI);
     // Cukup deklarasi wire, biarkan MQ module yang drive.
-    wire mq_a_core_result_ready;  // Driven by MQ scheduler output port
-    wire a_core_result_ready_int = (sched_select) ? mq_a_core_result_ready : sq_a_core_result_ready;
+    // mq_a_core_result_ready moved higher up
+    
+    assign a_core_result_ready_int = (sched_select) ? mq_a_core_result_ready : sq_a_core_result_ready;
 
     // CRITICAL FIX: Wire game_cmd_ready to scheduler ready signal
     // Previously unconnected, causing testbench to always timeout waiting for G-Core ready
@@ -2553,7 +2635,7 @@ module aurora_172_top #(
         .npu_busy(npu_busy_internal),
         
         // Power mode control
-        .power_mode(sys_power_mode[3:0]),
+        .power_mode_sel(sys_power_mode[1:0]),
         
         // Voltage and frequency control
         .g_core_voltage_mv(g_core_voltage_mv),
@@ -2782,10 +2864,9 @@ module aurora_172_top #(
     assign cet_jop_violations     = cet_total_jop_violations;
     assign cet_state_violations   = cet_total_state_violations;
 
+    // Ring Bus + Chiplet Architecture (AMD) - Simplified
     // =========================================================================
-    // 9. Ring Bus + Chiplet Architecture (AMD) - Simplified
-    // =========================================================================
-    wire [31:0] cg_packets, ca_packets, ch_packets, cnpu_packets, chits;
+    wire [31:0] ch_packets, cnpu_packets, chits;
 
     // FIX: Enable Ring Bus and connect to scheduler for load balancing
     // Node 0: Gaming Core 0
@@ -2816,7 +2897,7 @@ module aurora_172_top #(
     wire [ADDR_WIDTH-1:0] rb_addr_1 = game_cmd_addr;  // Direct from testbench
     // CRITICAL FIX: Form proper packet for ring bus with direction field
     wire [DATA_WIDTH-1:0] rb_data_1;
-    wire                  rb_valid_1 = game_cmd_valid && rb_ready_1; // Use ring when ready
+    wire                  rb_valid_1 = game_cmd_valid; // Always valid when game_cmd_valid
     wire                  rb_ready_1;
     wire [DATA_WIDTH-1:0] rb_resp_1;
     
@@ -2907,6 +2988,7 @@ module aurora_172_top #(
 
     // Ring bus response routing
     wire ring_bus_g_busy, ring_bus_a_busy;
+    
     assign ring_bus_g_busy = (cg_packets > 32'd50);  // Congestion threshold
     assign ring_bus_a_busy = (ca_packets > 32'd25);  // Lower threshold for A-Core
 
@@ -2935,10 +3017,12 @@ module aurora_172_top #(
         .ring_avg_latency(),
         .ring_contention_count(ring_bus_contention),
         .ring_adaptive_routing_count(),
-        .ring_cw_packets(),
-        .ring_ccw_packets(),
+        .ring_cw_packets(ring_cw_pkt_cnt),
+        .ring_ccw_packets(ring_ccw_pkt_cnt),
         .node_activity_mask()
     );
+    
+    // Ring bus packet counters menggunakan deklarasi yang sudah ada
 
     // A-Core ring bus (2 nodes)
     wire [ADDR_WIDTH-1:0] ra_addr_arr [0:2];

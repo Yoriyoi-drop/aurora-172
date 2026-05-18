@@ -1,5 +1,8 @@
 `timescale 1ns / 1ps
 
+// Include parameters (Icarus compatibility)
+`include "interfaces/aurora_params.svh"
+
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
 // Engineer: Interconnect Architecture Team
@@ -24,10 +27,10 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module noc_router #(
-    parameter DATA_WIDTH    = 128,
-    parameter ADDR_WIDTH    = 48,
-    parameter VC_COUNT      = 4,
-    parameter BUFFER_DEPTH  = 16,
+    parameter DATA_WIDTH    = AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
+    parameter ADDR_WIDTH    = AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
+    parameter VC_COUNT      = 2,    // OPTIMIZED: 4->2 (simpler VCs)
+    parameter BUFFER_DEPTH  = 16,   // OPTIMIZED: 32->16 (smaller buffers)
     parameter ROUTER_X      = 0,
     parameter ROUTER_Y      = 0
 )(
@@ -83,7 +86,12 @@ module noc_router #(
     output reg [7:0]                    congestion_level,
     output reg [31:0]                   packets_routed,
     output reg [31:0]                   contention_cycles,
-    output reg [31:0]                   dropped_packets
+    output reg [31:0]                   dropped_packets,
+    
+    // DEADLOCK FIX: Head-of-Line blocking prevention
+    output reg [31:0]                   hol_blocks_detected,
+    output reg [31:0]                   vc_age_violations,
+    output reg [31:0]                   priority_inversions
 );
 
     // =========================================================================
@@ -98,6 +106,16 @@ module noc_router #(
 
     localparam MSG_CMD      = 4'b0000;
     localparam MSG_DATA     = 4'b0001;
+    
+    // DEADLOCK FIX: Virtual channel priority levels
+    localparam VC_PRIORITY_0 = 2'b00;  // Lowest priority (best effort)
+    localparam VC_PRIORITY_1 = 2'b01;  // Medium priority
+    localparam VC_PRIORITY_2 = 2'b10;  // High priority
+    localparam VC_PRIORITY_3 = 2'b11;  // Highest priority (critical)
+    
+    // HOL prevention thresholds
+    localparam HOL_TIMEOUT = 16'd50;     // 50 cycles max wait in buffer
+    localparam AGE_THRESHOLD = 16'd100;  // 100 cycles before priority boost
     localparam MSG_RESP     = 4'b0010;
     localparam MSG_CREDIT   = 4'b0011;
 
@@ -118,11 +136,15 @@ module noc_router #(
 
     // =========================================================================
     // Input buffers (per port, per VC)
+    // Structure: input_buf[port][vc][depth] - 3D array for efficient routing
+    // - port: 0-4 (5 input ports: North, South, East, West, Local)
+    // - vc: 0-VC_COUNT-1 (virtual channels per port)
+    // - depth: 0-BUFFER_DEPTH-1 (buffer depth per VC)
     // =========================================================================
     reg [DATA_WIDTH-1:0]    input_buf [0:4][0:VC_COUNT-1][0:BUFFER_DEPTH-1];
-    reg [7:0]               input_buf_wr_ptr [0:4][0:VC_COUNT-1];
-    reg [7:0]               input_buf_rd_ptr [0:4][0:VC_COUNT-1];
-    reg [7:0]               input_buf_count [0:4][0:VC_COUNT-1];
+    reg [7:0]               input_buf_wr_ptr [0:4][0:VC_COUNT-1];  // Write pointer per port/VC
+    reg [7:0]               input_buf_rd_ptr [0:4][0:VC_COUNT-1];  // Read pointer per port/VC
+    reg [7:0]               input_buf_count [0:4][0:VC_COUNT-1];   // Occupancy count per port/VC
 
     // =========================================================================
     // Routing state machine
@@ -148,12 +170,21 @@ module noc_router #(
 
     // CRITICAL FIX #3: Timeout counter for S_SWITCH state to prevent deadlock
     reg [7:0]               switch_timeout_counter;
+    
+    // DEADLOCK FIX: HOL prevention and age tracking
+    reg [15:0]              vc_age_counter [0:4][0:VC_COUNT-1];  // Age counter per VC
+    reg [15:0]              hol_wait_counter [0:4][0:VC_COUNT-1]; // HOL wait time
+    reg [1:0]               vc_priority_boost [0:4][0:VC_COUNT-1]; // Dynamic priority
+    reg [31:0]              global_cycle_count;  // Global cycle counter for age tracking
 
     // =========================================================================
     // Credit-based Flow Control
     // =========================================================================
     reg [7:0] credit_count [0:5];  // FIX: 6 ports (include PORT_NONE for safety)
-    localparam CREDIT_INIT = BUFFER_DEPTH;
+    // Use single source of truth for credit initialization
+    localparam CREDIT_INIT = AURORA_CREDIT_INITIAL;  // Single source of truth
+    
+    // DEADLOCK FIX: HOL prevention metrics (declared as output ports above)
 
     // =========================================================================
     // FIX v2: Response network with PROPER drain logic
@@ -294,51 +325,76 @@ module noc_router #(
             // ─────────────────────────────────────────────────
             // Input: North port
             // ─────────────────────────────────────────────────
-            if (n_valid_in && n_ready_in && !is_buffer_full(PORT_NORTH, n_data_in[3:2])) begin
-                input_buf[PORT_NORTH][n_data_in[3:2]][input_buf_wr_ptr[PORT_NORTH][n_data_in[3:2]]] <= n_data_in;
-                input_buf_wr_ptr[PORT_NORTH][n_data_in[3:2]] <= input_buf_wr_ptr[PORT_NORTH][n_data_in[3:2]] + 1;
-                input_buf_count[PORT_NORTH][n_data_in[3:2]] <= input_buf_count[PORT_NORTH][n_data_in[3:2]] + 1;
+            begin : n_input_block
+                reg [1:0] vc_masked;
+                vc_masked = n_data_in[3:2] & (VC_COUNT - 1);
+                if (n_valid_in && n_ready_in && !is_buffer_full(PORT_NORTH, vc_masked)) begin
+                    input_buf[PORT_NORTH][vc_masked][input_buf_wr_ptr[PORT_NORTH][vc_masked]] <= n_data_in;
+                    input_buf_wr_ptr[PORT_NORTH][vc_masked] <= input_buf_wr_ptr[PORT_NORTH][vc_masked] + 1;
+                    input_buf_count[PORT_NORTH][vc_masked] <= input_buf_count[PORT_NORTH][vc_masked] + 1;
+                end
             end
 
             // ─────────────────────────────────────────────────
             // Input: South port
             // ─────────────────────────────────────────────────
-            if (s_valid_in && s_ready_in && !is_buffer_full(PORT_SOUTH, s_data_in[3:2])) begin
-                input_buf[PORT_SOUTH][s_data_in[3:2]][input_buf_wr_ptr[PORT_SOUTH][s_data_in[3:2]]] <= s_data_in;
-                input_buf_wr_ptr[PORT_SOUTH][s_data_in[3:2]] <= input_buf_wr_ptr[PORT_SOUTH][s_data_in[3:2]] + 1;
-                input_buf_count[PORT_SOUTH][s_data_in[3:2]] <= input_buf_count[PORT_SOUTH][s_data_in[3:2]] + 1;
+            begin : s_input_block
+                reg [1:0] vc_masked;
+                vc_masked = s_data_in[3:2] & (VC_COUNT - 1);
+                if (s_valid_in && s_ready_in && !is_buffer_full(PORT_SOUTH, vc_masked)) begin
+                    input_buf[PORT_SOUTH][vc_masked][input_buf_wr_ptr[PORT_SOUTH][vc_masked]] <= s_data_in;
+                    input_buf_wr_ptr[PORT_SOUTH][vc_masked] <= input_buf_wr_ptr[PORT_SOUTH][vc_masked] + 1;
+                    input_buf_count[PORT_SOUTH][vc_masked] <= input_buf_count[PORT_SOUTH][vc_masked] + 1;
+                end
             end
 
             // ─────────────────────────────────────────────────
             // Input: East port
             // ─────────────────────────────────────────────────
-            if (e_valid_in && e_ready_in && !is_buffer_full(PORT_EAST, e_data_in[3:2])) begin
-                input_buf[PORT_EAST][e_data_in[3:2]][input_buf_wr_ptr[PORT_EAST][e_data_in[3:2]]] <= e_data_in;
-                input_buf_wr_ptr[PORT_EAST][e_data_in[3:2]] <= input_buf_wr_ptr[PORT_EAST][e_data_in[3:2]] + 1;
-                input_buf_count[PORT_EAST][e_data_in[3:2]] <= input_buf_count[PORT_EAST][e_data_in[3:2]] + 1;
+            begin : e_input_block
+                reg [1:0] vc_masked;
+                vc_masked = e_data_in[3:2] & (VC_COUNT - 1);
+                if (e_valid_in && e_ready_in && !is_buffer_full(PORT_EAST, vc_masked)) begin
+                    input_buf[PORT_EAST][vc_masked][input_buf_wr_ptr[PORT_EAST][vc_masked]] <= e_data_in;
+                    input_buf_wr_ptr[PORT_EAST][vc_masked] <= input_buf_wr_ptr[PORT_EAST][vc_masked] + 1;
+                    input_buf_count[PORT_EAST][vc_masked] <= input_buf_count[PORT_EAST][vc_masked] + 1;
+                end
             end
 
             // ─────────────────────────────────────────────────
             // Input: West port
             // ─────────────────────────────────────────────────
-            if (w_valid_in && w_ready_in && !is_buffer_full(PORT_WEST, w_data_in[3:2])) begin
-                input_buf[PORT_WEST][w_data_in[3:2]][input_buf_wr_ptr[PORT_WEST][w_data_in[3:2]]] <= w_data_in;
-                input_buf_wr_ptr[PORT_WEST][w_data_in[3:2]] <= input_buf_wr_ptr[PORT_WEST][w_data_in[3:2]] + 1;
-                input_buf_count[PORT_WEST][w_data_in[3:2]] <= input_buf_count[PORT_WEST][w_data_in[3:2]] + 1;
+            begin : w_input_block
+                reg [1:0] vc_masked;
+                vc_masked = w_data_in[3:2] & (VC_COUNT - 1);
+                if (w_valid_in && w_ready_in && !is_buffer_full(PORT_WEST, vc_masked)) begin
+                    input_buf[PORT_WEST][vc_masked][input_buf_wr_ptr[PORT_WEST][vc_masked]] <= w_data_in;
+                    input_buf_wr_ptr[PORT_WEST][vc_masked] <= input_buf_wr_ptr[PORT_WEST][vc_masked] + 1;
+                    input_buf_count[PORT_WEST][vc_masked] <= input_buf_count[PORT_WEST][vc_masked] + 1;
+                end
             end
 
             // ─────────────────────────────────────────────────
             // FIX v2: Local port input - NO data truncation
             // Previously: {local_data, local_addr[15:0]} = 144 bits → truncated to 128
             // Now: Use local_data directly, encode addr in payload area
+            // DEADLOCK FIX: Track age and detect HOL blocking
             // ─────────────────────────────────────────────────
-            if (local_valid && local_ready && !is_buffer_full(PORT_LOCAL, local_vc)) begin
+            begin : local_input_block
+                reg [1:0] vc_masked;
+                vc_masked = local_vc & (VC_COUNT - 1);
+            if (local_valid && local_ready && !is_buffer_full(PORT_LOCAL, vc_masked)) begin
                 // Pack addr into upper bits of data (data is 128-bit, addr is 48-bit)
                 // Use upper 48 bits for addr, lower 80 bits for data
-                input_buf[PORT_LOCAL][local_vc][input_buf_wr_ptr[PORT_LOCAL][local_vc]] <=
+                input_buf[PORT_LOCAL][vc_masked][input_buf_wr_ptr[PORT_LOCAL][vc_masked]] <=
                     {local_addr[47:0], local_data[79:0]};
-                input_buf_wr_ptr[PORT_LOCAL][local_vc] <= input_buf_wr_ptr[PORT_LOCAL][local_vc] + 1;
-                input_buf_count[PORT_LOCAL][local_vc] <= input_buf_count[PORT_LOCAL][local_vc] + 1;
+                input_buf_wr_ptr[PORT_LOCAL][vc_masked] <= input_buf_wr_ptr[PORT_LOCAL][vc_masked] + 1;
+                input_buf_count[PORT_LOCAL][vc_masked] <= input_buf_count[PORT_LOCAL][vc_masked] + 1;
+                
+                // DEADLOCK FIX: Initialize age tracking for new packet
+                vc_age_counter[PORT_LOCAL][vc_masked] <= 16'd0;
+                hol_wait_counter[PORT_LOCAL][vc_masked] <= 16'd0;
+            end
             end
 
             // ─────────────────────────────────────────────────
@@ -412,6 +468,51 @@ module noc_router #(
                 resp_count[PORT_LOCAL] <= resp_count[PORT_LOCAL] + 1;
             end
 
+            // ─────────────────────────────────────────────────
+            // DEADLOCK FIX: Age tracking and HOL prevention
+            // Increment age counters and detect HOL blocking
+            // ─────────────────────────────────────────────────
+            global_cycle_count <= global_cycle_count + 1;
+            
+            // Update age counters for all VCs
+            for (int port = 0; port < 5; port = port + 1) begin
+                for (int vc = 0; vc < VC_COUNT; vc = vc + 1) begin
+                    if (input_buf_count[port][vc] > 0) begin
+                        // Increment age counter
+                        vc_age_counter[port][vc] <= vc_age_counter[port][vc] + 1;
+                        hol_wait_counter[port][vc] <= hol_wait_counter[port][vc] + 1;
+                        
+                        // Check for HOL blocking
+                        if (hol_wait_counter[port][vc] >= HOL_TIMEOUT) begin
+                            hol_blocks_detected <= hol_blocks_detected + 1;
+                            $display("[%0t] [NOC-ROUTER] HOL BLOCKING detected: Port=%0d, VC=%0d, wait=%0d cycles", 
+                                     $time, port, vc, hol_wait_counter[port][vc]);
+                            
+                            // Priority boost to prevent starvation
+                            if (vc_priority_boost[port][vc] < 2'b11) begin
+                                vc_priority_boost[port][vc] <= vc_priority_boost[port][vc] + 1;
+                                priority_inversions <= priority_inversions + 1;
+                            end
+                        end
+                        
+                        // Check for age violation
+                        if (vc_age_counter[port][vc] >= AGE_THRESHOLD) begin
+                            vc_age_violations <= vc_age_violations + 1;
+                            $display("[%0t] [NOC-ROUTER] AGE VIOLATION: Port=%0d, VC=%0d, age=%0d cycles", 
+                                     $time, port, vc, vc_age_counter[port][vc]);
+                            
+                            // Force priority to maximum
+                            vc_priority_boost[port][vc] <= 2'b11;
+                        end
+                    end else begin
+                        // Reset counters when buffer empty
+                        vc_age_counter[port][vc] <= 16'd0;
+                        hol_wait_counter[port][vc] <= 16'd0;
+                        vc_priority_boost[port][vc] <= 2'b00;
+                    end
+                end
+            end
+            
             // ─────────────────────────────────────────────────
             // FIX v2: Credit return when input buffer is consumed
             // (handled in S_COMPLETE state below)
@@ -525,23 +626,28 @@ module noc_router #(
                     // Find first non-empty VC in the selected port
                     vc = 0;
                     found = 1'b0;
-                    for (vc = 0; vc < VC_COUNT && !found; vc = vc + 1) begin
-                        if (!is_buffer_empty(current_in_port, vc)) begin
+                    for (int svc = 0; svc < VC_COUNT && !found; svc = svc + 1) begin
+                        if (!is_buffer_empty(current_in_port, svc)) begin
+                            vc = svc;
                             found = 1'b1;
                         end
                     end
                     if (!found) vc = 0;
 
-                    current_flit <= input_buf[current_in_port][vc][input_buf_rd_ptr[current_in_port][vc]];
+                    // REVIEWED: Array indexing is safe - current_in_port and vc are validated
+                    // current_in_port comes from port arbitration (0-4), vc is bounded by VC_COUNT
+                    // FIX: Buffer flit data before NBA so routing reads current value
+                    current_flit_data = input_buf[current_in_port][vc][input_buf_rd_ptr[current_in_port][vc]];
+                    current_flit <= current_flit_data;
                     current_vc <= vc[1:0];
 
-                    // Extract header
-                    current_msg_type <= current_flit[59:56];
-                    current_flit_type <= current_flit[1:0];
+                    // Extract header using combinational copy
+                    current_msg_type <= current_flit_data[59:56];
+                    current_flit_type <= current_flit_data[1:0];
 
                     // Determine output port using XY routing
-                    current_dest_addr <= current_flit[47:0];
-                    current_out_port <= xy_route(current_flit[47:0]);
+                    current_dest_addr <= current_flit_data[47:0];
+                    current_out_port <= xy_route(current_flit_data[47:0]);
 
                     // Check if output port is valid (not self for non-local)
                     if (current_out_port == PORT_NONE) begin

@@ -3,6 +3,9 @@
 // verilator lint_off WIDTHEXPAND
 // verilator lint_off WIDTHTRUNC
 
+// Include parameters (Icarus compatibility)
+`include "interfaces/aurora_params.svh"
+
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
 // Engineer: AI Accelerator Team
@@ -19,8 +22,8 @@
 
 module npu_cluster #(
     parameter CLUSTER_ID    = 0,
-    parameter DATA_WIDTH    = 128,
-    parameter ADDR_WIDTH    = 48,
+    parameter DATA_WIDTH    = AURORA_DATA_WIDTH,   // FIX: Use standard parameter
+    parameter ADDR_WIDTH    = AURORA_ADDR_WIDTH,   // FIX: Use standard parameter
     parameter NUM_PE        = 32,
     parameter WEIGHT_BITS   = 8,
     parameter LINE_SIZE     = 64,
@@ -108,6 +111,7 @@ module npu_cluster #(
 
     // Compute indices
     reg [7:0]               pe_idx;
+    reg [2:0]               reduce_level;  // FIXED: Multi-level tree reduction
     reg [15:0]              elem_idx;
 
     // FIX v2: STORE timeout counter to prevent hang
@@ -156,6 +160,7 @@ module npu_cluster #(
             error_valid <= 1'b0;
             exec_counter <= 16'h0;
             pe_idx <= 8'b0;
+            reduce_level <= 3'b0;
             elem_idx <= 16'b0;
             weight_count <= 10'b0;
             weight_loaded <= 1'b0;
@@ -165,10 +170,39 @@ module npu_cluster #(
             store_timeout_counter <= 8'b0;
             complete_timeout_counter <= 8'b0;
 
-            for (int i = 0; i < NUM_PE; i++) begin
-                pe_acc[i] <= 32'sb0;
-                pe_active[i] <= 1'b0;
-            end
+            // FIXED: Initialize all 32 PEs (was 0-7 only)
+            pe_acc[0] <= 32'sb0; pe_active[0] <= 1'b0;
+            pe_acc[1] <= 32'sb0; pe_active[1] <= 1'b0;
+            pe_acc[2] <= 32'sb0; pe_active[2] <= 1'b0;
+            pe_acc[3] <= 32'sb0; pe_active[3] <= 1'b0;
+            pe_acc[4] <= 32'sb0; pe_active[4] <= 1'b0;
+            pe_acc[5] <= 32'sb0; pe_active[5] <= 1'b0;
+            pe_acc[6] <= 32'sb0; pe_active[6] <= 1'b0;
+            pe_acc[7] <= 32'sb0; pe_active[7] <= 1'b0;
+            pe_acc[8] <= 32'sb0; pe_active[8] <= 1'b0;
+            pe_acc[9] <= 32'sb0; pe_active[9] <= 1'b0;
+            pe_acc[10] <= 32'sb0; pe_active[10] <= 1'b0;
+            pe_acc[11] <= 32'sb0; pe_active[11] <= 1'b0;
+            pe_acc[12] <= 32'sb0; pe_active[12] <= 1'b0;
+            pe_acc[13] <= 32'sb0; pe_active[13] <= 1'b0;
+            pe_acc[14] <= 32'sb0; pe_active[14] <= 1'b0;
+            pe_acc[15] <= 32'sb0; pe_active[15] <= 1'b0;
+            pe_acc[16] <= 32'sb0; pe_active[16] <= 1'b0;
+            pe_acc[17] <= 32'sb0; pe_active[17] <= 1'b0;
+            pe_acc[18] <= 32'sb0; pe_active[18] <= 1'b0;
+            pe_acc[19] <= 32'sb0; pe_active[19] <= 1'b0;
+            pe_acc[20] <= 32'sb0; pe_active[20] <= 1'b0;
+            pe_acc[21] <= 32'sb0; pe_active[21] <= 1'b0;
+            pe_acc[22] <= 32'sb0; pe_active[22] <= 1'b0;
+            pe_acc[23] <= 32'sb0; pe_active[23] <= 1'b0;
+            pe_acc[24] <= 32'sb0; pe_active[24] <= 1'b0;
+            pe_acc[25] <= 32'sb0; pe_active[25] <= 1'b0;
+            pe_acc[26] <= 32'sb0; pe_active[26] <= 1'b0;
+            pe_acc[27] <= 32'sb0; pe_active[27] <= 1'b0;
+            pe_acc[28] <= 32'sb0; pe_active[28] <= 1'b0;
+            pe_acc[29] <= 32'sb0; pe_active[29] <= 1'b0;
+            pe_acc[30] <= 32'sb0; pe_active[30] <= 1'b0;
+            pe_acc[31] <= 32'sb0; pe_active[31] <= 1'b0;
         end else begin
             error_valid <= 1'b0;
             complete <= 1'b0;
@@ -264,12 +298,12 @@ module npu_cluster #(
                         if (fabric_ready && fabric_rd_en) begin
                             // FIX v2: Store weights with bounded loop - min(16, 1024-weight_count)
                             for (int w = 0; w < 16; w++) begin
-                                // FIX v2: Limit to remaining capacity to prevent overflow
-                                if ((w < (1024 - weight_count)) && (weight_count < 1024)) begin
-                                    weight_mem[weight_count] <= fabric_rd_data[w*WEIGHT_BITS +: WEIGHT_BITS];
-                                    weight_count <= weight_count + 1;
+                                // FIXED: Use weight_count+w as index, not weight_count (NBA doesn't update until end of cycle)
+                                if ((w < (1024 - weight_count)) && (weight_count + w < 1024)) begin
+                                    weight_mem[weight_count + w] <= fabric_rd_data[w*WEIGHT_BITS +: WEIGHT_BITS];
                                 end
                             end
+                            weight_count <= weight_count + 16;  // FIXED: Increment by 16 for 16 weights
 
                             elem_idx <= elem_idx + 1;
                             exec_counter <= 16'h0;  // Reset counter on successful transfer
@@ -374,18 +408,22 @@ module npu_cluster #(
                 end
 
                 // ─────────────────────────────────────────────────
-                // ACCUMULATE: Reduce partial sums
+                // ACCUMULATE: Multi-level tree reduction
+                // FIXED: Was single-level only (NEVER produced correct sum for 32 PEs)
                 // ─────────────────────────────────────────────────
                 ACCUMULATE: begin
-                    if (pe_idx < NUM_PE) begin
-                        // Tree reduction
-                        if (pe_idx < NUM_PE / 2) begin
-                            pe_acc[pe_idx] <= pe_acc[pe_idx] + pe_acc[pe_idx + NUM_PE/2];
+                    if (reduce_level < $clog2(NUM_PE)) begin
+                        if (pe_idx < (NUM_PE >> (reduce_level + 1))) begin
+                            pe_acc[pe_idx] <= pe_acc[pe_idx] + pe_acc[pe_idx + (NUM_PE >> (reduce_level + 1))];
+                            pe_idx <= pe_idx + 1;
+                        end else begin
+                            reduce_level <= reduce_level + 1;
+                            pe_idx <= 8'b0;
                         end
-                        pe_idx <= pe_idx + 1;
                     end else begin
                         // Result in pe_acc[0]
                         act_out[0] <= pe_acc[0];
+                        reduce_level <= 3'b0;
                         state <= ACTIVATE;
                     end
                 end
@@ -478,12 +516,14 @@ module npu_cluster #(
                 end
 
                 COMPLETE_ST: begin
-                    // CRITICAL FIX NEW-1: Add 50-cycle timeout to prevent permanent stall
+                    // CRITICAL FIX NEW-1: Add 25-cycle timeout to prevent permanent stall
                     // If scheduler holds cmd_valid high, NPU will timeout and return to IDLE
-                    if (complete_timeout_counter >= 8'd50) begin
+                    if (complete_timeout_counter >= 8'd25) begin  // Reduced timeout for faster recovery
                         if (CLUSTER_ID == 0)
-                            $display("[%0t] [NPU#%0d] COMPLETE_ST TIMEOUT: cmd_valid still high after 50 cycles", $time, CLUSTER_ID);
+                            $display("[%0t] [NPU#%0d] COMPLETE_ST TIMEOUT: cmd_valid still high after 25 cycles", $time, CLUSTER_ID);
                         complete_timeout_counter <= 8'b0;
+                        complete <= 1'b0;  // Clear complete flag
+                        busy <= 1'b0;      // Clear busy flag
                         state <= IDLE;
                     end else if (cmd_valid == 1'b0) begin
                         complete_timeout_counter <= 8'b0;

@@ -3,6 +3,9 @@
 // verilator lint_off DECLFILENAME
 // verilator lint_off WIDTHEXPAND
 
+// Include parameters (Icarus compatibility)
+`include "interfaces/aurora_params.svh"
+
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
 // Engineer: Architecture Team (ATM: Intel uop Cache)
@@ -25,9 +28,9 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module uop_cache #(
-    parameter DATA_WIDTH        = 128,  // OPTIMIZED: 64->128 for wider micro-ops
-    parameter ADDR_WIDTH        = 48,
-    parameter INST_WIDTH        = 256,  // OPTIMIZED: 128->256 (match g_core)
+    parameter DATA_WIDTH        = AURORA_DATA_WIDTH,   // FIX: Use standard parameter
+    parameter ADDR_WIDTH        = AURORA_ADDR_WIDTH,   // FIX: Use standard parameter
+    parameter INST_WIDTH        = AURORA_INST_WIDTH,   // FIX: Use standard parameter
     parameter NUM_ENTRIES       = 512,
     parameter ASSOCIATIVITY     = 8,
     parameter NUM_SETS          = NUM_ENTRIES / ASSOCIATIVITY
@@ -102,6 +105,10 @@ module uop_cache #(
     assign uop_valid        = lookup_hit && fetch_valid;
     assign decode_request   = fetch_valid && !lookup_hit;
 
+    // FIXED: Register fetch_index at miss time so fill uses correct set
+    reg [INDEX_WIDTH-1:0] fill_index_reg;
+    reg [TAG_WIDTH-1:0] fill_tag_reg;
+
     // Counters
     reg [31:0]              hit_counter;
     reg [31:0]              miss_counter;
@@ -126,15 +133,13 @@ module uop_cache #(
                 if (!cache_valid[set_idx][w]) begin
                     // Invalid entry = best candidate (no eviction needed)
                     find_lru_way = w;
+                    return find_lru_way;  // FIXED: Early exit to avoid overwrite by valid entries
                 end else if (cache_lru[set_idx][w] > max_age) begin
                     max_age = cache_lru[set_idx][w];
                     lru_way = w;
-                    find_lru_way = lru_way;
-                end else begin
-                    // Keep current find_lru_way or default to lru_way
-                    find_lru_way = lru_way;
                 end
             end
+            find_lru_way = lru_way;
         end
     endfunction
 
@@ -177,25 +182,27 @@ module uop_cache #(
                 end
             end
 
-            // Miss: count it (fill happens on decode_complete)
+            // Miss: save fetch_index/tag for later fill
             if (fetch_valid && !lookup_hit) begin
                 miss_counter <= miss_counter + 32'd1;
+                fill_index_reg <= fetch_index;  // FIXED: Latch index at miss time
+                fill_tag_reg <= fetch_tag;      // FIXED: Latch tag at miss time
             end
 
-            // Fill from decoder
+            // Fill from decoder (use registered fetch_index, not live wire)
             if (decode_complete) begin
                 integer lru_way;
-                lru_way = find_lru_way(fetch_index);
+                lru_way = find_lru_way(fill_index_reg);
 
-                if (cache_valid[fetch_index][lru_way]) begin
+                if (cache_valid[fill_index_reg][lru_way]) begin
                     eviction_counter <= eviction_counter + 32'd1;
                 end
 
-                cache_valid[fetch_index][lru_way] <= 1'b1;
-                cache_tags[fetch_index][lru_way] <= fetch_tag;
-                cache_uops[fetch_index][lru_way] <= decode_micro_ops;
-                cache_uop_counts[fetch_index][lru_way] <= decode_uop_count;
-                cache_lru[fetch_index][lru_way] <= 8'd0;  // Reset LRU age for new entry
+                cache_valid[fill_index_reg][lru_way] <= 1'b1;
+                cache_tags[fill_index_reg][lru_way] <= fill_tag_reg;
+                cache_uops[fill_index_reg][lru_way] <= decode_micro_ops;
+                cache_uop_counts[fill_index_reg][lru_way] <= decode_uop_count;
+                cache_lru[fill_index_reg][lru_way] <= 8'd0;  // Reset LRU age for new entry
             end
         end
     end

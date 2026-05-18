@@ -1,5 +1,8 @@
 `timescale 1ns / 1ps
 
+// Include parameters (Icarus compatibility)
+`include "interfaces/aurora_params.svh"
+
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
 // Engineer: Interconnect Architecture Team
@@ -12,9 +15,10 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module chiplet_interconnect #(
-    parameter ADDR_WIDTH    = 48,
-    parameter DATA_WIDTH    = 128,
-    parameter NUM_CHIPLETS  = 4
+    // Use standardized parameters
+    parameter ADDR_WIDTH    = AURORA_ADDR_WIDTH,
+    parameter DATA_WIDTH    = AURORA_DATA_WIDTH,
+    parameter NUM_CHIPLETS  = 2     // OPTIMIZED: 4->2 (G and A only)
 )(
     input  wire                         clk,
     input  wire                         rst_n,
@@ -108,17 +112,7 @@ module chiplet_interconnect #(
             snoop_broadcast_valid <= 1'b0;
             snoop_invalidate_targets <= 4'b0000;
 
-            // FIX v2: Round-robin arbitration
-            // Scan from rr_pointer, pick first valid request with ready downstream
-            has_request = 1'b0;
-            selected_chiplet = rr_pointer;
-
-            if (g_valid && input_ready_g) begin selected_chiplet = 2'b00; has_request = 1'b0; end
-            if (!has_request && a_valid && input_ready_a) begin selected_chiplet = 2'b01; has_request = 1'b0; end
-            if (!has_request && h_valid && input_ready_h) begin selected_chiplet = 2'b10; has_request = 1'b0; end
-            if (!has_request && npu_valid && input_ready_npu) begin selected_chiplet = 2'b11; has_request = 1'b0; end
-
-            // FIX v2: Simpler priority-based with rotation
+            // FIX v2: Round-robin arbitration (single case, no redundant init)
             // Just pick based on rr_pointer priority order
             case (rr_pointer)
                 2'b00: begin  // G priority
@@ -173,14 +167,13 @@ module chiplet_interconnect #(
                 // This prevents starvation when one chiplet monopolizes
                 rr_pointer <= (rr_pointer == 2'b11) ? 2'b00 : rr_pointer + 1;
 
-                // FIX v2: Simple coherence - track which chiplets have which lines
-                if (mem_valid) begin
-                    snoop_broadcast_valid <= 1'b1;
-                    snoop_broadcast_addr <= mem_addr;
-                    snoop_invalidate_targets <= snoop_table[mem_addr[5:0] % SNOOP_SIZE];
-                    snoop_table[mem_addr[5:0] % SNOOP_SIZE] <= (1'b1 << selected_chiplet);
-                    snoop_tags[mem_addr[5:0] % SNOOP_SIZE] <= mem_addr[ADDR_WIDTH-1 -: 16];
-                end
+                // FIX: Snoop using current request, not stale mem_valid (NBA ordering)
+                // Use selected_chiplet/has_request which are blocking-assigned in same cycle
+                snoop_broadcast_valid <= 1'b1;
+                snoop_broadcast_addr <= mem_addr;
+                snoop_invalidate_targets <= snoop_table[mem_addr[5:0] % SNOOP_SIZE];
+                snoop_table[mem_addr[5:0] % SNOOP_SIZE] <= (1'b1 << selected_chiplet);
+                snoop_tags[mem_addr[5:0] % SNOOP_SIZE] <= mem_addr[ADDR_WIDTH-1 -: 16];
             end else begin
                 // CRITICAL FIX #10: Advance RR pointer even when memory not ready
                 // This prevents starvation - all chiplets get fair chance
