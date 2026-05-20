@@ -1,5 +1,8 @@
 `timescale 1ns / 1ps
 
+// Include parameters (Icarus compatibility)
+`include "interfaces/aurora_params.svh"
+
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
 // Engineer: Verification Team
@@ -14,9 +17,10 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module memory_assertions #(
-    parameter DATA_WIDTH = 64,
-    parameter ADDR_WIDTH = 48,
-    parameter CACHE_LINE_WIDTH = 512
+    // Use standardized parameters from aurora_params.svh
+    parameter DATA_WIDTH = AURORA_DATA_WIDTH,      // FIXED: Use standard parameter
+    parameter ADDR_WIDTH = AURORA_ADDR_WIDTH,       // FIXED: Use standard parameter
+    parameter CACHE_LINE_WIDTH = AURORA_CACHE_LINE_WIDTH // FIXED: Use standard parameter
 )(
     input  wire                         clk,
     input  wire                         rst_n,
@@ -97,6 +101,52 @@ module memory_assertions #(
         end
     end
     
+    // DEADLOCK FIX: Enhanced ready/valid protocol validation
+    integer valid_stuck_counter;
+    integer ready_stuck_counter;
+    reg [1:0] handshake_state;
+    localparam HS_IDLE = 2'b00;
+    localparam HS_VALID_ASSERTED = 2'b01;
+    localparam HS_READY_ASSERTED = 2'b10;
+    localparam HS_COMPLETE = 2'b11;
+    
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            valid_stuck_counter <= 0;
+            ready_stuck_counter <= 0;
+            handshake_state <= HS_IDLE;
+        end else begin
+            case (handshake_state)
+                HS_IDLE: begin
+                    if (mem_rd_en || mem_wr_en) begin
+                        handshake_state <= HS_VALID_ASSERTED;
+                        valid_stuck_counter <= 0;
+                        ready_stuck_counter <= 0;
+                    end
+                end
+                
+                HS_VALID_ASSERTED: begin
+                    if (mem_ready) begin
+                        handshake_state <= HS_COMPLETE;
+                    end else begin
+                        valid_stuck_counter <= valid_stuck_counter + 1;
+                        if (valid_stuck_counter >= 20) begin
+                            $error("[%0t] ASSERTION VIOLATION: Ready signal stuck low for 20+ cycles", $time);
+                            // Force recovery
+                            handshake_state <= HS_IDLE;
+                        end
+                    end
+                end
+                
+                HS_COMPLETE: begin
+                    handshake_state <= HS_IDLE;
+                end
+                
+                default: handshake_state <= HS_IDLE;
+            endcase
+        end
+    end
+    
     // A3: Cache hit response time monitoring
     integer cache_hit_timeout_counter;
     always @(posedge clk or negedge rst_n) begin
@@ -128,7 +178,14 @@ module memory_assertions #(
             // Check for invalid transitions
             if (cache_state != cache_state_prev) begin
                 case (cache_state)
-                    2'b00: if (cache_state_prev != 2'b00) $display("[%0t] [ASSERTION] MESI: Invalid -> Invalid", $time);
+                    2'b00: begin
+                        case (cache_state_prev)
+                            2'b01: $display("[%0t] [ASSERTION] MESI: Shared -> Invalid", $time);
+                            2'b10: $display("[%0t] [ASSERTION] MESI: Exclusive -> Invalid", $time);
+                            2'b11: $display("[%0t] [ASSERTION] MESI: Modified -> Invalid", $time);
+                            default: $display("[%0t] [ASSERTION] MESI: Invalid -> Invalid", $time);
+                        endcase
+                    end
                     2'b01: if (cache_state_prev != 2'b01) $display("[%0t] [ASSERTION] MESI: Transition to Shared", $time);
                     2'b10: if (cache_state_prev != 2'b10) $display("[%0t] [ASSERTION] MESI: Transition to Exclusive", $time);
                     2'b11: if (cache_state_prev != 2'b11) $display("[%0t] [ASSERTION] MESI: Transition to Modified", $time);

@@ -1,5 +1,8 @@
 `timescale 1ns / 1ps
 
+// Include parameters (Icarus doesn't support import in interfaces)
+`include "aurora_params.svh"
+
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
 // Engineer: Architecture Team
@@ -14,9 +17,9 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 interface axi_if #(
-    parameter DATA_WIDTH = 64,
-    parameter ADDR_WIDTH = 48,
-    parameter ID_WIDTH   = 8,
+    parameter DATA_WIDTH = AURORA_DATA_WIDTH,    // Use standardized parameter
+    parameter ADDR_WIDTH = AURORA_ADDR_WIDTH,
+    parameter ID_WIDTH   = 4,     // OPTIMIZED: 8->4 (simpler routing)
     parameter STRB_WIDTH = DATA_WIDTH/8
 )();
     

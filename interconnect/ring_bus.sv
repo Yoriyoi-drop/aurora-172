@@ -210,18 +210,7 @@ module ring_bus #(
         if (PKT_TOTAL_W > packet_width) begin
              // $error("PKT_TOTAL_W (%0d) exceeds packet_width (%0d)", PKT_TOTAL_W, packet_width);
         end
-        
-        for (init_node = 0; init_node < NUM_NODES; init_node = init_node + 1) begin
-            // CRITICAL FIX: Use single source of truth for credit initialization
-            credit_cw_vc0[init_node]  = AURORA_CREDIT_INITIAL;
-            credit_cw_vc1[init_node]  = AURORA_CREDIT_INITIAL;
-            credit_ccw_vc0[init_node] = AURORA_CREDIT_INITIAL;
-            credit_ccw_vc1[init_node] = AURORA_CREDIT_INITIAL;
-            credit_issued_total[init_node] = 32'd0;
-            credit_returned_total[init_node] = 32'd0;
-            credit_in_flight[init_node] = 32'd0;
-            credit_health[init_node] = 8'd0;
-        end
+        // Credit initialization moved to always_ff reset block (line 489)
         credit_leak_count = 16'd0;
         credit_rebalance_count = 32'd0;
     end

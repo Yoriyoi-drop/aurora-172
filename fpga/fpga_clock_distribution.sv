@@ -1,5 +1,9 @@
 `timescale 1ns / 1ps
 
+// Include timing and system constants
+`include "interfaces/aurora_timing_constants.svh"
+`include "interfaces/aurora_constants.svh"
+
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
 // Engineer: Architecture Team
@@ -35,13 +39,13 @@ module fpga_clock_distribution (
     input  wire                         sys_clk_n,
     input  wire                         sys_rst_n,
 
-    // Generated clock outputs
-    output wire                         g_core_clk,        // 500 MHz - Gaming cores
-    output wire                         h_core_clk,        // 250 MHz - Hybrid cores
-    output wire                         ai_core_clk,       // 125 MHz - AI/Tensor cores
-    output wire                         mem_fabric_clk,    // 333 MHz - Memory bus
-    output wire                         interconnect_clk,  // 250 MHz - Aurora Fabric
-    output wire                         debug_clk,         // 50 MHz - Debug/trace
+    // Clock outputs for all clock domains
+    output wire                         g_core_clk,        // 500 MHz - G-Core
+    output wire                         h_core_clk,        // 250 MHz - H-Core
+    output wire                         ai_core_clk,       // 125 MHz - AI-Core/NPU
+    output wire                         mem_fabric_clk,    // 333 MHz - Memory Fabric
+    output wire                         interconnect_clk,  // 250 MHz - Interconnect
+    output wire                         debug_clk,         // 100 MHz - Debug/trace
 
     // Clock enable/status
     output wire                         clk_locked,
@@ -154,11 +158,13 @@ always @(posedge sys_clk_ibufg or negedge sys_rst_n) begin
             end
             
             DVFS_SWITCH: begin
+                // Performance-optimized: Fast clock switching
                 // Switch clocks to new frequency domain
                 dvfs_state <= DVFS_ACK;
             end
             
             DVFS_ACK: begin
+                // Immediate acknowledgment for minimal latency
                 dvfs_reconfig_req <= 1'b0;
                 dvfs_state <= DVFS_IDLE;
             end
@@ -194,7 +200,7 @@ MMCME4_ADV #(
     .CLKOUT2_DUTY_CYCLE   (0.5),
     .CLKOUT2_PHASE        (0.0),
     .CLKOUT2_USE_FINE_PS  ("FALSE"),
-    .CLKOUT3_DIVIDE       (10),        // Debug: 500MHz / 10 = 50MHz
+    .CLKOUT3_DIVIDE       (5),         // Debug: 500MHz / 5 = 100MHz
     .CLKOUT3_DUTY_CYCLE   (0.5),
     .CLKOUT3_PHASE        (0.0),
     .CLKOUT3_USE_FINE_PS  ("FALSE"),
@@ -255,7 +261,7 @@ wire clk_mem_fbout;
 wire clk_mem_raw_int;
 
 MMCME4_ADV #(
-    .BANDWIDTH            ("OPTIMIZED"),
+    .BANDWIDTH            ("HIGH"),      // High bandwidth for better jitter performance
     .COMPENSATION         ("ZHOLD"),
     .STARTUP_WAIT         ("FALSE"),
     .DIVCLK_DIVIDE        (1),
@@ -374,58 +380,65 @@ reg ai_core_active = 0;
 reg mem_active = 0;
 reg interconnect_active = 0;
 reg debug_active = 0;
+reg g_core_prev, h_core_prev, ai_core_prev;
+reg mem_prev, interconnect_prev, debug_prev;
 
 // Clock presence detectors (toggle detection)
 always @(posedge sys_clk_ibufg or negedge sys_rst_n) begin
-    reg g_core_prev, h_core_prev, ai_core_prev;
-    reg mem_prev, interconnect_prev, debug_prev;
     
+    // Clock activity detection constants
+    localparam CLK_LOCK_TIMEOUT = 8'hFF;  // 255 cycles timeout
+    localparam CLK_ACTIVE_HIGH = 1'b1;
+    localparam CLK_ACTIVE_LOW = 1'b0;
+    
+    // Clock activity detection using defined constants
     if (!sys_rst_n) begin
-        g_core_prev <= 0; h_core_prev <= 0; ai_core_prev <= 0;
-        mem_prev <= 0; interconnect_prev <= 0; debug_prev <= 0;
-        g_core_active <= 0; h_core_active <= 0; ai_core_active <= 0;
-        mem_active <= 0; interconnect_active <= 0; debug_active <= 0;
+        g_core_prev <= CLK_ACTIVE_LOW; h_core_prev <= CLK_ACTIVE_LOW; ai_core_prev <= CLK_ACTIVE_LOW;
+        mem_prev <= CLK_ACTIVE_LOW; interconnect_prev <= CLK_ACTIVE_LOW; debug_prev <= CLK_ACTIVE_LOW;
+        g_core_active <= CLK_ACTIVE_LOW; h_core_active <= CLK_ACTIVE_LOW; ai_core_active <= CLK_ACTIVE_LOW;
+        mem_active <= CLK_ACTIVE_LOW; interconnect_active <= CLK_ACTIVE_LOW; debug_active <= CLK_ACTIVE_LOW;
     end else begin
         // Detect clock toggling (activity)
         g_core_prev <= g_core_clk;
-        if (g_core_clk != g_core_prev) g_core_active <= 1'b1;
-        else if (lock_counter == 8'hFF) g_core_active <= 1'b0;
+        if (g_core_clk != g_core_prev) g_core_active <= CLK_ACTIVE_HIGH;
+        else if (lock_counter == CLK_LOCK_TIMEOUT) g_core_active <= CLK_ACTIVE_LOW;
         
         h_core_prev <= h_core_clk;
-        if (h_core_clk != h_core_prev) h_core_active <= 1'b1;
-        else if (lock_counter == 8'hFF) h_core_active <= 1'b0;
+        if (h_core_clk != h_core_prev) h_core_active <= CLK_ACTIVE_HIGH;
+        else if (lock_counter == CLK_LOCK_TIMEOUT) h_core_active <= CLK_ACTIVE_LOW;
         
         ai_core_prev <= ai_core_clk;
-        if (ai_core_clk != ai_core_prev) ai_core_active <= 1'b1;
-        else if (lock_counter == 8'hFF) ai_core_active <= 1'b0;
+        if (ai_core_clk != ai_core_prev) ai_core_active <= CLK_ACTIVE_HIGH;
+        else if (lock_counter == CLK_LOCK_TIMEOUT) ai_core_active <= CLK_ACTIVE_LOW;
         
         mem_prev <= mem_fabric_clk;
-        if (mem_fabric_clk != mem_prev) mem_active <= 1'b1;
-        else if (lock_counter == 8'hFF) mem_active <= 1'b0;
+        if (mem_fabric_clk != mem_prev) mem_active <= CLK_ACTIVE_HIGH;
+        else if (lock_counter == CLK_LOCK_TIMEOUT) mem_active <= CLK_ACTIVE_LOW;
         
         interconnect_prev <= interconnect_clk;
-        if (interconnect_clk != interconnect_prev) interconnect_active <= 1'b1;
-        else if (lock_counter == 8'hFF) interconnect_active <= 1'b0;
+        if (interconnect_clk != interconnect_prev) interconnect_active <= CLK_ACTIVE_HIGH;
+        else if (lock_counter == CLK_LOCK_TIMEOUT) interconnect_active <= CLK_ACTIVE_LOW;
         
         debug_prev <= debug_clk;
-        if (debug_clk != debug_prev) debug_active <= 1'b1;
-        else if (lock_counter == 8'hFF) debug_active <= 1'b0;
+        if (debug_clk != debug_prev) debug_active <= CLK_ACTIVE_HIGH;
+        else if (lock_counter == CLK_LOCK_TIMEOUT) debug_active <= CLK_ACTIVE_LOW;
     end
 end
 
 // Lock counter - wait for stable lock
 always @(posedge sys_clk_ibufg or negedge sys_rst_n) begin
+    // Lock counter - wait for stable lock using defined constants
     if (!sys_rst_n) begin
-        lock_counter <= 0;
-        clk_locked_reg <= 0;
+        lock_counter <= 8'd0;
+        clk_locked_reg <= 1'b0;
     end else begin
         if (mmcm_locked && mmcm_mem_locked) begin
-            if (lock_counter < 8'hFF)
-                lock_counter <= lock_counter + 1;
+            if (lock_counter < CLK_LOCK_TIMEOUT)
+                lock_counter <= lock_counter + 8'd1;
             else
                 clk_locked_reg <= 1'b1;
         end else begin
-            lock_counter <= 0;
+            lock_counter <= 8'd0;
             clk_locked_reg <= 1'b0;
         end
     end
@@ -563,26 +576,12 @@ always @(posedge sys_clk_ibufg or negedge sys_rst_n) begin
             end
             
             CLK_FALLBACK: begin
-                // Force clock gating to safe state
-                g_core_clk_gate <= 1'b0;
-                h_core_clk_gate <= 1'b0;
-                ai_core_clk_gate <= 1'b0;
-                mem_clk_gate <= 1'b0;
-                interconnect_clk_gate <= 1'b0;
-                
                 // Attempt recovery
                 fail_state <= CLK_RECOVERY;
             end
             
             CLK_RECOVERY: begin
                 if (mmcm_locked && mmcm_mem_locked) begin
-                    // Restore clocks
-                    g_core_clk_gate <= 1'b1;
-                    h_core_clk_gate <= 1'b1;
-                    ai_core_clk_gate <= 1'b1;
-                    mem_clk_gate <= 1'b1;
-                    interconnect_clk_gate <= 1'b1;
-                    
                     fail_state <= CLK_FAIL_NORMAL;
                     clock_fail <= 1'b0;
                 end

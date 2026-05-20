@@ -10,24 +10,26 @@
 #   make clean        - Bersihkan build artifacts
 #   make help         - Tampilkan bantuan
 #
-# NEW: Fast Tools (10x lebih cepat dari Verilator)
-#   make fast_sim     - Simulasi cepat dengan sv-sim
-#   make analyze      - Static analysis dengan sv-analyze
-#   make debug        - Interactive debugging dengan sv-debug
-#   make profile      - Performance profiling dengan sv-profile
-#   make test_fast    - Parallel testing dengan sv-test
+# REAL Tools (bukan khayalan)
+#   make icarus_syntax - Cek syntax dengan Icarus
+#   make sim_fast      - Simulasi cepat tanpa trace
+#   make sim           - Simulasi dengan trace
 ###############################################################################
 
-# Fast Tools paths
-SV_SIM     := ./tools/sv-sim
-SV_ANALYZE := ./tools/sv-analyze
-SV_DEBUG   := ./tools/sv-debug
-SV_PROFILE := ./tools/sv-profile
-SV_TEST    := ./tools/sv-test
+# Tools yang benar-benar ada (bukan khayalan)
+VERILATOR := verilator
+IVERILOG  := iverilog
+VVP       := vvp
+GTKWAVE   := gtkwave
+
+# UVM Configuration
+UVM_HOME := $(PWD)/uvm-core-2020.3.1/src
+UVM_PKG := $(UVM_HOME)/uvm_pkg.sv
 
 # Project settings
 TOP_MODULE    := aurora_172_top
 TB_MODULE     := tb_aurora_172
+UVM_TB_MODULE := tb_aurora_172_uvm
 ATM_TB_MODULE := tb_atm_features
 STRESS_TB_MODULE := tb_stress_test
 PROJECT_NAME  := aurora_172
@@ -44,33 +46,39 @@ VERILATOR     := verilator
 VERILATOR_CCI := verilator_cc
 GTKWAVE       := gtkwave
 
-# OPTIMIZATION 4: Aggressive C++ optimization flags
+# Icarus Verilog support
+IVERILOG      := iverilog
+VVP           := vvp
+IVERILOG_OPTS := -g2012 -Wall -Wno-fatal -DAURORA_FEATURES_POWER -DAURORA_FEATURES_CACHE -DAURORA_FEATURES_PERFORMANCE -DAURORA_FEATURES_SECURITY -DAURORA_DEBUG_CORE_STATE
+
+# Verilator WAJIB - mode debug dengan trace
+# Default optimized options (no tracing for fast compile)
 VERILATOR_OPTS := \
 	--cc --exe --build \
-	--build-jobs 8 \
-	--verilate-jobs 8 \
-	--no-timing --no-decoration \
-	--output-split 50000 --trace-fst --trace-structs \
-	-MMD -Wno-fatal -Wno-STMTDLY \
-	--timescale 1ns/1ps \
-	--CFLAGS "-std=c++17 -O3 -march=native -flto" \
-	--LDFLAGS "-lstdc++"
+	--top-module $(TB_MODULE) \
+	--timing \
+	--threads 1 \
+	--output-split 20000 \
+	-O2 \
+	-f iv_compile.f \
+	-Wno-fatal -Wno-STMTDLY
 
-# FAST mode optimization (for sim_fast target)
+# Conditional tracing (only when TRACE=1)
+ifeq ($(TRACE),1)
+VERILATOR_OPTS += --trace
+endif
+
+# FAST mode - maximum performance without tracing
 VERILATOR_OPTS_FAST := \
 	--cc --exe --build \
-	--build-jobs 8 \
-	--verilate-jobs 8 \
-	--no-timing \
-	--no-decoration \
-	--output-split 50000 \
-	--no-trace \
-	-MMD \
-	-Wno-fatal \
-	-Wno-STMTDLY \
-	--timescale 1ns/1ps \
-	--CFLAGS "-std=c++17 -O3 -march=native -flto -DFAST_MODE" \
-	--LDFLAGS "-lstdc++"
+	--top-module $(TB_MODULE) \
+	--timing \
+	--threads 8 \
+	--output-split 20000 \
+	-O3 \
+	-f iv_compile.f \
+	-Wno-fatal -Wno-STMTDLY \
+	-DFAST_MODE
 
 # Source files
 SRC_FILES := \
@@ -106,24 +114,12 @@ SRC_FILES := \
 	interconnect/global_scheduler_mq.sv \
 	interconnect/global_scheduler_sq.sv \
 	rt_engine/rt_engine.sv \
-	testbench/perf_profiler_v2.sv \
-	testbench/testbench.sv \
 	interfaces/axi_if.sv \
 	interfaces/memory_if.sv \
 	assertions/memory_assertions.sv
 
 TB_FILES := \
 	testbench/testbench.sv
-
-TB_ADVANCED_FILES := \
-	testbench/testbench_advanced.sv
-
-TB_ENHANCED_FILES := \
-	testbench/activity_monitor.sv \
-	testbench/testbench_enhanced.sv
-
-TB_STRESS_FILES := \
-	testbench/testbench_stress.sv
 
 WRAPPER_FILE := \
 	sim_main.cpp
@@ -135,9 +131,18 @@ BUILD_DIR   := build
 OBJ_DIR     := $(BUILD_DIR)/obj
 BIN_DIR     := $(BUILD_DIR)/bin
 
+# Clean log files
+.PHONY: clean-logs
+clean-logs:
+	@echo "[INFO] Cleaning all log files..."
+	@rm -f *.log
+	@rm -f build/*.log
+	@rm -f build/*/*.log
+	@echo "[OK] All log files deleted"
+
 # Default target
 .PHONY: all
-all: compile sim
+all: clean-logs compile sim
 
 # Compile dengan Verilator
 .PHONY: compile
@@ -183,42 +188,47 @@ $(BIN_DIR)/V$(TB_MODULE)_advanced: $(SRC_FILES) $(TB_ADVANCED_FILES) $(CURDIR)/s
 		$(TB_ADVANCED_FILES)
 	@echo "[OK] Advanced testbench compilation successful"
 
-$(BIN_DIR)/V$(TB_MODULE): $(ALL_FILES) $(CURDIR)/$(WRAPPER_FILE) | $(BIN_DIR) $(OBJ_DIR)
-	@echo "[INFO] Compiling with Verilator (OPTIMIZED)..."
+$(BIN_DIR)/V$(TB_MODULE): $(CURDIR)/$(WRAPPER_FILE) | $(BIN_DIR) $(OBJ_DIR)
+	@echo "[INFO] Compiling dengan Verilator (DEBUG mode)..."
 	cd $(CURDIR) && $(VERILATOR) $(VERILATOR_OPTS) \
-		--top-module $(TB_MODULE) \
-		--Mdir $(CURDIR)/$(OBJ_DIR) \
-		--o $(CURDIR)/$(BIN_DIR)/V$(TB_MODULE) \
-		$(CURDIR)/$(WRAPPER_FILE) \
-		$(SRC_FILES) \
-		$(TB_FILES)
+		-Mdir $(CURDIR)/$(OBJ_DIR) \
+		-o $(CURDIR)/$(BIN_DIR)/V$(TB_MODULE) \
+		$(CURDIR)/$(WRAPPER_FILE)
 	@echo "[OK] Compilation successful"
 
-# Run simulasi
+# Run simulasi (fast, no tracing by default)
 .PHONY: sim
 sim: $(BIN_DIR)/V$(TB_MODULE)
-	@echo "[INFO] Running simulation..."
+	@echo "[INFO] Running simulation (fast mode, no tracing)..."
 	cd $(CURDIR) && ./$(BIN_DIR)/V$(TB_MODULE) 2>&1 | tee sim_run.log
 	@echo "[OK] Simulation complete - Log saved to sim_run.log"
 
-# OPTIMIZATION 5: Fast simulation without tracing (20-50x faster)
+# Debug simulation with tracing (use only when needed)
+.PHONY: sim_debug
+sim_debug: 
+	@echo "[INFO] Compiling with tracing enabled..."
+	$(MAKE) clean
+	$(MAKE) TRACE=1 $(BIN_DIR)/V$(TB_MODULE)
+	@echo "[INFO] Running simulation with tracing..."
+	cd $(CURDIR) && ./$(BIN_DIR)/V$(TB_MODULE) 2>&1 | tee sim_run.log
+	@echo "[OK] Debug simulation complete - Log saved to sim_run.log"
+	@echo "[INFO] VCD file: sim_output.vcd"
+
+# Ultra-fast simulation (no tracing, optimized)
 .PHONY: sim_fast
 sim_fast: $(BIN_DIR)/V$(TB_MODULE)_fast
-	@echo "[INFO] Running FAST simulation (no tracing)..."
+	@echo "[INFO] Running ULTRA-FAST simulation (no tracing)..."
 	cd $(CURDIR) && SIM_TIMEOUT=$(if $(TIMEOUT),$(TIMEOUT),200000) ./$(BIN_DIR)/V$(TB_MODULE)_fast 2>&1 | tee sim_run.log
 	@echo "[OK] FAST simulation complete - Log saved to sim_run.log"
-	@echo "[INFO] For debugging, use: make sim (with tracing)"
+	@echo "[INFO] For debugging, use: make sim_debug"
 
 # Compile fast version (no trace, optimized)
-$(BIN_DIR)/V$(TB_MODULE)_fast: $(ALL_FILES) $(CURDIR)/$(WRAPPER_FILE) | $(BIN_DIR) $(OBJ_DIR)_fast
-	@echo "[INFO] Compiling FAST testbench with Verilator (NO TRACE - 20-50x faster)..."
+$(BIN_DIR)/V$(TB_MODULE)_fast: $(CURDIR)/$(WRAPPER_FILE) | $(BIN_DIR) $(OBJ_DIR)_fast
+	@echo "[INFO] Compiling FAST testbench dengan Verilator (NO TRACE)..."
 	cd $(CURDIR) && $(VERILATOR) $(VERILATOR_OPTS_FAST) \
-		--top-module $(TB_MODULE) \
-		--Mdir $(CURDIR)/$(OBJ_DIR)_fast \
-		--o $(CURDIR)/$(BIN_DIR)/V$(TB_MODULE)_fast \
-		$(CURDIR)/$(WRAPPER_FILE) \
-		$(SRC_FILES) \
-		$(TB_FILES)
+		-Mdir $(CURDIR)/$(OBJ_DIR)_fast \
+		-o $(CURDIR)/$(BIN_DIR)/V$(TB_MODULE)_fast \
+		$(CURDIR)/sim_main_fast.cpp
 	@echo "[OK] Fast testbench compilation successful"
 
 $(OBJ_DIR)_fast:
@@ -284,7 +294,7 @@ clean:
 	# FIXED: Don't delete repository VCD file (aurora_172_tb.vcd)
 	rm -f *.vcd
 	@# Keep *.log files as they may contain useful simulation history
-	# rm -f *.log
+	 rm -f *.log
 	@echo "[OK] Clean complete"
 
 # ATM testbench build (Intel + AMD features)
@@ -371,10 +381,19 @@ help:
 	@echo "  make help           - Show this help"
 	@echo ""
 	@echo "Icarus Verilog (Lebih Ringan & Cepat):"
-	@echo "  make iv_run         - Compile & run dengan Icarus Verilog 🔥"
-	@echo "  make iverilog_compile  - Compile dengan Icarus Verilog"
-	@echo "  make iverilog_sim      - Run Icarus Verilog simulation"
-	@echo "  make iv_wave        - View waveform (VCD)"
+	@echo "  make icarus_compile - Compile dengan Icarus Verilog"
+	@echo "  make icarus_sim     - Compile & run simulasi"
+	@echo "  make icarus_sim_fast - Fast simulation (no tracing)"
+	@echo "  make icarus_wave    - Generate VCD waveform"
+	@echo "  make wave_vcd      - View VCD dengan GTKWave"
+	@echo "  make icarus_debug   - Debug mode"
+	@echo "  make icarus_syntax - Syntax check only (tercepat)"
+	@echo ""
+	@echo "Usage Examples:"
+	@echo "  make icarus_syntax     - Quick syntax check"
+	@echo "  make icarus_sim        - Full simulation with logging"
+	@echo "  make icarus_sim_fast   - Fast development cycle"
+	@echo "  make icarus_wave && make wave_vcd - Debug dengan waveform"
 	@echo ""
 	@echo "Fast Mode Options:"
 	@echo "  make sim_fast TIMEOUT=100000  - Custom timeout (default: 200000)"
@@ -428,12 +447,11 @@ help:
 	@echo "  ENABLE_TRACE=1 make sim                - Run simulation with trace"
 	@echo "  make wave                              - View waveform in GTKWave"
 	@echo ""
-	@echo "Fast Tools (NEW - 10x lebih cepat dari Verilator):"
-	@echo "  make fast_sim     - Fast simulation (sv-sim)"
-	@echo "  make analyze      - Static analysis (sv-analyze)"
-	@echo "  make debug        - Interactive debugger (sv-debug)"
-	@echo "  make profile      - Performance profiling (sv-profile)"
-	@echo "  make test_fast    - Parallel test runner (sv-test)"
+	@echo "REAL Tools (yang benar-benar ada):"
+	@echo "  make icarus_syntax - Syntax check tercepat"
+	@echo "  make sim_fast      - Simulasi cepat tanpa trace"
+	@echo "  make sim           - Simulasi dengan trace"
+	@echo "  make icarus_sim    - Simulasi dengan Icarus"
 	@echo ""
 	@echo "========================================="
 
@@ -444,34 +462,54 @@ help:
 # Icarus Verilog Targets (Lebih ringan & cepat dari Verilator)
 # ============================================================================
 
-# Icarus Verilog path & settings
-IVERILOG    := iverilog
-VVP         := vvp
-IVERILOG_G  := -g2012  # SystemVerilog 2012 support
+# SBY (SymbiYosys) path & settings
+SBY         := sby
+SBY_OPTS    := --threads 4 --yosys-opts -Q
 
-# Compile dengan Icarus Verilog
-.PHONY: iverilog_compile
-iverilog_compile: $(BIN_DIR)/aurora_sim
-	@echo "[OK] Icarus Verilog compilation complete"
+# Formal verification dengan SBY
+.PHONY: sby_run
+sby_run:
+	@echo "[INFO] Running formal verification dengan SBY..."
+	cd $(CURDIR) && $(SBY) $(SBY_OPTS) aurora.sby
+	@echo "[OK] Formal verification complete"
 
-$(BIN_DIR)/aurora_sim: iv_compile.f | $(BIN_DIR)
-	@echo "[INFO] Compiling with Icarus Verilog (using file list)..."
-	cd $(CURDIR) && $(IVERILOG) $(IVERILOG_G) \
+# Quick formal check
+.PHONY: sby_quick
+sby_quick:
+	@echo "[INFO] Quick formal check (depth 50)..."
+	cd $(CURDIR) && $(SBY) -f aurora.sby quick
+	@echo "[OK] Quick formal check complete"
+
+# Lightweight version untuk laptop low-spec
+.PHONY: iv_run_light
+iv_run_light:
+	@echo "[INFO] Compiling LIGHTWEIGHT version (low memory)..."
+	$(IVERILOG) $(IVERILOG_G) \
+		-f $(CURDIR)/iv_run_light.f \
+		-s $(TB_MODULE) \
+		-o $(CURDIR)/$(BIN_DIR)/aurora_sim_light
+	@echo "[INFO] Running lightweight simulation dengan TIMEOUT 30 detik..."
+	@echo "[WARNING] Simulation akan di-STOP otomatis setelah 30 detik"
+	cd $(CURDIR) && timeout 30s $(VVP) $(BIN_DIR)/aurora_sim_light +SIM_TIMEOUT=30000 2>&1 | tee sim_iv_light.log
+	@echo "[OK] Lightweight simulation complete (dibatasi 30 detik)"
+
+# Version dengan timeout custom
+.PHONY: iv_run_safe
+iv_run_safe:
+	@if [ -z "$(TIMEOUT)" ]; then \
+		echo "[INFO] Usage: make iv_run_safe TIMEOUT=60"; \
+		echo "[INFO] Default: 60 detik"; \
+		TIMEOUT=60; \
+	fi
+	@echo "[INFO] Compiling SAFE version dengan timeout $(TIMEOUT) detik..."
+	$(IVERILOG) $(IVERILOG_G) \
 		-f $(CURDIR)/iv_compile.f \
 		-s $(TB_MODULE) \
-		-o $(CURDIR)/$(BIN_DIR)/aurora_sim
-	@echo "[OK] Icarus Verilog compilation successful"
-
-# Run simulation dengan Icarus Verilog
-.PHONY: iverilog_sim
-iverilog_sim: $(BIN_DIR)/aurora_sim
-	@echo "[INFO] Running simulation with Icarus Verilog (vvp)..."
-	cd $(CURDIR) && $(VVP) $(BIN_DIR)/aurora_sim 2>&1 | tee sim_iv.log
-	@echo "[OK] Icarus Verilog simulation complete"
-
-# Quick compile & run dengan Icarus
-.PHONY: iv_run
-iv_run: iverilog_compile iverilog_sim
+		-o $(CURDIR)/$(BIN_DIR)/aurora_sim_safe
+	@echo "[INFO] Running SAFE simulation dengan TIMEOUT $(TIMEOUT) detik..."
+	@echo "[WARNING] Simulation akan di-STOP otomatis setelah $(TIMEOUT) detik"
+	cd $(CURDIR) && timeout $(TIMEOUT)s $(VVP) $(BIN_DIR)/aurora_sim_safe +SIM_TIMEOUT=$(shell echo $(TIMEOUT) | awk '{print $$1*1000}') 2>&1 | tee sim_iv_safe.log
+	@echo "[OK] SAFE simulation complete (dibatasi $(TIMEOUT) detik)"
 
 # Icarus waveform (VCD output)
 .PHONY: iv_wave
@@ -480,69 +518,113 @@ iv_wave:
 	$(GTKWAVE) $(BIN_DIR)/waveform.vcd &
 
 # ============================================================================
-# AURORA-172 Fast Tools Targets (10x lebih cepat dari Verilator)
+# REAL TARGETS (bukan khayalan)
 # ============================================================================
 
-# Fast simulation (10x lebih cepat dari Verilator)
-.PHONY: fast_sim
-fast_sim:
-	@echo "[INFO] Running fast simulation with sv-sim..."
-	@echo "[INFO] This is 10x faster than Verilator"
-	$(SV_SIM) $(SRC_FILES) $(TB_FILES) \
-		--top-module $(TB_MODULE) \
-		--cycles 100000 \
-		--optimize \
-		--threads 8 \
-		--verbose
+# Syntax check tercepat
+.PHONY: icarus_syntax
+icarus_syntax:
+	@echo "[INFO] Cek syntax dengan Icarus..."
+	cd $(CURDIR) && $(IVERILOG) -g2012 -Wall -t -f iv_compile.f
+	@echo "[OK] Syntax check complete"
 
-# Static analysis dengan 200+ checks
-.PHONY: analyze
-analyze:
-	@echo "[INFO] Running static analysis with sv-analyze..."
-	@echo "[INFO] Checking 200+ rules (5x more detailed than Verilator)"
-	$(SV_ANALYZE) $(SRC_FILES) \
-		--top-module $(TOP_MODULE) \
-		--all-checks \
-		--report analysis_report.txt \
-		--verbose
-	@echo "[INFO] Report saved to: analysis_report.txt"
+# ============================================================================
+# ICARUS VERILOG TARGETS
+# ============================================================================
 
-# Interactive debugging
-.PHONY: debug
-debug:
-	@echo "[INFO] Starting interactive debugger..."
-	@echo "[INFO] Features not available in Verilator"
-	$(SV_DEBUG) $(SRC_FILES) $(TB_FILES) \
-		--top-module $(TB_MODULE) \
-		--interactive
+# Compile dengan Icarus Verilog (menggunakan iv_compile.f)
+.PHONY: icarus_compile
+icarus_compile:
+	@echo "[INFO] Compiling with Icarus Verilog using iv_compile.f..."
+	cd $(CURDIR) && mkdir -p build && $(IVERILOG) $(IVERILOG_OPTS) \
+		-f iv_compile.f \
+		-o build/aurora_172.vvp 2>&1 | tee icarus_compile.log
+	@echo "[OK] Icarus Verilog compilation complete - Log saved to icarus_compile.log"
 
-# Performance profiling
-.PHONY: profile
-profile:
-	@echo "[INFO] Running performance profiling..."
-	$(SV_PROFILE) $(SRC_FILES) $(TB_FILES) \
-		--top-module $(TOP_MODULE) \
-		--cycles 100000 \
-		--detail-level 2 \
-		--report profile_report.txt \
-		--verbose
-	@echo "[INFO] Report saved to: profile_report.txt"
+# Run simulasi dengan Icarus Verilog
+.PHONY: icarus_sim
+icarus_sim: icarus_compile
+	@echo "[INFO] Running Icarus Verilog simulation..."
+	@$(VVP) build/aurora_172.vvp 2>&1 | tee icarus_sim.log; \
+	status=$$?; \
+	if [ $$status -ne 0 ]; then \
+		echo "[ERROR] Simulation failed with exit code $$status"; \
+	else \
+		echo "[OK] Simulation complete - Log saved to icarus_sim.log"; \
+	fi
+# Fast Icarus simulation (no tracing)
+.PHONY: icarus_sim_fast
+icarus_sim_fast:
+	@echo "[INFO] Compiling with Icarus Verilog (fast mode) using iv_compile.f..."
+	cd $(CURDIR) && mkdir -p build && $(IVERILOG) -g2012 -Wall \
+		-f iv_compile.f \
+		-o build/aurora_172_fast.vvp
+	@echo "[OK] Fast compilation successful"
+	@echo "[INFO] Running fast simulation with timeout protection..."
+	@echo "[INFO] Timeout: 30 seconds (fast mode)"
+	cd $(CURDIR) && timeout 30s $(VVP) build/aurora_172_fast.vvp 2>&1 | tee icarus_fast.log || \
+		if [ $$? -eq 124 ]; then \
+			echo "[TIMEOUT] Fast simulation stopped after 30 seconds"; \
+		else \
+			echo "[OK] Fast simulation complete"; \
+		fi
 
-# Parallel test runner (3x faster)
-.PHONY: test_fast
-test_fast:
-	@echo "[INFO] Running tests in parallel with sv-test..."
-	@echo "[INFO] This is 3x faster than Verilator sequential testing"
-	$(SV_TEST) $(TB_FILES) \
-		--top-module $(TB_MODULE) \
-		--parallel 8 \
-		--coverage \
-		--report test_results.xml \
-		--verbose
+# Generate VCD waveform dengan Icarus
+.PHONY: icarus_wave
+icarus_wave:
+	@echo "[INFO] Compiling with VCD dump support using iv_compile.f..."
+	cd $(CURDIR) && mkdir -p build && $(IVERILOG) -g2012 -Wall -DDUMP_VCD \
+		-f iv_compile.f \
+		-o build/aurora_172_wave.vvp
+	@echo "[OK] Waveform compilation successful"
+	@echo "[INFO] Running simulation with VCD dump (timeout protected)..."
+	@echo "[INFO] Timeout: 45 seconds (wave generation)"
+	cd $(CURDIR) && timeout 45s $(VVP) build/aurora_172_wave.vvp || \
+		if [ $$? -eq 124 ]; then \
+			echo "[TIMEOUT] Wave simulation stopped after 45 seconds"; \
+		else \
+			echo "[OK] VCD waveform generated - Use: make wave_vcd"; \
+		fi
 
-# Build fast tools
-.PHONY: build_tools
-build_tools:
-	@echo "[INFO] Building AURORA-172 Fast Tools..."
-	bash ./tools/build.sh
-	@echo "[INFO] Tools build complete"
+# View VCD waveform dengan GTKWave
+.PHONY: wave_vcd
+wave_vcd:
+	@echo "[INFO] Opening VCD waveform with GTKWave..."
+	cd $(CURDIR) && $(GTKWAVE) build/aurora_172.vcd &
+
+# Debug dengan Icarus Verilog
+.PHONY: icarus_debug
+icarus_debug:
+	@echo "[INFO] Compiling with debug symbols using iv_compile.f..."
+	cd $(CURDIR) && mkdir -p build && $(IVERILOG) -g2012 -Wall -g \
+		-f iv_compile.f \
+		-o build/aurora_172_debug.vvp
+	@echo "[OK] Debug compilation successful"
+	@echo "[INFO] Running debug simulation..."
+	cd $(CURDIR) && $(VVP) build/aurora_172_debug.vvp
+
+# Custom timeout simulation
+.PHONY: icarus_sim_timeout
+icarus_sim_timeout:
+	@if [ -z "$(TIMEOUT)" ]; then \
+		echo "[INFO] Usage: make icarus_sim_timeout TIMEOUT=60"; \
+		echo "[INFO] Default: 60 seconds"; \
+		TIMEOUT=60; \
+	fi
+	@echo "[INFO] Running simulation with custom timeout $(TIMEOUT) seconds..."
+	cd $(CURDIR) && timeout $(TIMEOUT)s $(VVP) build/aurora_172.vvp 2>&1 | tee icarus_custom_timeout.log || \
+		if [ $$? -eq 124 ]; then \
+			echo "[TIMEOUT] Simulation stopped after $(TIMEOUT) seconds"; \
+		else \
+			echo "[OK] Simulation complete"; \
+		fi
+
+# Syntax check only (fastest)
+.PHONY: icarus_syntax
+icarus_syntax:
+	@echo "[INFO] Running Icarus Verilog syntax check using iv_compile.f..."
+	cd $(CURDIR) && $(IVERILOG) -g2012 -Wall -t \
+		-f iv_compile.f -s $(TB_MODULE)
+	@echo "[OK] Syntax check complete"
+
+# Tidak ada build tools - tools khayalan dihapus

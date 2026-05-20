@@ -457,23 +457,24 @@ module exception_handler #(
             end
             
             // DEADLOCK FIX: Use explicit assignments instead of for-loop in always block
-            // Process G-Core exceptions with rate limiting (4 cores)
-            if (g_core_error_valid[0] && (error_rate_count < ERROR_RATE_THRESHOLD)) begin
+            // Process G-Core exceptions with rate limiting (all cores)
+            for (int g = 0; g < NUM_G_CORES && error_rate_count < ERROR_RATE_THRESHOLD; g = g + 1) begin
+                if (g_core_error_valid[g] && (error_rate_count < ERROR_RATE_THRESHOLD)) begin
                     total_error_count <= total_error_count + 1;
                     g_core_error_count <= g_core_error_count + 1;
                     
                     // Log error with overflow protection
-                    error_history[error_history_tail] <= {g_core_error_code[0], EXC_ERROR_CODE_NONE, 8'd0};
+                    error_history[error_history_tail] <= {g_core_error_code[g], EXC_ERROR_CODE_NONE, 8'd0};
                     error_history_tail <= (error_history_tail + 1) % EXC_ERROR_HISTORY_SIZE;
                     
                     // Determine if this is highest priority error
-                    if (!current_error_valid || g_core_error_code[0][3:0] > current_error_code[3:0]) begin
-                        current_error_code <= g_core_error_code[0];
-                        current_error_source <= {CORE_TYPE_G, 8'd0};  // G-Core type + ID
+                    if (!current_error_valid || g_core_error_code[g][3:0] > current_error_code[3:0]) begin
+                        current_error_code <= g_core_error_code[g];
+                        current_error_source <= {CORE_TYPE_G, g[7:0]};  // G-Core type + ID
                         current_error_valid <= 1'b1;
                     end
                     
-                    $display("[%0t] [EXCEPTION] G-Core#%0d: Error 0x%02h", $time, 8'd0, g_core_error_code[0]);
+                    $display("[%0t] [EXCEPTION] G-Core#%0d: Error 0x%02h", $time, g, g_core_error_code[g]);
                 end
             end
             
@@ -556,7 +557,8 @@ module exception_handler #(
                 end
             end
         end
-    
+    end
+     
     // =========================================================================
     // Helper functions
     // =========================================================================

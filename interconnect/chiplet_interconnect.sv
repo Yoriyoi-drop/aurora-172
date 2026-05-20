@@ -170,7 +170,7 @@ module chiplet_interconnect #(
                 // FIX: Snoop using current request, not stale mem_valid (NBA ordering)
                 // Use selected_chiplet/has_request which are blocking-assigned in same cycle
                 snoop_broadcast_valid <= 1'b1;
-                snoop_broadcast_addr <= mem_addr;
+                snoop_broadcast_addr <= g_addr;
                 snoop_invalidate_targets <= snoop_table[mem_addr[5:0] % SNOOP_SIZE];
                 snoop_table[mem_addr[5:0] % SNOOP_SIZE] <= (1'b1 << selected_chiplet);
                 snoop_tags[mem_addr[5:0] % SNOOP_SIZE] <= mem_addr[ADDR_WIDTH-1 -: 16];

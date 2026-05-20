@@ -37,12 +37,12 @@ module cdc_synchronizer #(
     output wire dst_data
 );
 
-// Synchronizer chain di destination clock domain
-reg [1:0] sync_stage = 2'b00;
+// Standard 2-flop synchronizer chain
+reg [1:0] sync_stage = {2{RESET_VALUE}};
 
 always @(posedge dst_clk or negedge dst_rst_n) begin
     if (!dst_rst_n)
-        sync_stage <= {RESET_VALUE, RESET_VALUE};
+        sync_stage <= {2{RESET_VALUE}};
     else
         sync_stage <= {sync_stage[0], src_data};
 end
@@ -79,11 +79,26 @@ module cdc_pulse_synchronizer (
 
 // Toggle flip-flop di source domain
 reg src_toggle = 0;
+reg src_pulse_stretched = 0;
+reg [2:0] src_pulse_counter = 0;
+
 always @(posedge src_clk or negedge src_rst_n) begin
-    if (!src_rst_n)
+    if (!src_rst_n) begin
         src_toggle <= 0;
-    else if (src_pulse)
-        src_toggle <= ~src_toggle;
+        src_pulse_stretched <= 0;
+        src_pulse_counter <= 0;
+    end else begin
+        if (src_pulse) begin
+            src_pulse_stretched <= 1;
+            src_pulse_counter <= 3'd5;  // Stretch for 5 cycles
+            src_toggle <= ~src_toggle;
+        end else if (src_pulse_counter > 0) begin
+            src_pulse_counter <= src_pulse_counter - 1;
+            if (src_pulse_counter == 1) begin
+                src_pulse_stretched <= 0;
+            end
+        end
+    end
 end
 
 // Synchronize toggle ke destination domain
@@ -101,11 +116,31 @@ cdc_synchronizer #(
 
 // Detect perubahan di destination domain
 reg dst_toggle_d = 0;
+reg [2:0] metastability_detector = 0;
+reg metastability_detected = 0;
+
 always @(posedge dst_clk or negedge dst_rst_n) begin
-    if (!dst_rst_n)
+    if (!dst_rst_n) begin
         dst_toggle_d <= 0;
-    else
+        metastability_detector <= 0;
+        metastability_detected <= 0;
+    end else begin
         dst_toggle_d <= dst_toggle_sync;
+        
+        if (dst_toggle_d !== dst_toggle_sync) begin  // X detection
+            metastability_detector <= metastability_detector + 1;
+            if (metastability_detector >= 3) begin
+                metastability_detected <= 1;
+                $display("[%0t] [CDC] METASTABILITY DETECTED - forcing recovery", $time);
+            end
+        end else begin
+            metastability_detector <= 0;
+            if (metastability_detected) begin
+                metastability_detected <= 0;
+                $display("[%0t] [CDC] Metastability resolved", $time);
+            end
+        end
+    end
 end
 
 assign dst_pulse = dst_toggle_sync ^ dst_toggle_d;
@@ -117,7 +152,7 @@ endmodule
 // 3. GRAY CODE COUNTER (untuk FIFO pointers)
 //=============================================================================
 module cdc_grey_code #(
-    parameter WIDTH = 4
+    parameter WIDTH = 4  // Small parameter, no need for AURORA standard
 )(
     input  wire             clk,
     input  wire             rst_n,
@@ -146,7 +181,7 @@ endmodule
 // 4. ASYNC FIFO (untuk multi-bit data transfer antar clock domain)
 //=============================================================================
 module cdc_fifo #(
-    parameter DATA_WIDTH = 32,
+    parameter DATA_WIDTH = AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
     parameter ADDR_WIDTH = 4,  // 2^ADDR_DEPTH entries
     parameter DEPTH = (1 << ADDR_WIDTH)
 )(
@@ -256,8 +291,10 @@ function automatic [ADDR_WIDTH:0] gray_to_binary;
     end
 endfunction
 
-assign wr_ptr_bin = gray_to_binary(wr_ptr_gray)[ADDR_WIDTH-1:0];
-assign rd_ptr_bin = gray_to_binary(rd_ptr_gray)[ADDR_WIDTH-1:0];
+wire [ADDR_WIDTH:0] wr_ptr_bin_full = gray_to_binary(wr_ptr_gray);
+wire [ADDR_WIDTH:0] rd_ptr_bin_full = gray_to_binary(rd_ptr_gray);
+assign wr_ptr_bin = wr_ptr_bin_full[ADDR_WIDTH-1:0];
+assign rd_ptr_bin = rd_ptr_bin_full[ADDR_WIDTH-1:0];
 
 endmodule
 
@@ -265,7 +302,7 @@ endmodule
 // 5. HANDSHAKE SYNCHRONIZER (untuk transfer data terkontrol)
 //=============================================================================
 module cdc_handshake #(
-    parameter DATA_WIDTH = 32
+    parameter DATA_WIDTH = AURORA_DATA_WIDTH   // FIXED: Use standard parameter
 )(
     // Source domain
     input  wire                     src_clk,
@@ -362,7 +399,7 @@ endmodule
 // 6. MULTIBIT MUXED SYNCHRONIZER (untuk bus data lebar)
 //=============================================================================
 module cdc_muxed_synchronizer #(
-    parameter DATA_WIDTH = 64
+    parameter DATA_WIDTH = AURORA_DATA_WIDTH   // FIXED: Use standard parameter
 )(
     input  wire                     src_clk,
     input  wire                     dst_clk,

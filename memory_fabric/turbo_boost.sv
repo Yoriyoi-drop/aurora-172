@@ -30,28 +30,27 @@
 
 `timescale 1ns / 1ps
 
+// Include parameters (Icarus compatibility)
+`include "interfaces/aurora_params.svh"
+
 module turbo_boost #(
-    parameter DATA_WIDTH            = 128,  // OPTIMIZED: 64→128 for finer power monitoring
-    /* verilator lint_off UNUSED */
-    parameter CLK_FREQ_MHZ          = 6000,  // 6 GHz base
-    /* verilator lint_on UNUSED */
+    parameter DATA_WIDTH            = AURORA_DATA_WIDTH,   // Standard data width
+    parameter CLK_FREQ_MHZ          = 4000,  // 4GHz base clock frequency
 
     // G-Core turbo parameters
-    parameter G_BASE_CLOCK_MHZ      = 6000,
-    parameter G_TURBO_CLOCK_MHZ     = 6500,  // +8.3%
-    parameter G_TAU_CYCLES          = 28000, // 28ms @ 1GHz equivalent
+    parameter G_BASE_CLOCK_MHZ      = 4000,
+    parameter G_TURBO_CLOCK_MHZ     = 4400,  // +10% boost over base
+    parameter G_TAU_CYCLES          = 14000, // Fast response time
 
     // A-Core turbo parameters
-    parameter A_BASE_CLOCK_MHZ      = 4000,
-    parameter A_TURBO_CLOCK_MHZ     = 4500,  // +12.5%
-    /* verilator lint_off UNUSED */
-    parameter A_TAU_UNLIMITED       = 1'b1,  // AMD-style unlimited
-    /* verilator lint_on UNUSED */
+    parameter A_BASE_CLOCK_MHZ      = 3000,
+    parameter A_TURBO_CLOCK_MHZ     = 3300,  // +10% boost over base
+    parameter A_TAU_UNLIMITED       = 1'b0,  // Limited turbo for thermal safety
 
     // Thermal parameters
-    parameter TEMP_MAX_C            = 85,    // Max operating temp
-    parameter TEMP_THROTTLE_C       = 95,    // Throttle temp
-    parameter TEMP_COOLDOWN_C       = 75,    // Cooldown threshold
+    parameter TEMP_MAX_C            = 80,    // Maximum safe operating temperature
+    parameter TEMP_THROTTLE_C       = 90,    // Thermal throttling threshold
+    parameter TEMP_COOLDOWN_C       = 70,    // Cooldown temperature threshold
 
     // TDP parameters
     parameter TDP_BASE_MW           = 250000, // 250W

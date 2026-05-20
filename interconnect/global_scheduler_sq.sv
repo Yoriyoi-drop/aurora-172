@@ -431,32 +431,28 @@ module global_scheduler_sq #(
                 queue_wait_cycles[0] <= queue_wait_cycles[0] + 1;
                 case (queue_type[0])
                     TASK_GAMING: begin
-                        // Gaming tasks age slower (already high priority)
                         if (queue_wait_cycles[0] >= (AGING_RATE * 2) && queue_aging[0] < 8'd1) begin
                             queue_aging[0] <= queue_aging[0] + 1;
                             aging_boosted_tasks <= aging_boosted_tasks + 1;
-                            end
                         end
-                        TASK_AI: begin
-                            // AI tasks age at normal rate
-                            if (queue_wait_cycles[0] >= AGING_RATE && queue_aging[0] < MAX_AGING) begin
-                                queue_aging[0] <= queue_aging[0] + 1;
-                                aging_boosted_tasks <= aging_boosted_tasks + 1;
-                            end
-                        end
-                        TASK_NPU: begin
-                            // NPU tasks age faster (prevent starvation)
-                            if (queue_wait_cycles[0] >= (AGING_RATE / 2) && queue_aging[0] < MAX_AGING) begin
-                                queue_aging[0] <= queue_aging[0] + 1;
-                                aging_boosted_tasks <= aging_boosted_tasks + 1;
-                            end
-                        end
-                    endcase
-                    
-                    // ANTI-STARVATION: Force dispatch if waiting too long
-                    if (queue_wait_cycles[0] > 8'd200) begin  // 200 cycles = too long
-                        queue_aging[0] <= MAX_AGING;  // Force maximum priority
                     end
+                    TASK_AI: begin
+                        if (queue_wait_cycles[0] >= AGING_RATE && queue_aging[0] < MAX_AGING) begin
+                            queue_aging[0] <= queue_aging[0] + 1;
+                            aging_boosted_tasks <= aging_boosted_tasks + 1;
+                        end
+                    end
+                    TASK_NPU: begin
+                        if (queue_wait_cycles[0] >= (AGING_RATE / 2) && queue_aging[0] < MAX_AGING) begin
+                            queue_aging[0] <= queue_aging[0] + 1;
+                            aging_boosted_tasks <= aging_boosted_tasks + 1;
+                        end
+                    end
+                endcase
+                
+                // ANTI-STARVATION: Force dispatch if waiting too long
+                if (queue_wait_cycles[0] > 8'd200) begin
+                    queue_aging[0] <= MAX_AGING;
                 end
             end
 
@@ -475,7 +471,7 @@ module global_scheduler_sq #(
                     queue_dispatched[active_queue_idx] <= 1'b0;
                     active_queue_idx_valid <= 1'b0;
                 end
-                if (queue_count > 0) queue_count <= queue_count - 1;  // FIX: Decrement on completion
+                if (queue_count > 0 && active_queue_idx_valid) queue_count <= queue_count - 1;  // FIX: Decrement on completion with guard
             end
             if (a_core_complete && !a_core_complete_prev && task_being_served && active_task_type == TASK_AI) begin
                 $display("[%0t] [SQ-SCHEDULER] ✓ A-Core completion detected! Pulling result from FIFO", $time);
@@ -490,7 +486,7 @@ module global_scheduler_sq #(
                     queue_dispatched[active_queue_idx] <= 1'b0;
                     active_queue_idx_valid <= 1'b0;
                 end
-                if (queue_count > 0) queue_count <= queue_count - 1;  // FIX: Decrement on completion
+                if (queue_count > 0 && active_queue_idx_valid) queue_count <= queue_count - 1;  // FIX: Decrement on completion with guard
             end
             if (npu_complete && !npu_complete_prev && task_being_served && active_task_type == TASK_NPU) begin
                 counter_completed <= counter_completed + 1;
@@ -504,7 +500,7 @@ module global_scheduler_sq #(
                     queue_dispatched[active_queue_idx] <= 1'b0;
                     active_queue_idx_valid <= 1'b0;
                 end
-                if (queue_count > 0) queue_count <= queue_count - 1;  // FIX: Decrement on completion
+                if (queue_count > 0 && active_queue_idx_valid) queue_count <= queue_count - 1;  // FIX: Decrement on completion with guard
             end
 
             if (!active_task_valid) pending_result_valid <= 1'b0;
@@ -688,5 +684,6 @@ module global_scheduler_sq #(
             end
             // Continue for all 16 entries (truncated for brevity)
     end
+end
 
 endmodule

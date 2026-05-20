@@ -27,8 +27,8 @@
 
 module l2_cache #(
     // Use standardized parameters from aurora_params.svh
-    parameter DATA_WIDTH    = AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
-    parameter ADDR_WIDTH    = AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
+    parameter DATA_WIDTH    = `AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
+    parameter ADDR_WIDTH    = `AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
     parameter CACHE_SIZE    = 262144,         // OPTIMIZED: 512KB->256KB (smaller cache)
     parameter ASSOCIATIVITY = 8,              // OPTIMIZED: 16->8 (simpler associativity)
     parameter LINE_SIZE     = 64,             // OPTIMIZED: smaller line size
@@ -51,8 +51,8 @@ module l2_cache #(
     input  wire [LINE_SIZE-1:0]         l1_1_wr_data,
     input  wire                         l1_1_rd_en,
     input  wire                         l1_1_wr_en,
-    output wire [LINE_SIZE-1:0]         l1_1_rd_data,
-    output wire                         l1_1_ready,
+    output reg [LINE_SIZE-1:0]          l1_1_rd_data,
+    output reg                          l1_1_ready,
 
     // L1 port 2: NPU interface
     input  wire [ADDR_WIDTH-1:0]        l1_2_addr,
@@ -301,8 +301,10 @@ module l2_cache #(
         if (!rst_n_sync) begin
             state <= S_IDLE;
             l1_0_ready <= 1'b1;
+            l1_1_ready <= 1'b1;
             l1_2_ready <= 1'b1;
             l1_0_rd_data <= {LINE_SIZE{1'b0}};
+            l1_1_rd_data <= {LINE_SIZE{1'b0}};
             l1_2_rd_data <= {LINE_SIZE{1'b0}};
             mem_rd_en <= 1'b0;
             mem_wr_en <= 1'b0;
@@ -391,7 +393,7 @@ module l2_cache #(
             case (state)
                 S_IDLE: begin
                     l1_0_ready <= 1'b1;
-                    // l1_1_ready handled by continuous assignment
+                    l1_1_ready <= 1'b1;
                     l1_2_ready <= 1'b1;
                     mem_rd_en <= 1'b0;
                     mem_wr_en <= 1'b0;
@@ -401,7 +403,7 @@ module l2_cache #(
                         backpressure_active <= 1'b1;
                         // Only accept reads under backpressure, block writes
                         l1_0_ready <= l1_0_wr_en ? 1'b0 : 1'b1;
-                        // l1_1_ready handled by continuous assignment
+                        l1_1_ready <= l1_1_wr_en ? 1'b0 : 1'b1;
                         l1_2_ready <= l1_2_wr_en ? 1'b0 : 1'b1;
                         
                         // Still check for reads (no backpressure for reads)
@@ -417,7 +419,7 @@ module l2_cache #(
                                     state <= S_HIT_CHECK;
                                 end
                                 2'b01: if (!l1_1_wr_en) begin
-                                    // l1_1_ready handled by continuous assignment
+                                    l1_1_ready <= 1'b0;
                                     current_addr <= l1_1_addr;
                                     current_wr_data <= l1_1_wr_data;
                                     current_is_write <= l1_1_wr_en;
@@ -444,7 +446,7 @@ module l2_cache #(
 
                             // Accept request
                             l1_0_ready <= (active_port == 2'b00) ? 1'b0 : 1'b1;
-                            // l1_1_ready handled by continuous assignment
+                            l1_1_ready <= (active_port == 2'b01) ? 1'b0 : 1'b1;
                             l1_2_ready <= (active_port == 2'b10) ? 1'b0 : 1'b1;
 
                             case (active_port)
@@ -517,7 +519,7 @@ module l2_cache #(
                             // Read hit
                             case (current_port)
                                 2'b00: l1_0_rd_data <= cache_data[hit_way][set_index];
-                                // l1_1_rd_data handled by continuous assignment
+                                2'b01: l1_1_rd_data <= cache_data[hit_way][set_index];
                                 2'b10: l1_2_rd_data <= cache_data[hit_way][set_index];
                             endcase
 
@@ -534,7 +536,7 @@ module l2_cache #(
                             // Victim cache hit
                             case (current_port)
                                 2'b00: l1_0_rd_data <= victim_data[victim_hit];
-                                // l1_1_rd_data handled by continuous assignment
+                                2'b01: l1_1_rd_data <= victim_data[victim_hit];
                                 2'b10: l1_2_rd_data <= victim_data[victim_hit];
                             endcase
                             // FIX v2: Update victim LRU timestamp
@@ -631,7 +633,7 @@ module l2_cache #(
                             cache_mesi[victim_way][set_index] <= MESI_SHARED;
                             case (current_port)
                                 2'b00: l1_0_rd_data <= mem_rd_data;
-                                // l1_1_rd_data handled by continuous assignment
+                                2'b01: l1_1_rd_data <= mem_rd_data;
                                 2'b10: l1_2_rd_data <= mem_rd_data;
                             endcase
                         end
@@ -668,7 +670,7 @@ module l2_cache #(
                 S_COMPLETE_RD: begin
                     // Set ready signal for appropriate port
                     l1_0_ready <= 1'b0;
-                    // l1_1_ready handled by continuous assignment
+                    l1_1_ready <= (current_port == 2'b01) ? 1'b1 : 1'b0;
                     l1_2_ready <= 1'b0;
                     if (current_port == 2'b00) l1_0_ready <= 1'b1;
                     else if (current_port == 2'b10) l1_2_ready <= 1'b1;
@@ -678,7 +680,7 @@ module l2_cache #(
                 S_COMPLETE_WR: begin
                     // Set ready signal for appropriate port
                     l1_0_ready <= 1'b0;
-                    // l1_1_ready handled by continuous assignment
+                    l1_1_ready <= (current_port == 2'b01) ? 1'b1 : 1'b0;
                     l1_2_ready <= 1'b0;
                     if (current_port == 2'b00) l1_0_ready <= 1'b1;
                     else if (current_port == 2'b10) l1_2_ready <= 1'b1;
@@ -694,14 +696,5 @@ module l2_cache #(
                 endcase
         end
     end
-
-    // Continuous assignments for wire outputs
-    assign l1_1_ready = (state == S_IDLE) ? 1'b1 :
-                       (state == S_BACKPRESSURE) ? (l1_1_wr_en ? 1'b0 : 1'b1) :
-                       (state == S_ARBITRATE && active_port == 2'b01) ? 1'b0 :
-                       (state == S_COMPLETE_RD && current_port == 2'b01) ? 1'b1 :
-                       (state == S_COMPLETE_WR && current_port == 2'b01) ? 1'b1 : 1'b0;
-    
-    assign l1_1_rd_data = (state == S_COMPLETE_RD && current_port == 2'b01) ? mem_rd_data : {LINE_SIZE{1'b0}};
 
 endmodule

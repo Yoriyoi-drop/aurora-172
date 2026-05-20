@@ -40,11 +40,15 @@
 
 `timescale 1ns / 1ps
 
+// Include parameters (Icarus compatibility)
+`include "interfaces/aurora_params.svh"
+
 module cet_anti_cheat #(
-    parameter DATA_WIDTH            = 128,
-    parameter ADDR_WIDTH            = 48,
-    parameter SHADOW_STACK_DEPTH    = 256,
-    parameter MAX_GAME_STATES       = 16
+    // Use standardized parameters
+    parameter DATA_WIDTH            = AURORA_DATA_WIDTH,
+    parameter ADDR_WIDTH            = AURORA_ADDR_WIDTH,
+    parameter SHADOW_STACK_DEPTH    = 128,   // OPTIMIZED: 256->128 (smaller shadow stack)
+    parameter MAX_GAME_STATES       = 8      // OPTIMIZED: 16->8 (fewer game states)
 )(
     input  wire                         clk,
     input  wire                         rst_n,
@@ -236,13 +240,13 @@ module cet_anti_cheat #(
 
                     // Register game state hash
                     if (game_state_valid && game_state_id < MAX_GAME_STATES) begin
-                        registered_hashes[game_state_id_4b] <= game_state_hash;
-                        registered_valid[game_state_id_4b] <= 1'b1;
+                        registered_hashes[game_state_id_4b & 4'h7] <= game_state_hash;
+                        registered_valid[game_state_id_4b & 4'h7] <= 1'b1;
                     end
 
                     // Verify current game state
-                    if (game_state_valid && registered_valid[game_state_id_4b]) begin
-                        if (game_state_hash != registered_hashes[game_state_id_4b]) begin
+                    if (game_state_valid && registered_valid[game_state_id_4b & 4'h7]) begin
+                        if (game_state_hash != registered_hashes[game_state_id_4b & 4'h7]) begin
                             // State tampering detected!
                             violation_detected <= 1'b1;
                             violation_latched <= 1'b1;  // FIXED: Latch the violation

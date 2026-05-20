@@ -110,7 +110,7 @@ module aurora_fabric #(
     reg [ADDR_WIDTH-1:0]    addr_fifo  [0:NUM_PORTS-1][0:FIFO_DEPTH-1];
     reg [1:0]               qos_fifo   [0:NUM_PORTS-1][0:FIFO_DEPTH-1];
     reg [1:0]               vc_fifo    [0:NUM_PORTS-1][0:FIFO_DEPTH-1];
-    reg [5:0]               src_port_fifo [0:NUM_PORTS-1][0:FIFO_DEPTH-1];
+    reg [6:0]               src_port_fifo [0:NUM_PORTS-1][0:FIFO_DEPTH-1];
     reg [31:0]              timestamp_fifo [0:NUM_PORTS-1][0:FIFO_DEPTH-1];
 
     // Per-port FIFO management
@@ -691,15 +691,7 @@ module aurora_fabric #(
                     credit_count[src_port] <= credit_count[src_port] + 1;
                     forwarded_count = forwarded_count + 1;  // OPTIMIZED: Track forwarding
                     
-                    // OPTIMIZED: Early exit if we've forwarded enough packets
-                    if (forwarded_count >= active_ports) begin
-                        // Clear remaining outputs
-                        for (p = 0; p < NUM_PORTS; p = p + 1) begin
-                            if (p != src_port) begin
-                                port_out_valid_reg[p] <= 1'b0;
-                            end
-                        end
-                    end
+
                 end else begin
                     // No packet to forward
                     for (p = 0; p < NUM_PORTS; p = p + 1) begin

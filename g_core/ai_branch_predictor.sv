@@ -148,11 +148,9 @@ module ai_branch_predictor #(
     // =========================================================================
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            // Reset all weights to zero
-            for (int i = 0; i < (1<<PHT_BITS); i++) begin
-                for (int j = 0; j < HISTORY_LEN; j++) begin
-                    pht[i][j] <= {WEIGHT_BITS{1'b0}};
-                end
+            // Reset all weights to zero - OPTIMIZED: Use single loop for faster reset
+            for (int i = 0; i < (1<<PHT_BITS) * HISTORY_LEN; i++) begin
+                pht[i>>4][i&15] <= {WEIGHT_BITS{1'b0}};
             end
 
             global_history <= {HISTORY_LEN{1'b0}};
@@ -248,7 +246,7 @@ module ai_branch_predictor #(
                         btb_target[btb_set][lru_way] <= branch_target_actual;
                         btb_valid[btb_set][lru_way]  <= 1'b1;
                         btb_tag[btb_set][lru_way]    <= branch_pc[15:0];
-                        btb_lru[btb_set] <= ~lru_way[7:0];  // Toggle LRU
+                        btb_lru[btb_set] <= {7'b0, ~lru_way[0]};  // Toggle LRU (2-bit for 2-way)
                     end
                 end
 
@@ -272,15 +270,31 @@ module ai_branch_predictor #(
     // Accuracy calculation
     // =========================================================================
     function [7:0] calc_accuracy;
+        reg [31:0] temp_result;
         begin
             if (total_branches == 0) begin
                 calc_accuracy = 8'd0;
             end else begin
-                calc_accuracy = (correct_predictions * 255) / total_branches;
+                // FIX: Prevent overflow in multiplication
+                temp_result = (correct_predictions * 255) / total_branches;
+                // FIX: Clamp to 8-bit range
+                calc_accuracy = (temp_result > 255) ? 8'd255 : temp_result[7:0];
             end
         end
     endfunction
 
-    assign prediction_accuracy = calc_accuracy;
+    // Variable to store calculated accuracy
+    reg [7:0] calc_accuracy_result;
+    
+    // Always calculate accuracy when inputs change
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            calc_accuracy_result <= 8'd0;
+        end else begin
+            calc_accuracy_result <= calc_accuracy();
+        end
+    end
+
+    assign prediction_accuracy = calc_accuracy_result;
 
 endmodule

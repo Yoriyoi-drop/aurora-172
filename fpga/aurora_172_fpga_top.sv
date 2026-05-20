@@ -1,5 +1,10 @@
 `timescale 1ns / 1ps
 
+// Import global package for parameters
+// Import global package for parameters
+`include "interfaces/aurora_params.svh"
+import aurora_global_pkg::*;
+
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
 // Engineer: Architecture Team
@@ -30,20 +35,17 @@ module aurora_172_fpga_top (
     input  wire                         sys_rst_n,
 
     // =========================================================================
-    // DDR4 Memory Interface
+    // Simplified DDR4 Memory Interface
     // =========================================================================
     output wire [16:0]                  ddr4_addr,
     output wire [2:0]                   ddr4_ba,
-    output wire [1:0]                   ddr4_cke,
     output wire                         ddr4_cs_n,
     output wire                         ddr4_ras_n,
     output wire                         ddr4_cas_n,
     output wire                         ddr4_we_n,
-    output wire                         ddr4_reset_n,
-    inout  wire [71:0]                  ddr4_dq,
-    inout wire [8:0]                    ddr4_dqs_p,
-    inout wire [8:0]                    ddr4_dqs_n,
-    output wire                         ddr4_act_n,
+    inout  wire [31:0]                  ddr4_dq,      // OPTIMIZED: 72->32 bits
+    inout wire [3:0]                    ddr4_dqs_p,    // OPTIMIZED: 9->4 bits
+    inout wire [3:0]                    ddr4_dqs_n,    // OPTIMIZED: 9->4 bits
 
     // =========================================================================
     // PCIe Gen5 Interface
@@ -324,11 +326,6 @@ assign sys_power_mode = 16'b0011;
 // System Interrupt
 //-----------------------------------------------------------------------------
 assign sys_interrupt = ~gpio_int_n | ~pcie_perst_n;
-
-//-----------------------------------------------------------------------------
-// Memory Ready (simplified - should come from DDR4 controller)
-//-----------------------------------------------------------------------------
-assign mem_ready = 1'b1;
 
 //=============================================================================
 // Simulation-Only Assertions

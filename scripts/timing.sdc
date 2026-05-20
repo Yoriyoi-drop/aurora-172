@@ -2,7 +2,7 @@
 # AURORA-172 Timing Constraints
 # Synopsys Design Constraints (SDC)
 #
-# Target: 6 GHz clock (production)
+# Target: 6 GHz clock (development target)
 # Simulasi: 100 MHz (untuk testing)
 ################################################################################
 

@@ -1,5 +1,8 @@
 `timescale 1ns / 1ps
 
+// Include parameters (Icarus compatibility)
+`include "interfaces/aurora_params.svh"
+
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
 // Engineer: Interconnect Architecture Team
@@ -20,11 +23,11 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module noc_monitor #(
-    parameter DATA_WIDTH    = 128,  // OPTIMIZED: 64→128 (match noc_mesh)
-    parameter ADDR_WIDTH    = 48,
+    parameter DATA_WIDTH    = AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
+    parameter ADDR_WIDTH    = AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
     parameter MESH_X        = 2,
     parameter MESH_Y        = 2,
-    parameter HISTOGRAM_BINS = 16
+    parameter HISTOGRAM_BINS = 8     // OPTIMIZED: 16→8 (simpler histogram)
 )(
     input  wire                         clk,
     input  wire                         rst_n,

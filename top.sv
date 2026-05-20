@@ -2931,7 +2931,8 @@ module aurora_172_top #(
     localparam AI_PKT_DIR  = 2'b01; // CW direction (2->0 is shorter CW)
     localparam AI_PKT_QOS  = 2'b10; // High priority for AI traffic
     
-    assign rb_data_2 = {ai_cmd_addr,        // 48 bits
+    assign rb_data_2 = {{(DATA_WIDTH-236){1'b0}},  // Zero-extend to DATA_WIDTH
+                        ai_cmd_addr,        // 48 bits
                         AI_PKT_SRC,         // 8 bits  
                         AI_PKT_DEST,        // 8 bits
                         ai_cmd_data,        // 128 bits
@@ -3033,14 +3034,14 @@ module aurora_172_top #(
     wire                  ra_rvalid_arr [0:2];
 
     assign ra_addr_arr[0] = sched_a_core_cmd_addr;
-    assign ra_data_arr[0] = sched_a_core_cmd_data;
+    assign ra_data_arr[0] = {{(DATA_WIDTH-64){1'b0}}, sched_a_core_cmd_data};
     assign ra_valid_arr[0] = sched_a_core_cmd_valid;
     assign ra_addr_arr[1] = {ADDR_WIDTH{1'b0}};
     assign ra_data_arr[1] = {DATA_WIDTH{1'b0}};
     assign ra_valid_arr[1] = 1'b0;
     // Node 2: A-Core direct path (backup/reroute)
     assign ra_addr_arr[2] = a_core_cmd_addr_mux;
-    assign ra_data_arr[2] = a_core_cmd_data_mux;
+    assign ra_data_arr[2] = {{(DATA_WIDTH-64){1'b0}}, a_core_cmd_data_mux};
     assign ra_valid_arr[2] = a_core_cmd_valid_mux && !a0_cmd_ready;  // Use ring when direct not ready
 
     // CRITICAL FIX: Connect A-Core result to ring bus response path
@@ -3078,8 +3079,8 @@ module aurora_172_top #(
         .node_resp_ready(ra_resp_ready_arr),
 
         .gaming_mode(1'b0),
-        .node_priority(2'b11),
-        .node_congested({ring_bus_a_busy, 1'b0}),
+        .node_priority(3'b111),
+        .node_congested({ring_bus_a_busy, 1'b0, 1'b0}),
 
         .ring_total_packets(ca_packets),
         .ring_avg_latency(),

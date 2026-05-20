@@ -32,22 +32,22 @@
 module a_core #(
     parameter CORE_ID       = 0,
     // Use standardized parameters from aurora_global_pkg
-    parameter DATA_WIDTH    = AURORA_DATA_WIDTH,
-    parameter ADDR_WIDTH    = AURORA_ADDR_WIDTH,
-    parameter TILE_SIZE     = AURORA_TILE_SIZE,
-    parameter PRECISION     = AURORA_PRECISION,
-    parameter RESULT_FIFO_DEPTH = AURORA_RESULT_FIFO_DEPTH,
-    parameter LINE_SIZE     = AURORA_LINE_SIZE,
+    parameter DATA_WIDTH    = `AURORA_DATA_WIDTH,
+    parameter ADDR_WIDTH    = `AURORA_ADDR_WIDTH,
+    parameter TILE_SIZE     = `AURORA_TILE_SIZE,
+    parameter PRECISION     = `AURORA_PRECISION,
+    parameter RESULT_FIFO_DEPTH = `AURORA_RESULT_FIFO_DEPTH,
+    parameter LINE_SIZE     = `AURORA_LINE_SIZE,
 
     // Use standardized pipeline latencies from params
-    parameter A_PIPE_MATMUL    = AURORA_A_PIPE_MATMUL,    // From params
-    parameter A_PIPE_ATTENTION = AURORA_A_PIPE_ATTENTION, // From params
-    parameter A_PIPE_CONV2D    = AURORA_A_PIPE_CONV2D,   // From params
-    parameter A_PIPE_POOLING   = AURORA_A_PIPE_POOLING,   // From params
-    parameter A_PIPE_ACTIVATION = AURORA_A_PIPE_ACTIVATION, // From params
-    parameter A_PIPE_NORMALIZE = AURORA_A_PIPE_NORMALIZE, // From params
-    parameter A_PIPE_LOAD_WT   = AURORA_A_PIPE_LOAD_WT,   // From params
-    parameter A_PIPE_STORE_WT  = AURORA_A_PIPE_STORE_WT,  // From params
+    parameter A_PIPE_MATMUL    = `AURORA_A_PIPE_MATMUL,    // From params
+    parameter A_PIPE_ATTENTION = `AURORA_A_PIPE_ATTENTION, // From params
+    parameter A_PIPE_CONV2D    = `AURORA_A_PIPE_CONV2D,   // From params
+    parameter A_PIPE_POOLING   = `AURORA_A_PIPE_POOLING,   // From params
+    parameter A_PIPE_ACTIVATION = `AURORA_A_PIPE_ACTIVATION, // From params
+    parameter A_PIPE_NORMALIZE = `AURORA_A_PIPE_NORMALIZE, // From params
+    parameter A_PIPE_LOAD_WT   = `AURORA_A_PIPE_LOAD_WT,   // From params
+    parameter A_PIPE_STORE_WT  = `AURORA_A_PIPE_STORE_WT,  // From params
     parameter DEBUG_ENABLE     = 0,                         // Debug output control (0=disabled, 1=enabled)
     
     // Initialization multipliers for AI operations
@@ -290,7 +290,7 @@ module a_core #(
     reg [3:0]               row_idx;
     reg [3:0]               col_idx;
     reg [3:0]               k_idx;
-    reg [6:0]               stage_counter;
+    reg [7:0]               stage_counter;
 
     // NEW: Execution counter untuk realistic latency - OPTIMIZED
     reg [15:0]              a_exec_counter;
@@ -469,7 +469,62 @@ module a_core #(
             matrix_a[5] <= 32'sb0; matrix_b[5] <= 32'sb0; matrix_c[5] <= 32'sb0;
             matrix_a[6] <= 32'sb0; matrix_b[6] <= 32'sb0; matrix_c[6] <= 32'sb0;
             matrix_a[7] <= 32'sb0; matrix_b[7] <= 32'sb0; matrix_c[7] <= 32'sb0;
-            // Continue for all 64 entries (truncated for brevity)
+            matrix_a[8] <= 32'sb0; matrix_b[8] <= 32'sb0; matrix_c[8] <= 32'sb0;
+            matrix_a[9] <= 32'sb0; matrix_b[9] <= 32'sb0; matrix_c[9] <= 32'sb0;
+            matrix_a[10] <= 32'sb0; matrix_b[10] <= 32'sb0; matrix_c[10] <= 32'sb0;
+            matrix_a[11] <= 32'sb0; matrix_b[11] <= 32'sb0; matrix_c[11] <= 32'sb0;
+            matrix_a[12] <= 32'sb0; matrix_b[12] <= 32'sb0; matrix_c[12] <= 32'sb0;
+            matrix_a[13] <= 32'sb0; matrix_b[13] <= 32'sb0; matrix_c[13] <= 32'sb0;
+            matrix_a[14] <= 32'sb0; matrix_b[14] <= 32'sb0; matrix_c[14] <= 32'sb0;
+            matrix_a[15] <= 32'sb0; matrix_b[15] <= 32'sb0; matrix_c[15] <= 32'sb0;
+            matrix_a[16] <= 32'sb0; matrix_b[16] <= 32'sb0; matrix_c[16] <= 32'sb0;
+            matrix_a[17] <= 32'sb0; matrix_b[17] <= 32'sb0; matrix_c[17] <= 32'sb0;
+            matrix_a[18] <= 32'sb0; matrix_b[18] <= 32'sb0; matrix_c[18] <= 32'sb0;
+            matrix_a[19] <= 32'sb0; matrix_b[19] <= 32'sb0; matrix_c[19] <= 32'sb0;
+            matrix_a[20] <= 32'sb0; matrix_b[20] <= 32'sb0; matrix_c[20] <= 32'sb0;
+            matrix_a[21] <= 32'sb0; matrix_b[21] <= 32'sb0; matrix_c[21] <= 32'sb0;
+            matrix_a[22] <= 32'sb0; matrix_b[22] <= 32'sb0; matrix_c[22] <= 32'sb0;
+            matrix_a[23] <= 32'sb0; matrix_b[23] <= 32'sb0; matrix_c[23] <= 32'sb0;
+            matrix_a[24] <= 32'sb0; matrix_b[24] <= 32'sb0; matrix_c[24] <= 32'sb0;
+            matrix_a[25] <= 32'sb0; matrix_b[25] <= 32'sb0; matrix_c[25] <= 32'sb0;
+            matrix_a[26] <= 32'sb0; matrix_b[26] <= 32'sb0; matrix_c[26] <= 32'sb0;
+            matrix_a[27] <= 32'sb0; matrix_b[27] <= 32'sb0; matrix_c[27] <= 32'sb0;
+            matrix_a[28] <= 32'sb0; matrix_b[28] <= 32'sb0; matrix_c[28] <= 32'sb0;
+            matrix_a[29] <= 32'sb0; matrix_b[29] <= 32'sb0; matrix_c[29] <= 32'sb0;
+            matrix_a[30] <= 32'sb0; matrix_b[30] <= 32'sb0; matrix_c[30] <= 32'sb0;
+            matrix_a[31] <= 32'sb0; matrix_b[31] <= 32'sb0; matrix_c[31] <= 32'sb0;
+            matrix_a[32] <= 32'sb0; matrix_b[32] <= 32'sb0; matrix_c[32] <= 32'sb0;
+            matrix_a[33] <= 32'sb0; matrix_b[33] <= 32'sb0; matrix_c[33] <= 32'sb0;
+            matrix_a[34] <= 32'sb0; matrix_b[34] <= 32'sb0; matrix_c[34] <= 32'sb0;
+            matrix_a[35] <= 32'sb0; matrix_b[35] <= 32'sb0; matrix_c[35] <= 32'sb0;
+            matrix_a[36] <= 32'sb0; matrix_b[36] <= 32'sb0; matrix_c[36] <= 32'sb0;
+            matrix_a[37] <= 32'sb0; matrix_b[37] <= 32'sb0; matrix_c[37] <= 32'sb0;
+            matrix_a[38] <= 32'sb0; matrix_b[38] <= 32'sb0; matrix_c[38] <= 32'sb0;
+            matrix_a[39] <= 32'sb0; matrix_b[39] <= 32'sb0; matrix_c[39] <= 32'sb0;
+            matrix_a[40] <= 32'sb0; matrix_b[40] <= 32'sb0; matrix_c[40] <= 32'sb0;
+            matrix_a[41] <= 32'sb0; matrix_b[41] <= 32'sb0; matrix_c[41] <= 32'sb0;
+            matrix_a[42] <= 32'sb0; matrix_b[42] <= 32'sb0; matrix_c[42] <= 32'sb0;
+            matrix_a[43] <= 32'sb0; matrix_b[43] <= 32'sb0; matrix_c[43] <= 32'sb0;
+            matrix_a[44] <= 32'sb0; matrix_b[44] <= 32'sb0; matrix_c[44] <= 32'sb0;
+            matrix_a[45] <= 32'sb0; matrix_b[45] <= 32'sb0; matrix_c[45] <= 32'sb0;
+            matrix_a[46] <= 32'sb0; matrix_b[46] <= 32'sb0; matrix_c[46] <= 32'sb0;
+            matrix_a[47] <= 32'sb0; matrix_b[47] <= 32'sb0; matrix_c[47] <= 32'sb0;
+            matrix_a[48] <= 32'sb0; matrix_b[48] <= 32'sb0; matrix_c[48] <= 32'sb0;
+            matrix_a[49] <= 32'sb0; matrix_b[49] <= 32'sb0; matrix_c[49] <= 32'sb0;
+            matrix_a[50] <= 32'sb0; matrix_b[50] <= 32'sb0; matrix_c[50] <= 32'sb0;
+            matrix_a[51] <= 32'sb0; matrix_b[51] <= 32'sb0; matrix_c[51] <= 32'sb0;
+            matrix_a[52] <= 32'sb0; matrix_b[52] <= 32'sb0; matrix_c[52] <= 32'sb0;
+            matrix_a[53] <= 32'sb0; matrix_b[53] <= 32'sb0; matrix_c[53] <= 32'sb0;
+            matrix_a[54] <= 32'sb0; matrix_b[54] <= 32'sb0; matrix_c[54] <= 32'sb0;
+            matrix_a[55] <= 32'sb0; matrix_b[55] <= 32'sb0; matrix_c[55] <= 32'sb0;
+            matrix_a[56] <= 32'sb0; matrix_b[56] <= 32'sb0; matrix_c[56] <= 32'sb0;
+            matrix_a[57] <= 32'sb0; matrix_b[57] <= 32'sb0; matrix_c[57] <= 32'sb0;
+            matrix_a[58] <= 32'sb0; matrix_b[58] <= 32'sb0; matrix_c[58] <= 32'sb0;
+            matrix_a[59] <= 32'sb0; matrix_b[59] <= 32'sb0; matrix_c[59] <= 32'sb0;
+            matrix_a[60] <= 32'sb0; matrix_b[60] <= 32'sb0; matrix_c[60] <= 32'sb0;
+            matrix_a[61] <= 32'sb0; matrix_b[61] <= 32'sb0; matrix_c[61] <= 32'sb0;
+            matrix_a[62] <= 32'sb0; matrix_b[62] <= 32'sb0; matrix_c[62] <= 32'sb0;
+            matrix_a[63] <= 32'sb0; matrix_b[63] <= 32'sb0; matrix_c[63] <= 32'sb0;
         end else begin
             // Update state_prev at beginning of cycle
             state_prev <= state;
@@ -650,7 +705,18 @@ module a_core #(
                                 matrix_c[4] <= 32'sb0; matrix_c[5] <= 32'sb0; matrix_c[6] <= 32'sb0; matrix_c[7] <= 32'sb0;
                                 matrix_c[8] <= 32'sb0; matrix_c[9] <= 32'sb0; matrix_c[10] <= 32'sb0; matrix_c[11] <= 32'sb0;
                                 matrix_c[12] <= 32'sb0; matrix_c[13] <= 32'sb0; matrix_c[14] <= 32'sb0; matrix_c[15] <= 32'sb0;
-                                // Continue for all 64 entries (truncated for brevity)
+                                matrix_c[16] <= 32'sb0; matrix_c[17] <= 32'sb0; matrix_c[18] <= 32'sb0; matrix_c[19] <= 32'sb0;
+                                matrix_c[20] <= 32'sb0; matrix_c[21] <= 32'sb0; matrix_c[22] <= 32'sb0; matrix_c[23] <= 32'sb0;
+                                matrix_c[24] <= 32'sb0; matrix_c[25] <= 32'sb0; matrix_c[26] <= 32'sb0; matrix_c[27] <= 32'sb0;
+                                matrix_c[28] <= 32'sb0; matrix_c[29] <= 32'sb0; matrix_c[30] <= 32'sb0; matrix_c[31] <= 32'sb0;
+                                matrix_c[32] <= 32'sb0; matrix_c[33] <= 32'sb0; matrix_c[34] <= 32'sb0; matrix_c[35] <= 32'sb0;
+                                matrix_c[36] <= 32'sb0; matrix_c[37] <= 32'sb0; matrix_c[38] <= 32'sb0; matrix_c[39] <= 32'sb0;
+                                matrix_c[40] <= 32'sb0; matrix_c[41] <= 32'sb0; matrix_c[42] <= 32'sb0; matrix_c[43] <= 32'sb0;
+                                matrix_c[44] <= 32'sb0; matrix_c[45] <= 32'sb0; matrix_c[46] <= 32'sb0; matrix_c[47] <= 32'sb0;
+                                matrix_c[48] <= 32'sb0; matrix_c[49] <= 32'sb0; matrix_c[50] <= 32'sb0; matrix_c[51] <= 32'sb0;
+                                matrix_c[52] <= 32'sb0; matrix_c[53] <= 32'sb0; matrix_c[54] <= 32'sb0; matrix_c[55] <= 32'sb0;
+                                matrix_c[56] <= 32'sb0; matrix_c[57] <= 32'sb0; matrix_c[58] <= 32'sb0; matrix_c[59] <= 32'sb0;
+                                matrix_c[60] <= 32'sb0; matrix_c[61] <= 32'sb0; matrix_c[62] <= 32'sb0; matrix_c[63] <= 32'sb0;
                                 
                                 // Initialize parallel processing units (4 units)
                                 mac_parallel_units[0] <= 64'b0; mac_parallel_units[1] <= 64'b0; 
@@ -685,7 +751,18 @@ module a_core #(
                                 matrix_c[4] <= 32'sb0; matrix_c[5] <= 32'sb0; matrix_c[6] <= 32'sb0; matrix_c[7] <= 32'sb0;
                                 matrix_c[8] <= 32'sb0; matrix_c[9] <= 32'sb0; matrix_c[10] <= 32'sb0; matrix_c[11] <= 32'sb0;
                                 matrix_c[12] <= 32'sb0; matrix_c[13] <= 32'sb0; matrix_c[14] <= 32'sb0; matrix_c[15] <= 32'sb0;
-                                // Continue for all 64 entries (truncated for brevity)
+                                matrix_c[16] <= 32'sb0; matrix_c[17] <= 32'sb0; matrix_c[18] <= 32'sb0; matrix_c[19] <= 32'sb0;
+                                matrix_c[20] <= 32'sb0; matrix_c[21] <= 32'sb0; matrix_c[22] <= 32'sb0; matrix_c[23] <= 32'sb0;
+                                matrix_c[24] <= 32'sb0; matrix_c[25] <= 32'sb0; matrix_c[26] <= 32'sb0; matrix_c[27] <= 32'sb0;
+                                matrix_c[28] <= 32'sb0; matrix_c[29] <= 32'sb0; matrix_c[30] <= 32'sb0; matrix_c[31] <= 32'sb0;
+                                matrix_c[32] <= 32'sb0; matrix_c[33] <= 32'sb0; matrix_c[34] <= 32'sb0; matrix_c[35] <= 32'sb0;
+                                matrix_c[36] <= 32'sb0; matrix_c[37] <= 32'sb0; matrix_c[38] <= 32'sb0; matrix_c[39] <= 32'sb0;
+                                matrix_c[40] <= 32'sb0; matrix_c[41] <= 32'sb0; matrix_c[42] <= 32'sb0; matrix_c[43] <= 32'sb0;
+                                matrix_c[44] <= 32'sb0; matrix_c[45] <= 32'sb0; matrix_c[46] <= 32'sb0; matrix_c[47] <= 32'sb0;
+                                matrix_c[48] <= 32'sb0; matrix_c[49] <= 32'sb0; matrix_c[50] <= 32'sb0; matrix_c[51] <= 32'sb0;
+                                matrix_c[52] <= 32'sb0; matrix_c[53] <= 32'sb0; matrix_c[54] <= 32'sb0; matrix_c[55] <= 32'sb0;
+                                matrix_c[56] <= 32'sb0; matrix_c[57] <= 32'sb0; matrix_c[58] <= 32'sb0; matrix_c[59] <= 32'sb0;
+                                matrix_c[60] <= 32'sb0; matrix_c[61] <= 32'sb0; matrix_c[62] <= 32'sb0; matrix_c[63] <= 32'sb0;
                                 a_exec_counter <= 16'h0;
                                 a_exec_target_cycles <= A_PIPE_ATTENTION;
                                 a_pipeline_stage_detail <= 4'd1;
@@ -707,7 +784,186 @@ module a_core #(
                                 matrix_a[3] <= $signed(cmd_data[31:0]) + $signed(3 * MATRIX_INIT_MULTIPLIER_1);
                                 matrix_b[3] <= $signed(cmd_data[63:32]) - $signed(3 * MATRIX_INIT_MULTIPLIER_2);
                                 matrix_c[3] <= 32'sb0;
-                                // Continue for all 64 entries (truncated for brevity)
+                                matrix_a[4] <= $signed(cmd_data[31:0]) + $signed(4 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[4] <= $signed(cmd_data[63:32]) - $signed(4 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[4] <= 32'sb0;
+                                matrix_a[5] <= $signed(cmd_data[31:0]) + $signed(5 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[5] <= $signed(cmd_data[63:32]) - $signed(5 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[5] <= 32'sb0;
+                                matrix_a[6] <= $signed(cmd_data[31:0]) + $signed(6 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[6] <= $signed(cmd_data[63:32]) - $signed(6 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[6] <= 32'sb0;
+                                matrix_a[7] <= $signed(cmd_data[31:0]) + $signed(7 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[7] <= $signed(cmd_data[63:32]) - $signed(7 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[7] <= 32'sb0;
+                                matrix_a[8] <= $signed(cmd_data[31:0]) + $signed(8 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[8] <= $signed(cmd_data[63:32]) - $signed(8 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[8] <= 32'sb0;
+                                matrix_a[9] <= $signed(cmd_data[31:0]) + $signed(9 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[9] <= $signed(cmd_data[63:32]) - $signed(9 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[9] <= 32'sb0;
+                                matrix_a[10] <= $signed(cmd_data[31:0]) + $signed(10 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[10] <= $signed(cmd_data[63:32]) - $signed(10 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[10] <= 32'sb0;
+                                matrix_a[11] <= $signed(cmd_data[31:0]) + $signed(11 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[11] <= $signed(cmd_data[63:32]) - $signed(11 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[11] <= 32'sb0;
+                                matrix_a[12] <= $signed(cmd_data[31:0]) + $signed(12 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[12] <= $signed(cmd_data[63:32]) - $signed(12 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[12] <= 32'sb0;
+                                matrix_a[13] <= $signed(cmd_data[31:0]) + $signed(13 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[13] <= $signed(cmd_data[63:32]) - $signed(13 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[13] <= 32'sb0;
+                                matrix_a[14] <= $signed(cmd_data[31:0]) + $signed(14 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[14] <= $signed(cmd_data[63:32]) - $signed(14 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[14] <= 32'sb0;
+                                matrix_a[15] <= $signed(cmd_data[31:0]) + $signed(15 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[15] <= $signed(cmd_data[63:32]) - $signed(15 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[15] <= 32'sb0;
+                                matrix_a[16] <= $signed(cmd_data[31:0]) + $signed(16 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[16] <= $signed(cmd_data[63:32]) - $signed(16 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[16] <= 32'sb0;
+                                matrix_a[17] <= $signed(cmd_data[31:0]) + $signed(17 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[17] <= $signed(cmd_data[63:32]) - $signed(17 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[17] <= 32'sb0;
+                                matrix_a[18] <= $signed(cmd_data[31:0]) + $signed(18 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[18] <= $signed(cmd_data[63:32]) - $signed(18 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[18] <= 32'sb0;
+                                matrix_a[19] <= $signed(cmd_data[31:0]) + $signed(19 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[19] <= $signed(cmd_data[63:32]) - $signed(19 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[19] <= 32'sb0;
+                                matrix_a[20] <= $signed(cmd_data[31:0]) + $signed(20 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[20] <= $signed(cmd_data[63:32]) - $signed(20 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[20] <= 32'sb0;
+                                matrix_a[21] <= $signed(cmd_data[31:0]) + $signed(21 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[21] <= $signed(cmd_data[63:32]) - $signed(21 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[21] <= 32'sb0;
+                                matrix_a[22] <= $signed(cmd_data[31:0]) + $signed(22 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[22] <= $signed(cmd_data[63:32]) - $signed(22 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[22] <= 32'sb0;
+                                matrix_a[23] <= $signed(cmd_data[31:0]) + $signed(23 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[23] <= $signed(cmd_data[63:32]) - $signed(23 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[23] <= 32'sb0;
+                                matrix_a[24] <= $signed(cmd_data[31:0]) + $signed(24 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[24] <= $signed(cmd_data[63:32]) - $signed(24 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[24] <= 32'sb0;
+                                matrix_a[25] <= $signed(cmd_data[31:0]) + $signed(25 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[25] <= $signed(cmd_data[63:32]) - $signed(25 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[25] <= 32'sb0;
+                                matrix_a[26] <= $signed(cmd_data[31:0]) + $signed(26 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[26] <= $signed(cmd_data[63:32]) - $signed(26 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[26] <= 32'sb0;
+                                matrix_a[27] <= $signed(cmd_data[31:0]) + $signed(27 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[27] <= $signed(cmd_data[63:32]) - $signed(27 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[27] <= 32'sb0;
+                                matrix_a[28] <= $signed(cmd_data[31:0]) + $signed(28 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[28] <= $signed(cmd_data[63:32]) - $signed(28 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[28] <= 32'sb0;
+                                matrix_a[29] <= $signed(cmd_data[31:0]) + $signed(29 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[29] <= $signed(cmd_data[63:32]) - $signed(29 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[29] <= 32'sb0;
+                                matrix_a[30] <= $signed(cmd_data[31:0]) + $signed(30 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[30] <= $signed(cmd_data[63:32]) - $signed(30 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[30] <= 32'sb0;
+                                matrix_a[31] <= $signed(cmd_data[31:0]) + $signed(31 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[31] <= $signed(cmd_data[63:32]) - $signed(31 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[31] <= 32'sb0;
+                                matrix_a[32] <= $signed(cmd_data[31:0]) + $signed(32 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[32] <= $signed(cmd_data[63:32]) - $signed(32 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[32] <= 32'sb0;
+                                matrix_a[33] <= $signed(cmd_data[31:0]) + $signed(33 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[33] <= $signed(cmd_data[63:32]) - $signed(33 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[33] <= 32'sb0;
+                                matrix_a[34] <= $signed(cmd_data[31:0]) + $signed(34 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[34] <= $signed(cmd_data[63:32]) - $signed(34 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[34] <= 32'sb0;
+                                matrix_a[35] <= $signed(cmd_data[31:0]) + $signed(35 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[35] <= $signed(cmd_data[63:32]) - $signed(35 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[35] <= 32'sb0;
+                                matrix_a[36] <= $signed(cmd_data[31:0]) + $signed(36 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[36] <= $signed(cmd_data[63:32]) - $signed(36 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[36] <= 32'sb0;
+                                matrix_a[37] <= $signed(cmd_data[31:0]) + $signed(37 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[37] <= $signed(cmd_data[63:32]) - $signed(37 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[37] <= 32'sb0;
+                                matrix_a[38] <= $signed(cmd_data[31:0]) + $signed(38 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[38] <= $signed(cmd_data[63:32]) - $signed(38 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[38] <= 32'sb0;
+                                matrix_a[39] <= $signed(cmd_data[31:0]) + $signed(39 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[39] <= $signed(cmd_data[63:32]) - $signed(39 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[39] <= 32'sb0;
+                                matrix_a[40] <= $signed(cmd_data[31:0]) + $signed(40 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[40] <= $signed(cmd_data[63:32]) - $signed(40 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[40] <= 32'sb0;
+                                matrix_a[41] <= $signed(cmd_data[31:0]) + $signed(41 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[41] <= $signed(cmd_data[63:32]) - $signed(41 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[41] <= 32'sb0;
+                                matrix_a[42] <= $signed(cmd_data[31:0]) + $signed(42 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[42] <= $signed(cmd_data[63:32]) - $signed(42 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[42] <= 32'sb0;
+                                matrix_a[43] <= $signed(cmd_data[31:0]) + $signed(43 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[43] <= $signed(cmd_data[63:32]) - $signed(43 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[43] <= 32'sb0;
+                                matrix_a[44] <= $signed(cmd_data[31:0]) + $signed(44 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[44] <= $signed(cmd_data[63:32]) - $signed(44 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[44] <= 32'sb0;
+                                matrix_a[45] <= $signed(cmd_data[31:0]) + $signed(45 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[45] <= $signed(cmd_data[63:32]) - $signed(45 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[45] <= 32'sb0;
+                                matrix_a[46] <= $signed(cmd_data[31:0]) + $signed(46 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[46] <= $signed(cmd_data[63:32]) - $signed(46 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[46] <= 32'sb0;
+                                matrix_a[47] <= $signed(cmd_data[31:0]) + $signed(47 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[47] <= $signed(cmd_data[63:32]) - $signed(47 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[47] <= 32'sb0;
+                                matrix_a[48] <= $signed(cmd_data[31:0]) + $signed(48 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[48] <= $signed(cmd_data[63:32]) - $signed(48 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[48] <= 32'sb0;
+                                matrix_a[49] <= $signed(cmd_data[31:0]) + $signed(49 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[49] <= $signed(cmd_data[63:32]) - $signed(49 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[49] <= 32'sb0;
+                                matrix_a[50] <= $signed(cmd_data[31:0]) + $signed(50 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[50] <= $signed(cmd_data[63:32]) - $signed(50 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[50] <= 32'sb0;
+                                matrix_a[51] <= $signed(cmd_data[31:0]) + $signed(51 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[51] <= $signed(cmd_data[63:32]) - $signed(51 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[51] <= 32'sb0;
+                                matrix_a[52] <= $signed(cmd_data[31:0]) + $signed(52 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[52] <= $signed(cmd_data[63:32]) - $signed(52 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[52] <= 32'sb0;
+                                matrix_a[53] <= $signed(cmd_data[31:0]) + $signed(53 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[53] <= $signed(cmd_data[63:32]) - $signed(53 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[53] <= 32'sb0;
+                                matrix_a[54] <= $signed(cmd_data[31:0]) + $signed(54 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[54] <= $signed(cmd_data[63:32]) - $signed(54 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[54] <= 32'sb0;
+                                matrix_a[55] <= $signed(cmd_data[31:0]) + $signed(55 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[55] <= $signed(cmd_data[63:32]) - $signed(55 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[55] <= 32'sb0;
+                                matrix_a[56] <= $signed(cmd_data[31:0]) + $signed(56 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[56] <= $signed(cmd_data[63:32]) - $signed(56 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[56] <= 32'sb0;
+                                matrix_a[57] <= $signed(cmd_data[31:0]) + $signed(57 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[57] <= $signed(cmd_data[63:32]) - $signed(57 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[57] <= 32'sb0;
+                                matrix_a[58] <= $signed(cmd_data[31:0]) + $signed(58 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[58] <= $signed(cmd_data[63:32]) - $signed(58 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[58] <= 32'sb0;
+                                matrix_a[59] <= $signed(cmd_data[31:0]) + $signed(59 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[59] <= $signed(cmd_data[63:32]) - $signed(59 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[59] <= 32'sb0;
+                                matrix_a[60] <= $signed(cmd_data[31:0]) + $signed(60 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[60] <= $signed(cmd_data[63:32]) - $signed(60 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[60] <= 32'sb0;
+                                matrix_a[61] <= $signed(cmd_data[31:0]) + $signed(61 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[61] <= $signed(cmd_data[63:32]) - $signed(61 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[61] <= 32'sb0;
+                                matrix_a[62] <= $signed(cmd_data[31:0]) + $signed(62 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[62] <= $signed(cmd_data[63:32]) - $signed(62 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[62] <= 32'sb0;
+                                matrix_a[63] <= $signed(cmd_data[31:0]) + $signed(63 * MATRIX_INIT_MULTIPLIER_1);
+                                matrix_b[63] <= $signed(cmd_data[63:32]) - $signed(63 * MATRIX_INIT_MULTIPLIER_2);
+                                matrix_c[63] <= 32'sb0;
                                 a_exec_counter <= 16'h0;
                                 a_exec_target_cycles <= A_PIPE_CONV2D;
                                 a_pipeline_stage_detail <= 4'd1;
@@ -720,7 +976,66 @@ module a_core #(
                                 matrix_c[1] <= $signed(cmd_data[31:0]) + $signed(1 * POOLING_INIT_MULT);
                                 matrix_c[2] <= $signed(cmd_data[31:0]) + $signed(2 * POOLING_INIT_MULT);
                                 matrix_c[3] <= $signed(cmd_data[31:0]) + $signed(3 * POOLING_INIT_MULT);
-                                // Continue for all 64 entries (truncated for brevity)
+                                matrix_c[4] <= $signed(cmd_data[31:0]) + $signed(4 * POOLING_INIT_MULT);
+                                matrix_c[5] <= $signed(cmd_data[31:0]) + $signed(5 * POOLING_INIT_MULT);
+                                matrix_c[6] <= $signed(cmd_data[31:0]) + $signed(6 * POOLING_INIT_MULT);
+                                matrix_c[7] <= $signed(cmd_data[31:0]) + $signed(7 * POOLING_INIT_MULT);
+                                matrix_c[8] <= $signed(cmd_data[31:0]) + $signed(8 * POOLING_INIT_MULT);
+                                matrix_c[9] <= $signed(cmd_data[31:0]) + $signed(9 * POOLING_INIT_MULT);
+                                matrix_c[10] <= $signed(cmd_data[31:0]) + $signed(10 * POOLING_INIT_MULT);
+                                matrix_c[11] <= $signed(cmd_data[31:0]) + $signed(11 * POOLING_INIT_MULT);
+                                matrix_c[12] <= $signed(cmd_data[31:0]) + $signed(12 * POOLING_INIT_MULT);
+                                matrix_c[13] <= $signed(cmd_data[31:0]) + $signed(13 * POOLING_INIT_MULT);
+                                matrix_c[14] <= $signed(cmd_data[31:0]) + $signed(14 * POOLING_INIT_MULT);
+                                matrix_c[15] <= $signed(cmd_data[31:0]) + $signed(15 * POOLING_INIT_MULT);
+                                matrix_c[16] <= $signed(cmd_data[31:0]) + $signed(16 * POOLING_INIT_MULT);
+                                matrix_c[17] <= $signed(cmd_data[31:0]) + $signed(17 * POOLING_INIT_MULT);
+                                matrix_c[18] <= $signed(cmd_data[31:0]) + $signed(18 * POOLING_INIT_MULT);
+                                matrix_c[19] <= $signed(cmd_data[31:0]) + $signed(19 * POOLING_INIT_MULT);
+                                matrix_c[20] <= $signed(cmd_data[31:0]) + $signed(20 * POOLING_INIT_MULT);
+                                matrix_c[21] <= $signed(cmd_data[31:0]) + $signed(21 * POOLING_INIT_MULT);
+                                matrix_c[22] <= $signed(cmd_data[31:0]) + $signed(22 * POOLING_INIT_MULT);
+                                matrix_c[23] <= $signed(cmd_data[31:0]) + $signed(23 * POOLING_INIT_MULT);
+                                matrix_c[24] <= $signed(cmd_data[31:0]) + $signed(24 * POOLING_INIT_MULT);
+                                matrix_c[25] <= $signed(cmd_data[31:0]) + $signed(25 * POOLING_INIT_MULT);
+                                matrix_c[26] <= $signed(cmd_data[31:0]) + $signed(26 * POOLING_INIT_MULT);
+                                matrix_c[27] <= $signed(cmd_data[31:0]) + $signed(27 * POOLING_INIT_MULT);
+                                matrix_c[28] <= $signed(cmd_data[31:0]) + $signed(28 * POOLING_INIT_MULT);
+                                matrix_c[29] <= $signed(cmd_data[31:0]) + $signed(29 * POOLING_INIT_MULT);
+                                matrix_c[30] <= $signed(cmd_data[31:0]) + $signed(30 * POOLING_INIT_MULT);
+                                matrix_c[31] <= $signed(cmd_data[31:0]) + $signed(31 * POOLING_INIT_MULT);
+                                matrix_c[32] <= $signed(cmd_data[31:0]) + $signed(32 * POOLING_INIT_MULT);
+                                matrix_c[33] <= $signed(cmd_data[31:0]) + $signed(33 * POOLING_INIT_MULT);
+                                matrix_c[34] <= $signed(cmd_data[31:0]) + $signed(34 * POOLING_INIT_MULT);
+                                matrix_c[35] <= $signed(cmd_data[31:0]) + $signed(35 * POOLING_INIT_MULT);
+                                matrix_c[36] <= $signed(cmd_data[31:0]) + $signed(36 * POOLING_INIT_MULT);
+                                matrix_c[37] <= $signed(cmd_data[31:0]) + $signed(37 * POOLING_INIT_MULT);
+                                matrix_c[38] <= $signed(cmd_data[31:0]) + $signed(38 * POOLING_INIT_MULT);
+                                matrix_c[39] <= $signed(cmd_data[31:0]) + $signed(39 * POOLING_INIT_MULT);
+                                matrix_c[40] <= $signed(cmd_data[31:0]) + $signed(40 * POOLING_INIT_MULT);
+                                matrix_c[41] <= $signed(cmd_data[31:0]) + $signed(41 * POOLING_INIT_MULT);
+                                matrix_c[42] <= $signed(cmd_data[31:0]) + $signed(42 * POOLING_INIT_MULT);
+                                matrix_c[43] <= $signed(cmd_data[31:0]) + $signed(43 * POOLING_INIT_MULT);
+                                matrix_c[44] <= $signed(cmd_data[31:0]) + $signed(44 * POOLING_INIT_MULT);
+                                matrix_c[45] <= $signed(cmd_data[31:0]) + $signed(45 * POOLING_INIT_MULT);
+                                matrix_c[46] <= $signed(cmd_data[31:0]) + $signed(46 * POOLING_INIT_MULT);
+                                matrix_c[47] <= $signed(cmd_data[31:0]) + $signed(47 * POOLING_INIT_MULT);
+                                matrix_c[48] <= $signed(cmd_data[31:0]) + $signed(48 * POOLING_INIT_MULT);
+                                matrix_c[49] <= $signed(cmd_data[31:0]) + $signed(49 * POOLING_INIT_MULT);
+                                matrix_c[50] <= $signed(cmd_data[31:0]) + $signed(50 * POOLING_INIT_MULT);
+                                matrix_c[51] <= $signed(cmd_data[31:0]) + $signed(51 * POOLING_INIT_MULT);
+                                matrix_c[52] <= $signed(cmd_data[31:0]) + $signed(52 * POOLING_INIT_MULT);
+                                matrix_c[53] <= $signed(cmd_data[31:0]) + $signed(53 * POOLING_INIT_MULT);
+                                matrix_c[54] <= $signed(cmd_data[31:0]) + $signed(54 * POOLING_INIT_MULT);
+                                matrix_c[55] <= $signed(cmd_data[31:0]) + $signed(55 * POOLING_INIT_MULT);
+                                matrix_c[56] <= $signed(cmd_data[31:0]) + $signed(56 * POOLING_INIT_MULT);
+                                matrix_c[57] <= $signed(cmd_data[31:0]) + $signed(57 * POOLING_INIT_MULT);
+                                matrix_c[58] <= $signed(cmd_data[31:0]) + $signed(58 * POOLING_INIT_MULT);
+                                matrix_c[59] <= $signed(cmd_data[31:0]) + $signed(59 * POOLING_INIT_MULT);
+                                matrix_c[60] <= $signed(cmd_data[31:0]) + $signed(60 * POOLING_INIT_MULT);
+                                matrix_c[61] <= $signed(cmd_data[31:0]) + $signed(61 * POOLING_INIT_MULT);
+                                matrix_c[62] <= $signed(cmd_data[31:0]) + $signed(62 * POOLING_INIT_MULT);
+                                matrix_c[63] <= $signed(cmd_data[31:0]) + $signed(63 * POOLING_INIT_MULT);
                                 a_exec_counter <= 16'h0;
                                 a_exec_target_cycles <= A_PIPE_POOLING;
                                 a_pipeline_stage_detail <= 4'd1;
@@ -733,7 +1048,66 @@ module a_core #(
                                 matrix_c[1] <= $signed(cmd_data[31:0]) + $signed(1 * ACTIVATION_INIT_MULT);
                                 matrix_c[2] <= $signed(cmd_data[31:0]) + $signed(2 * ACTIVATION_INIT_MULT);
                                 matrix_c[3] <= $signed(cmd_data[31:0]) + $signed(3 * ACTIVATION_INIT_MULT);
-                                // Continue for all 64 entries (truncated for brevity)
+                                matrix_c[4] <= $signed(cmd_data[31:0]) + $signed(4 * ACTIVATION_INIT_MULT);
+                                matrix_c[5] <= $signed(cmd_data[31:0]) + $signed(5 * ACTIVATION_INIT_MULT);
+                                matrix_c[6] <= $signed(cmd_data[31:0]) + $signed(6 * ACTIVATION_INIT_MULT);
+                                matrix_c[7] <= $signed(cmd_data[31:0]) + $signed(7 * ACTIVATION_INIT_MULT);
+                                matrix_c[8] <= $signed(cmd_data[31:0]) + $signed(8 * ACTIVATION_INIT_MULT);
+                                matrix_c[9] <= $signed(cmd_data[31:0]) + $signed(9 * ACTIVATION_INIT_MULT);
+                                matrix_c[10] <= $signed(cmd_data[31:0]) + $signed(10 * ACTIVATION_INIT_MULT);
+                                matrix_c[11] <= $signed(cmd_data[31:0]) + $signed(11 * ACTIVATION_INIT_MULT);
+                                matrix_c[12] <= $signed(cmd_data[31:0]) + $signed(12 * ACTIVATION_INIT_MULT);
+                                matrix_c[13] <= $signed(cmd_data[31:0]) + $signed(13 * ACTIVATION_INIT_MULT);
+                                matrix_c[14] <= $signed(cmd_data[31:0]) + $signed(14 * ACTIVATION_INIT_MULT);
+                                matrix_c[15] <= $signed(cmd_data[31:0]) + $signed(15 * ACTIVATION_INIT_MULT);
+                                matrix_c[16] <= $signed(cmd_data[31:0]) + $signed(16 * ACTIVATION_INIT_MULT);
+                                matrix_c[17] <= $signed(cmd_data[31:0]) + $signed(17 * ACTIVATION_INIT_MULT);
+                                matrix_c[18] <= $signed(cmd_data[31:0]) + $signed(18 * ACTIVATION_INIT_MULT);
+                                matrix_c[19] <= $signed(cmd_data[31:0]) + $signed(19 * ACTIVATION_INIT_MULT);
+                                matrix_c[20] <= $signed(cmd_data[31:0]) + $signed(20 * ACTIVATION_INIT_MULT);
+                                matrix_c[21] <= $signed(cmd_data[31:0]) + $signed(21 * ACTIVATION_INIT_MULT);
+                                matrix_c[22] <= $signed(cmd_data[31:0]) + $signed(22 * ACTIVATION_INIT_MULT);
+                                matrix_c[23] <= $signed(cmd_data[31:0]) + $signed(23 * ACTIVATION_INIT_MULT);
+                                matrix_c[24] <= $signed(cmd_data[31:0]) + $signed(24 * ACTIVATION_INIT_MULT);
+                                matrix_c[25] <= $signed(cmd_data[31:0]) + $signed(25 * ACTIVATION_INIT_MULT);
+                                matrix_c[26] <= $signed(cmd_data[31:0]) + $signed(26 * ACTIVATION_INIT_MULT);
+                                matrix_c[27] <= $signed(cmd_data[31:0]) + $signed(27 * ACTIVATION_INIT_MULT);
+                                matrix_c[28] <= $signed(cmd_data[31:0]) + $signed(28 * ACTIVATION_INIT_MULT);
+                                matrix_c[29] <= $signed(cmd_data[31:0]) + $signed(29 * ACTIVATION_INIT_MULT);
+                                matrix_c[30] <= $signed(cmd_data[31:0]) + $signed(30 * ACTIVATION_INIT_MULT);
+                                matrix_c[31] <= $signed(cmd_data[31:0]) + $signed(31 * ACTIVATION_INIT_MULT);
+                                matrix_c[32] <= $signed(cmd_data[31:0]) + $signed(32 * ACTIVATION_INIT_MULT);
+                                matrix_c[33] <= $signed(cmd_data[31:0]) + $signed(33 * ACTIVATION_INIT_MULT);
+                                matrix_c[34] <= $signed(cmd_data[31:0]) + $signed(34 * ACTIVATION_INIT_MULT);
+                                matrix_c[35] <= $signed(cmd_data[31:0]) + $signed(35 * ACTIVATION_INIT_MULT);
+                                matrix_c[36] <= $signed(cmd_data[31:0]) + $signed(36 * ACTIVATION_INIT_MULT);
+                                matrix_c[37] <= $signed(cmd_data[31:0]) + $signed(37 * ACTIVATION_INIT_MULT);
+                                matrix_c[38] <= $signed(cmd_data[31:0]) + $signed(38 * ACTIVATION_INIT_MULT);
+                                matrix_c[39] <= $signed(cmd_data[31:0]) + $signed(39 * ACTIVATION_INIT_MULT);
+                                matrix_c[40] <= $signed(cmd_data[31:0]) + $signed(40 * ACTIVATION_INIT_MULT);
+                                matrix_c[41] <= $signed(cmd_data[31:0]) + $signed(41 * ACTIVATION_INIT_MULT);
+                                matrix_c[42] <= $signed(cmd_data[31:0]) + $signed(42 * ACTIVATION_INIT_MULT);
+                                matrix_c[43] <= $signed(cmd_data[31:0]) + $signed(43 * ACTIVATION_INIT_MULT);
+                                matrix_c[44] <= $signed(cmd_data[31:0]) + $signed(44 * ACTIVATION_INIT_MULT);
+                                matrix_c[45] <= $signed(cmd_data[31:0]) + $signed(45 * ACTIVATION_INIT_MULT);
+                                matrix_c[46] <= $signed(cmd_data[31:0]) + $signed(46 * ACTIVATION_INIT_MULT);
+                                matrix_c[47] <= $signed(cmd_data[31:0]) + $signed(47 * ACTIVATION_INIT_MULT);
+                                matrix_c[48] <= $signed(cmd_data[31:0]) + $signed(48 * ACTIVATION_INIT_MULT);
+                                matrix_c[49] <= $signed(cmd_data[31:0]) + $signed(49 * ACTIVATION_INIT_MULT);
+                                matrix_c[50] <= $signed(cmd_data[31:0]) + $signed(50 * ACTIVATION_INIT_MULT);
+                                matrix_c[51] <= $signed(cmd_data[31:0]) + $signed(51 * ACTIVATION_INIT_MULT);
+                                matrix_c[52] <= $signed(cmd_data[31:0]) + $signed(52 * ACTIVATION_INIT_MULT);
+                                matrix_c[53] <= $signed(cmd_data[31:0]) + $signed(53 * ACTIVATION_INIT_MULT);
+                                matrix_c[54] <= $signed(cmd_data[31:0]) + $signed(54 * ACTIVATION_INIT_MULT);
+                                matrix_c[55] <= $signed(cmd_data[31:0]) + $signed(55 * ACTIVATION_INIT_MULT);
+                                matrix_c[56] <= $signed(cmd_data[31:0]) + $signed(56 * ACTIVATION_INIT_MULT);
+                                matrix_c[57] <= $signed(cmd_data[31:0]) + $signed(57 * ACTIVATION_INIT_MULT);
+                                matrix_c[58] <= $signed(cmd_data[31:0]) + $signed(58 * ACTIVATION_INIT_MULT);
+                                matrix_c[59] <= $signed(cmd_data[31:0]) + $signed(59 * ACTIVATION_INIT_MULT);
+                                matrix_c[60] <= $signed(cmd_data[31:0]) + $signed(60 * ACTIVATION_INIT_MULT);
+                                matrix_c[61] <= $signed(cmd_data[31:0]) + $signed(61 * ACTIVATION_INIT_MULT);
+                                matrix_c[62] <= $signed(cmd_data[31:0]) + $signed(62 * ACTIVATION_INIT_MULT);
+                                matrix_c[63] <= $signed(cmd_data[31:0]) + $signed(63 * ACTIVATION_INIT_MULT);
                                 a_exec_counter <= 16'h0;
                                 a_exec_target_cycles <= A_PIPE_ACTIVATION;
                                 a_pipeline_stage_detail <= 4'd1;
@@ -746,7 +1120,66 @@ module a_core #(
                                 matrix_c[1] <= $signed(cmd_data[31:0]) - $signed(1 * NORMALIZE_INIT_MULT);
                                 matrix_c[2] <= $signed(cmd_data[31:0]) - $signed(2 * NORMALIZE_INIT_MULT);
                                 matrix_c[3] <= $signed(cmd_data[31:0]) - $signed(3 * NORMALIZE_INIT_MULT);
-                                // Continue for all 64 entries (truncated for brevity)
+                                matrix_c[4] <= $signed(cmd_data[31:0]) - $signed(4 * NORMALIZE_INIT_MULT);
+                                matrix_c[5] <= $signed(cmd_data[31:0]) - $signed(5 * NORMALIZE_INIT_MULT);
+                                matrix_c[6] <= $signed(cmd_data[31:0]) - $signed(6 * NORMALIZE_INIT_MULT);
+                                matrix_c[7] <= $signed(cmd_data[31:0]) - $signed(7 * NORMALIZE_INIT_MULT);
+                                matrix_c[8] <= $signed(cmd_data[31:0]) - $signed(8 * NORMALIZE_INIT_MULT);
+                                matrix_c[9] <= $signed(cmd_data[31:0]) - $signed(9 * NORMALIZE_INIT_MULT);
+                                matrix_c[10] <= $signed(cmd_data[31:0]) - $signed(10 * NORMALIZE_INIT_MULT);
+                                matrix_c[11] <= $signed(cmd_data[31:0]) - $signed(11 * NORMALIZE_INIT_MULT);
+                                matrix_c[12] <= $signed(cmd_data[31:0]) - $signed(12 * NORMALIZE_INIT_MULT);
+                                matrix_c[13] <= $signed(cmd_data[31:0]) - $signed(13 * NORMALIZE_INIT_MULT);
+                                matrix_c[14] <= $signed(cmd_data[31:0]) - $signed(14 * NORMALIZE_INIT_MULT);
+                                matrix_c[15] <= $signed(cmd_data[31:0]) - $signed(15 * NORMALIZE_INIT_MULT);
+                                matrix_c[16] <= $signed(cmd_data[31:0]) - $signed(16 * NORMALIZE_INIT_MULT);
+                                matrix_c[17] <= $signed(cmd_data[31:0]) - $signed(17 * NORMALIZE_INIT_MULT);
+                                matrix_c[18] <= $signed(cmd_data[31:0]) - $signed(18 * NORMALIZE_INIT_MULT);
+                                matrix_c[19] <= $signed(cmd_data[31:0]) - $signed(19 * NORMALIZE_INIT_MULT);
+                                matrix_c[20] <= $signed(cmd_data[31:0]) - $signed(20 * NORMALIZE_INIT_MULT);
+                                matrix_c[21] <= $signed(cmd_data[31:0]) - $signed(21 * NORMALIZE_INIT_MULT);
+                                matrix_c[22] <= $signed(cmd_data[31:0]) - $signed(22 * NORMALIZE_INIT_MULT);
+                                matrix_c[23] <= $signed(cmd_data[31:0]) - $signed(23 * NORMALIZE_INIT_MULT);
+                                matrix_c[24] <= $signed(cmd_data[31:0]) - $signed(24 * NORMALIZE_INIT_MULT);
+                                matrix_c[25] <= $signed(cmd_data[31:0]) - $signed(25 * NORMALIZE_INIT_MULT);
+                                matrix_c[26] <= $signed(cmd_data[31:0]) - $signed(26 * NORMALIZE_INIT_MULT);
+                                matrix_c[27] <= $signed(cmd_data[31:0]) - $signed(27 * NORMALIZE_INIT_MULT);
+                                matrix_c[28] <= $signed(cmd_data[31:0]) - $signed(28 * NORMALIZE_INIT_MULT);
+                                matrix_c[29] <= $signed(cmd_data[31:0]) - $signed(29 * NORMALIZE_INIT_MULT);
+                                matrix_c[30] <= $signed(cmd_data[31:0]) - $signed(30 * NORMALIZE_INIT_MULT);
+                                matrix_c[31] <= $signed(cmd_data[31:0]) - $signed(31 * NORMALIZE_INIT_MULT);
+                                matrix_c[32] <= $signed(cmd_data[31:0]) - $signed(32 * NORMALIZE_INIT_MULT);
+                                matrix_c[33] <= $signed(cmd_data[31:0]) - $signed(33 * NORMALIZE_INIT_MULT);
+                                matrix_c[34] <= $signed(cmd_data[31:0]) - $signed(34 * NORMALIZE_INIT_MULT);
+                                matrix_c[35] <= $signed(cmd_data[31:0]) - $signed(35 * NORMALIZE_INIT_MULT);
+                                matrix_c[36] <= $signed(cmd_data[31:0]) - $signed(36 * NORMALIZE_INIT_MULT);
+                                matrix_c[37] <= $signed(cmd_data[31:0]) - $signed(37 * NORMALIZE_INIT_MULT);
+                                matrix_c[38] <= $signed(cmd_data[31:0]) - $signed(38 * NORMALIZE_INIT_MULT);
+                                matrix_c[39] <= $signed(cmd_data[31:0]) - $signed(39 * NORMALIZE_INIT_MULT);
+                                matrix_c[40] <= $signed(cmd_data[31:0]) - $signed(40 * NORMALIZE_INIT_MULT);
+                                matrix_c[41] <= $signed(cmd_data[31:0]) - $signed(41 * NORMALIZE_INIT_MULT);
+                                matrix_c[42] <= $signed(cmd_data[31:0]) - $signed(42 * NORMALIZE_INIT_MULT);
+                                matrix_c[43] <= $signed(cmd_data[31:0]) - $signed(43 * NORMALIZE_INIT_MULT);
+                                matrix_c[44] <= $signed(cmd_data[31:0]) - $signed(44 * NORMALIZE_INIT_MULT);
+                                matrix_c[45] <= $signed(cmd_data[31:0]) - $signed(45 * NORMALIZE_INIT_MULT);
+                                matrix_c[46] <= $signed(cmd_data[31:0]) - $signed(46 * NORMALIZE_INIT_MULT);
+                                matrix_c[47] <= $signed(cmd_data[31:0]) - $signed(47 * NORMALIZE_INIT_MULT);
+                                matrix_c[48] <= $signed(cmd_data[31:0]) - $signed(48 * NORMALIZE_INIT_MULT);
+                                matrix_c[49] <= $signed(cmd_data[31:0]) - $signed(49 * NORMALIZE_INIT_MULT);
+                                matrix_c[50] <= $signed(cmd_data[31:0]) - $signed(50 * NORMALIZE_INIT_MULT);
+                                matrix_c[51] <= $signed(cmd_data[31:0]) - $signed(51 * NORMALIZE_INIT_MULT);
+                                matrix_c[52] <= $signed(cmd_data[31:0]) - $signed(52 * NORMALIZE_INIT_MULT);
+                                matrix_c[53] <= $signed(cmd_data[31:0]) - $signed(53 * NORMALIZE_INIT_MULT);
+                                matrix_c[54] <= $signed(cmd_data[31:0]) - $signed(54 * NORMALIZE_INIT_MULT);
+                                matrix_c[55] <= $signed(cmd_data[31:0]) - $signed(55 * NORMALIZE_INIT_MULT);
+                                matrix_c[56] <= $signed(cmd_data[31:0]) - $signed(56 * NORMALIZE_INIT_MULT);
+                                matrix_c[57] <= $signed(cmd_data[31:0]) - $signed(57 * NORMALIZE_INIT_MULT);
+                                matrix_c[58] <= $signed(cmd_data[31:0]) - $signed(58 * NORMALIZE_INIT_MULT);
+                                matrix_c[59] <= $signed(cmd_data[31:0]) - $signed(59 * NORMALIZE_INIT_MULT);
+                                matrix_c[60] <= $signed(cmd_data[31:0]) - $signed(60 * NORMALIZE_INIT_MULT);
+                                matrix_c[61] <= $signed(cmd_data[31:0]) - $signed(61 * NORMALIZE_INIT_MULT);
+                                matrix_c[62] <= $signed(cmd_data[31:0]) - $signed(62 * NORMALIZE_INIT_MULT);
+                                matrix_c[63] <= $signed(cmd_data[31:0]) - $signed(63 * NORMALIZE_INIT_MULT);
                                 a_exec_counter <= 16'h0;
                                 a_exec_target_cycles <= A_PIPE_NORMALIZE;
                                 a_pipeline_stage_detail <= 4'd1;
@@ -790,7 +1223,7 @@ module a_core #(
                 LOAD_INPUT: begin
                     // Loading matrix A
                     l1_rd_en <= 1'b1;
-                    l1_addr <= cmd_addr + {42'b0, stage_counter[5:0]};
+                    l1_addr <= cmd_addr + {40'b0, stage_counter[7:0]};
 
                     // FIXED: Timeout after 256 cycles to prevent infinite hang
                     a_exec_counter <= a_exec_counter + 1;
@@ -820,7 +1253,7 @@ module a_core #(
                 // ─────────────────────────────────────────────────
                 LOAD_WEIGHT: begin
                     l1_rd_en <= 1'b1;
-                    l1_addr <= cmd_addr + 64 + {42'b0, stage_counter[5:0]};
+                    l1_addr <= cmd_addr + 64 + {40'b0, stage_counter[7:0]};
 
                     // FIXED: Timeout after 256 cycles to prevent infinite hang
                     a_exec_counter <= a_exec_counter + 1;
@@ -862,7 +1295,6 @@ module a_core #(
                         // MAC compute started
                         // Counter progress tracking disabled for performance
                         // Don't execute MAC ops yet - still waiting for latency
-                        stage_counter <= stage_counter;  // Hold stage_counter
                     end else if (!mac_compute_started) begin
                         // Counter reached target AND this is first cycle - start MAC
                         mac_compute_started <= 1'b1;

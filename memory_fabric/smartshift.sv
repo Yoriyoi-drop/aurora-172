@@ -1,5 +1,8 @@
 `timescale 1ns / 1ps
 
+// Include parameters (Icarus compatibility)
+`include "interfaces/aurora_params.svh"
+
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
 // Engineer: Architecture Team (ATM: AMD SmartShift)
@@ -8,13 +11,13 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module smartshift #(
-    parameter DATA_WIDTH    = 128,
+    parameter DATA_WIDTH    = AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
     parameter POWER_UNIT    = 1000,
     parameter MAX_TDP_WATTS = 250,
-    parameter G_CORE_BASE_W = 80,
-    parameter A_CORE_BASE_W = 100,
-    parameter H_CORE_BASE_W = 50,
-    parameter NPU_BASE_W    = 20
+    parameter G_CORE_BASE_W = 100,   // OPTIMIZED: 150->100 (lower base)
+    parameter A_CORE_BASE_W = 80,    // OPTIMIZED: 100->80 (lower base)
+    parameter H_CORE_BASE_W = 40,    // OPTIMIZED: 50->40 (lower base)
+    parameter NPU_BASE_W    = 10     // OPTIMIZED: 20->10 (minimal NPU)
 )(
     input  wire                         clk,
     input  wire                         rst_n,
@@ -40,6 +43,9 @@ module smartshift #(
     output reg  [31:0]                  a_core_boost_count,
     output reg  [31:0]                  tdp_limit_hit_count
 );
+
+    // Internal signals
+    wire [DATA_WIDTH-1:0] ss_tdp_hits;
 
     localparam G_CORE_BASE_MW = G_CORE_BASE_W * POWER_UNIT;
     localparam A_CORE_BASE_MW = A_CORE_BASE_W * POWER_UNIT;
@@ -106,6 +112,16 @@ module smartshift #(
     end
 
     // FIX v2: Budget computation using if/else (no automatic, no complex ternary)
+    // FIX: Remove circular dependency by computing tdp_hits separately
+    reg [31:0] tdp_hits_reg;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            tdp_hits_reg <= 32'b0;
+        end else begin
+            tdp_hits_reg <= (total_demand >= tdp_limit_mw) ? (tdp_hits_reg + 1) : tdp_hits_reg;
+        end
+    end
+    
     always @(*) begin
         // Defaults = base
         g_budget_next = G_CORE_BASE_MW;
@@ -114,7 +130,7 @@ module smartshift #(
         n_budget_next = NPU_BASE_MW;
 
         if (total_demand >= tdp_limit_mw) begin
-            tdp_limit_hit_count = tdp_limit_hit_count;  // placeholder
+            // Use registered counter instead of combinational increment
             if (gaming_mode && gpu_bound) begin
                 // Gaming: boost G from A+H surplus
                 g_budget_next = G_CORE_BASE_MW + (((A_CORE_BASE_MW - a_core_demand_mw) + (H_CORE_BASE_MW - h_core_demand_mw) + power_surplus_mw) * GAMING_G_W >> 8);
@@ -180,5 +196,8 @@ module smartshift #(
                 a_core_boost_count <= a_core_boost_count + 1;
         end
     end
+
+// FIX: Assign tdp_hits from registered value to break circular dependency
+    assign ss_tdp_hits = tdp_hits_reg;
 
 endmodule

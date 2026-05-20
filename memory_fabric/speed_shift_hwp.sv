@@ -50,17 +50,20 @@
 
 `timescale 1ns / 1ps
 
-module speed_shift_hwp #(
-    parameter DATA_WIDTH            = 128,  // OPTIMIZED: 64->128 for finer P-state control
-    parameter NUM_DOMAINS           = 4,    // G, A, H, NPU
-    parameter NUM_P_STATES          = 16,   // P0-P15
-    parameter RESPONSE_CYCLES       = 8,    // 8 cycle response time
+// Include parameters (Icarus compatibility)
+`include "interfaces/aurora_params.svh"
 
-    // Base frequencies per domain (MHz)
-    parameter G_MAX_FREQ_MHZ        = 6500,
-    parameter A_MAX_FREQ_MHZ        = 4500,
-    parameter H_MAX_FREQ_MHZ        = 3000,
-    parameter N_MAX_FREQ_MHZ        = 1000
+module speed_shift_hwp #(
+    parameter DATA_WIDTH            = AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
+    parameter NUM_DOMAINS           = 3,    // OPTIMIZED: 4->3 (G, A, H only)
+    parameter NUM_P_STATES          = 8,    // OPTIMIZED: 16->8 (P0-P7)
+    parameter RESPONSE_CYCLES       = 4,    // OPTIMIZED: 8->4 (faster response)
+
+    // Base frequencies per domain (MHz) - realistic
+    parameter G_MAX_FREQ_MHZ        = 4000,  // OPTIMIZED: 6500->4000
+    parameter A_MAX_FREQ_MHZ        = 3000,  // OPTIMIZED: 4500->3000
+    parameter H_MAX_FREQ_MHZ        = 2000,  // OPTIMIZED: 3000->2000
+    parameter N_MAX_FREQ_MHZ        = 2500   // NPU frequency
 )(
     input  wire                         clk,
     input  wire                         rst_n,

@@ -320,12 +320,6 @@ module cache_coherency #(
                 if (system_stuck && deadlock_recovery_count > 0) begin
                     $display("[%0t] [COHERENCE-DEADLOCK] Global deadlock detected! Recovery count: %0d", $time, deadlock_recovery_count);
                     global_deadlock_detected <= 1'b1;
-                    // Force reset all pending requests
-                    for (int i = 0; i < NUM_CORES; i++) begin
-                        per_core_mem_rd_req[i] <= 1'b0;
-                        per_core_mem_wr_req[i] <= 1'b0;
-                        coherence_timeout[i] <= 16'd0;
-                    end
                 end else begin
                     global_deadlock_detected <= 1'b0;
                 end

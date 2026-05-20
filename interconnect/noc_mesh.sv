@@ -1,5 +1,8 @@
 `timescale 1ns / 1ps
 
+// Include parameters (Icarus compatibility)
+`include "interfaces/aurora_params.svh"
+
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
 // Engineer: Interconnect Architecture Team
@@ -25,12 +28,12 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module noc_mesh #(
-    parameter DATA_WIDTH    = 128,  // OPTIMIZED: 64→128 for higher bandwidth
-    parameter ADDR_WIDTH    = 48,
+    parameter DATA_WIDTH    = AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
+    parameter ADDR_WIDTH    = AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
     parameter MESH_X        = 2,    // Mesh width (routers in X)
     parameter MESH_Y        = 2,    // Mesh height (routers in Y)
-    parameter VC_COUNT      = 4,    // OPTIMIZED: 2→4 (more QoS levels)
-    parameter BUFFER_DEPTH  = 16,   // OPTIMIZED: 8→16 (deeper buffer)
+    parameter VC_COUNT      = 2,    // OPTIMIZED: 4→2 (simpler QoS)
+    parameter BUFFER_DEPTH  = 16,   // OPTIMIZED: 32→16 (smaller buffers)
     parameter LINK_LATENCY  = 1     // Cycles per hop
 )(
     input  wire                         clk,

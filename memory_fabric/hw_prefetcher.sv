@@ -45,13 +45,16 @@
 
 `timescale 1ns / 1ps
 
+// Include parameters (Icarus compatibility)
+`include "interfaces/aurora_params.svh"
+
 module hw_prefetcher #(
-    parameter DATA_WIDTH            = 128,  // OPTIMIZED: 64→128 for wider prefetch data
-    parameter PREFETCH_DISTANCE     = 4,    // Lines ahead
-    parameter CACHE_LINE_BITS       = 5,    // OPTIMIZED: 6→5 (32-byte lines)
-    parameter ADDR_WIDTH            = 48,
-    parameter NUM_STREAMS           = 8,    // OPTIMIZED: 4→8 (more streams)
-    parameter MAX_STRIDE_BITS       = 16,   // Max stride width
+    parameter DATA_WIDTH            = AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
+    parameter PREFETCH_DISTANCE     = 2,    // OPTIMIZED: 4->2 (less aggressive)
+    parameter CACHE_LINE_BITS       = 5,    // 32-byte lines
+    parameter ADDR_WIDTH            = AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
+    parameter NUM_STREAMS           = 4,    // OPTIMIZED: 8->4 (simpler tracking)
+    parameter MAX_STRIDE_BITS       = 12,   // OPTIMIZED: 16->12 (smaller stride)
     parameter CONFIDENCE_MAX        = 8,    // Max confidence level
     parameter USELESS_THRESHOLD     = 4     // Deallocation threshold
 )(
@@ -353,10 +356,12 @@ module hw_prefetcher #(
             // ─────────────────────────────────────────────────
             if (pf_result_used) begin
                 integer i;
+                reg [ADDR_WIDTH-1:0] prefetch_addr;
                 total_pf_useful <= total_pf_useful + 32'd1;
                 // Clear pending for the stream that used this
                 for (i = 0; i < NUM_STREAMS; i = i + 1) begin
-                    if (pf_result_addr == stream_base[i]) begin
+                    prefetch_addr = stream_base[i] + stream_stride[i] * stream_pf_dist[i];
+                    if (pf_result_addr == prefetch_addr) begin
                         pf_pending_mask[i] <= 1'b0;
                         stream_useless[i] <= 8'd0;  // Reset useless
                     end
@@ -365,10 +370,12 @@ module hw_prefetcher #(
 
             if (pf_result_unused) begin
                 integer i;
+                reg [ADDR_WIDTH-1:0] prefetch_addr;
                 total_pf_useless <= total_pf_useless + 32'd1;
                 // Increment useless counter
                 for (i = 0; i < NUM_STREAMS; i = i + 1) begin
-                    if (pf_result_addr == stream_base[i]) begin
+                    prefetch_addr = stream_base[i] + stream_stride[i] * stream_pf_dist[i];
+                    if (pf_result_addr == prefetch_addr) begin
                         if (stream_useless[i] < USELESS_THRESHOLD) begin
                             stream_useless[i] <= stream_useless[i] + 8'd1;
                         end

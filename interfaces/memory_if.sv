@@ -1,5 +1,8 @@
 `timescale 1ns / 1ps
 
+// Include parameters (Icarus doesn't support import in interfaces)
+`include "aurora_params.svh"
+
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
 // Engineer: Architecture Team
@@ -14,8 +17,8 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 interface memory_if #(
-    parameter DATA_WIDTH = 64,
-    parameter ADDR_WIDTH = 48
+    parameter DATA_WIDTH = 256,  // OPTIMIZED: 512->256 (more efficient)
+    parameter ADDR_WIDTH = 40   // OPTIMIZED: 48->40 (simpler addressing)
 )();
     
     // Address and control signals

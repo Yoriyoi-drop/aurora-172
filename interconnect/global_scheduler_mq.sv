@@ -848,7 +848,7 @@ module global_scheduler_mq #(
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            g_head <= 0; g_tail <= 0; g_q_count <= 0; g_credits <= G_QUEUE_DEPTH;
+            g_head <= 0; g_tail <= 0; g_q_count <= 0;
             a_head <= 0; a_tail <= 0; a_q_count <= 0; a_credits <= A_QUEUE_DEPTH;
             n_head <= 0; n_tail <= 0; n_q_count <= 0; n_credits <= N_QUEUE_DEPTH;
             active_task_valid <= 1'b0; active_task_type <= TASK_GAMING;
@@ -1449,8 +1449,8 @@ module global_scheduler_mq #(
                             end
                         end
 
-                        dq_decoded[fsm_li_dq] = 1'b1;
-                        hq_dq_decoded = hq_dq_decoded + 1;
+                        dq_decoded[fsm_li_dq] <= 1'b1;
+                        hq_dq_decoded <= hq_dq_decoded + 1;
                     end
                 end
             end
@@ -1487,17 +1487,17 @@ module global_scheduler_mq #(
                                     fsm_found_slot = 1'b0;
                                     for (fsm_li_eq_slot = 0; fsm_li_eq_slot < EQ_MEM_DEPTH && !fsm_found_slot; fsm_li_eq_slot = fsm_li_eq_slot + 1) begin
                                         if (!eq_mem_valid[fsm_li_eq_slot]) begin
-                                            eq_mem_tag_id[fsm_li_eq_slot] = dq_tag_id[fsm_li_dq_eq];
-                                            eq_mem_addr[fsm_li_eq_slot]   = dq_addr[fsm_li_dq_eq];
-                                            eq_mem_data[fsm_li_eq_slot]   = dq_data[fsm_li_dq_eq];
-                                            eq_mem_valid[fsm_li_eq_slot]  = 1'b1;
-                                            eq_mem_ready[fsm_li_eq_slot]  = 1'b1;
-                                            eq_mem_count = eq_mem_count + 1;
+                                            eq_mem_tag_id[fsm_li_eq_slot] <= dq_tag_id[fsm_li_dq_eq];
+                                            eq_mem_addr[fsm_li_eq_slot]   <= dq_addr[fsm_li_dq_eq];
+                                            eq_mem_data[fsm_li_eq_slot]   <= dq_data[fsm_li_dq_eq];
+                                            eq_mem_valid[fsm_li_eq_slot]  <= 1'b1;
+                                            eq_mem_ready[fsm_li_eq_slot]  <= 1'b1;
+                                            eq_mem_count <= eq_mem_count + 1;
                                             fsm_found_slot = 1'b1;
                                         end
                                     end
-                                    dq_valid[fsm_li_dq_eq] = 1'b0;
-                                    dq_count = dq_count - 1;
+                                    dq_valid[fsm_li_dq_eq] <= 1'b0;
+                                    dq_count <= dq_count - 1;
                                     fsm_dispatched = 1'b1;
                                 end
                             end
@@ -1506,17 +1506,17 @@ module global_scheduler_mq #(
                                     fsm_found_slot = 1'b0;
                                     for (fsm_li_eq_slot = 0; fsm_li_eq_slot < EQ_VEC_DEPTH && !fsm_found_slot; fsm_li_eq_slot = fsm_li_eq_slot + 1) begin
                                         if (!eq_vec_valid[fsm_li_eq_slot]) begin
-                                            eq_vec_tag_id[fsm_li_eq_slot] = dq_tag_id[fsm_li_dq_eq];
-                                            eq_vec_addr[fsm_li_eq_slot]   = dq_addr[fsm_li_dq_eq];
-                                            eq_vec_data[fsm_li_eq_slot]   = dq_data[fsm_li_dq_eq];
-                                            eq_vec_valid[fsm_li_eq_slot]  = 1'b1;
-                                            eq_vec_ready[fsm_li_eq_slot]  = 1'b1;
-                                            eq_vec_count = eq_vec_count + 1;
+                                            eq_vec_tag_id[fsm_li_eq_slot] <= dq_tag_id[fsm_li_dq_eq];
+                                            eq_vec_addr[fsm_li_eq_slot]   <= dq_addr[fsm_li_dq_eq];
+                                            eq_vec_data[fsm_li_eq_slot]   <= dq_data[fsm_li_dq_eq];
+                                            eq_vec_valid[fsm_li_eq_slot]  <= 1'b1;
+                                            eq_vec_ready[fsm_li_eq_slot]  <= 1'b1;
+                                            eq_vec_count <= eq_vec_count + 1;
                                             fsm_found_slot = 1'b1;
                                         end
                                     end
-                                    dq_valid[fsm_li_dq_eq] = 1'b0;
-                                    dq_count = dq_count - 1;
+                                    dq_valid[fsm_li_dq_eq] <= 1'b0;
+                                    dq_count <= dq_count - 1;
                                     fsm_dispatched = 1'b1;
                                 end
                             end
@@ -1753,7 +1753,6 @@ module global_scheduler_mq #(
             // ── DYNAMIC QUEUE BALANCER (DQB) ──
             // Spill overflow from busy EQ to less busy EQ
             begin
-                // If EQ-ALU is > 75% full and EQ-VEC has space, spill ALU tasks to VEC
                 if (eq_alu_count > (EQ_ALU_DEPTH * 3 / 4) && eq_vec_count < EQ_VEC_DEPTH / 2) begin
                     fsm_found_spill = 1'b0;
                     for (fsm_li_spill = 0; fsm_li_spill < EQ_ALU_DEPTH && !fsm_found_spill; fsm_li_spill = fsm_li_spill + 1) begin
@@ -1761,18 +1760,18 @@ module global_scheduler_mq #(
                             fsm_found_vec = 1'b0;
                             for (fsm_li_vec = 0; fsm_li_vec < EQ_VEC_DEPTH && !fsm_found_vec; fsm_li_vec = fsm_li_vec + 1) begin
                                 if (!eq_vec_valid[fsm_li_vec]) begin
-                                    eq_vec_tag_id[fsm_li_vec] = eq_alu_tag_id[fsm_li_spill];
-                                    eq_vec_addr[fsm_li_vec]   = eq_alu_addr[fsm_li_spill];
-                                    eq_vec_data[fsm_li_vec]   = eq_alu_data[fsm_li_spill];
-                                    eq_vec_valid[fsm_li_vec]  = 1'b1;
-                                    eq_vec_ready[fsm_li_vec]  = eq_alu_ready[fsm_li_spill];
-                                    eq_vec_count = eq_vec_count + 1;
+                                    eq_vec_tag_id[fsm_li_vec] <= eq_alu_tag_id[fsm_li_spill];
+                                    eq_vec_addr[fsm_li_vec]   <= eq_alu_addr[fsm_li_spill];
+                                    eq_vec_data[fsm_li_vec]   <= eq_alu_data[fsm_li_spill];
+                                    eq_vec_valid[fsm_li_vec]  <= 1'b1;
+                                    eq_vec_ready[fsm_li_vec]  <= eq_alu_ready[fsm_li_spill];
+                                    eq_vec_count <= eq_vec_count + 1;
                                     fsm_found_vec = 1'b1;
                                 end
                             end
-                            eq_alu_valid[fsm_li_spill] = 1'b0;
-                            eq_alu_count = eq_alu_count - 1;
-                            dqb_spill_count = dqb_spill_count + 1;
+                            eq_alu_valid[fsm_li_spill] <= 1'b0;
+                            eq_alu_count <= eq_alu_count - 1;
+                            dqb_spill_count <= dqb_spill_count + 1;
                             fsm_found_spill = 1'b1;
                         end
                     end

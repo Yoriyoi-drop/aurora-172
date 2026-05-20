@@ -597,15 +597,18 @@ module noc_router #(
                 S_ARBITRATE: begin
                     integer p;
                     integer count;
+                    reg found;
                     grant_ports = 0;
                     count = 0;
+                    found = 1'b0;
 
                     // Find highest priority port with request
-                    for (p = 0; p < 5; p = p + 1) begin
+                    for (p = 0; p < 5 && !found; p = p + 1) begin
                         if (request_ports[p]) begin
                             grant_ports[p] = 1'b1;
                             current_in_port <= p[2:0];  // FIX: Use non-blocking for consistency
                             count = count + 1;
+                            found = 1'b1;
                         end
                     end
 
@@ -623,6 +626,7 @@ module noc_router #(
                 S_ROUTE: begin
                     integer vc;
                     reg found;
+                    reg [DATA_WIDTH-1:0] current_flit_data;
                     // Find first non-empty VC in the selected port
                     vc = 0;
                     found = 1'b0;

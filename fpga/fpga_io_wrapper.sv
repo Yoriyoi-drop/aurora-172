@@ -1,5 +1,10 @@
 `timescale 1ns / 1ps
 
+// Include parameters and constants
+`include "interfaces/aurora_params.svh"
+`include "interfaces/aurora_timing_constants.svh"
+`include "interfaces/aurora_constants.svh"
+
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
 // Engineer: Architecture Team
@@ -21,7 +26,11 @@
 // Tool: Vivado 2024.1+
 //////////////////////////////////////////////////////////////////////////////////
 
-module fpga_io_wrapper (
+module fpga_io_wrapper #(
+    // Use standardized parameters
+    parameter DATA_WIDTH = AURORA_DATA_WIDTH,
+    parameter ADDR_WIDTH = AURORA_ADDR_WIDTH
+) (
     // =========================================================================
     // External clock and reset
     // =========================================================================
@@ -30,29 +39,27 @@ module fpga_io_wrapper (
     input  wire                         sys_rst_n,
 
     // =========================================================================
-    // DDR4/HBM Memory Interface (simplified - 172-bit bus)
+    // Simplified DDR4 Memory Interface (64-bit bus)
     // =========================================================================
     // DDR4 control signals
     output wire [16:0]                  ddr4_addr,
     output wire [2:0]                   ddr4_ba,
-    output wire [1:0]                   ddr4_cke,
     output wire                         ddr4_cs_n,
     output wire                         ddr4_ras_n,
     output wire                         ddr4_cas_n,
     output wire                         ddr4_we_n,
     output wire                         ddr4_reset_n,
-    inout  wire [71:0]                  ddr4_dq,
-    inout wire [8:0]                    ddr4_dqs_p,
-    inout wire [8:0]                    ddr4_dqs_n,
-    output wire                         ddr4_act_n,
+    inout  wire [31:0]                  ddr4_dq,      // OPTIMIZED: 72->32 bits
+    inout wire [3:0]                    ddr4_dqs_p,    // OPTIMIZED: 9->4 bits
+    inout wire [3:0]                    ddr4_dqs_n,    // OPTIMIZED: 9->4 bits
 
     // =========================================================================
-    // PCIe Gen5 Interface (x16 lanes)
+    // Simplified PCIe Interface (x8 lanes)
     // =========================================================================
-    output wire [15:0]                  pcie_tx_p,
-    output wire [15:0]                  pcie_tx_n,
-    input  wire [15:0]                  pcie_rx_p,
-    input  wire [15:0]                  pcie_rx_n,
+    output wire [7:0]                   pcie_tx_p,    // OPTIMIZED: 16->8 lanes
+    output wire [7:0]                   pcie_tx_n,
+    input  wire [7:0]                   pcie_rx_p,    // OPTIMIZED: 16->8 lanes
+    input  wire [7:0]                   pcie_rx_n,
     input  wire                         pcie_perst_n,
     input  wire                         pcie_clk_p,
     input  wire                         pcie_clk_n,
@@ -79,7 +86,7 @@ module fpga_io_wrapper (
     input  wire                         gpio_int_n,
 
     // =========================================================================
-    // Test Mode (production test)
+    // Test Mode (testing)
     // =========================================================================
     input  wire                         test_mode_en
 );
@@ -98,19 +105,19 @@ wire [7:0] clk_status;
 wire freq_update_ack;
 
 // AURORA-172 internal signals
-wire [63:0] game_cmd_addr;
-wire [31:0] game_cmd_data;
-wire        game_cmd_valid;
-wire        game_cmd_ready;
-wire [63:0] game_result;
-wire        game_result_valid;
+wire [ADDR_WIDTH-1:0] game_cmd_addr;
+wire [DATA_WIDTH-1:0] game_cmd_data;
+wire                 game_cmd_valid;
+wire                 game_cmd_ready;
+wire [DATA_WIDTH-1:0]  game_result;
+wire                 game_result_valid;
 
-wire [63:0] ai_cmd_addr;
-wire [63:0] ai_cmd_data;
-wire        ai_cmd_valid;
-wire        ai_cmd_ready;
-wire [63:0] ai_result;
-wire        ai_result_valid;
+wire [ADDR_WIDTH-1:0] ai_cmd_addr;
+wire [DATA_WIDTH-1:0]  ai_cmd_data;
+wire                 ai_cmd_valid;
+wire                 ai_cmd_ready;
+wire [DATA_WIDTH-1:0]  ai_result;
+wire                 ai_result_valid;
 
 wire        sys_interrupt;
 wire [15:0] sys_power_mode;
@@ -142,14 +149,86 @@ IBUFDS #(
 //-----------------------------------------------------------------------------
 // Synchronize reset to system clock domain (FIXED: Use sys_clk_ibufg instead of g_core_clk)
 //-----------------------------------------------------------------------------
-reg [2:0] rst_sync = 3'b000;
-always @(posedge sys_clk_ibufg) begin
-    rst_sync <= {rst_sync[1:0], sys_rst_n};
+reg [2:0] sys_rst_sync_ff;
+always @(posedge sys_clk_ibufg or negedge sys_rst_n) begin
+    if (!sys_rst_n) begin
+        sys_rst_sync_ff <= 3'b000;
+    end else begin
+        sys_rst_sync_ff <= {sys_rst_sync_ff[1:0], sys_rst_n};
+    end
 end
-assign sys_rst_sync = rst_sync[2];
+assign sys_rst_sync = sys_rst_sync_ff[2];
+
+    // TASK 2 FIX: Zero-Trust Clock Domain Analysis - Enhanced CDC protection
+    // Multi-stage synchronizer for critical async signals
+    reg [2:0] sys_interrupt_sync_ff;
+    reg [2:0] gpio_int_sync_ff;
+    reg [2:0] pcie_perst_sync_ff;
+    
+    // 3-stage synchronizer for maximum metastability protection
+    always @(posedge g_core_clk or negedge sys_rst_sync) begin
+        if (!sys_rst_sync) begin
+            sys_interrupt_sync_ff <= 3'b000;
+            gpio_int_sync_ff <= 3'b000;
+            pcie_perst_sync_ff <= 3'b000;
+        end else begin
+            sys_interrupt_sync_ff <= {sys_interrupt_sync_ff[1:0], sys_interrupt};
+            gpio_int_sync_ff <= {gpio_int_sync_ff[1:0], gpio_int_n};
+            pcie_perst_sync_ff <= {pcie_perst_sync_ff[1:0], pcie_perst_n};
+        end
+    end
+    
+    // Use only the most stable synchronized signals
+    wire sys_interrupt_sync = sys_interrupt_sync_ff[2];
+    wire gpio_int_sync = gpio_int_sync_ff[2];
+    wire pcie_perst_sync = pcie_perst_sync_ff[2];
+    
+    // Metastability detection for critical signals
+    reg metastability_detected;
+    always @(posedge g_core_clk or negedge sys_rst_sync) begin
+        if (!sys_rst_sync) begin
+            metastability_detected <= 1'b0;
+        end else begin
+            // Detect if signal is unstable (changing within synchronizer)
+            if ((sys_interrupt_sync_ff[0] != sys_interrupt_sync_ff[1]) ||
+                (sys_interrupt_sync_ff[1] != sys_interrupt_sync_ff[2]) ||
+                (gpio_int_sync_ff[0] != gpio_int_sync_ff[1]) ||
+                (gpio_int_sync_ff[1] != gpio_int_sync_ff[2])) begin
+                metastability_detected <= 1'b1;
+            end else begin
+                metastability_detected <= 1'b0;
+            end
+        end
+    end
 
 //-----------------------------------------------------------------------------
-// Clock Distribution
+// Enhanced DDR4 Error Detection and Recovery
+// Include timing constants
+`include "interfaces/aurora_timing_constants.svh"
+
+// DDR4 Error handling parameters
+localparam DDR4_MAX_ERRORS = 8'd10;
+localparam DDR4_ERROR_RECOVERY_CYCLES = 16'd100;
+
+always @(posedge g_core_clk or negedge sys_rst_sync) begin
+    if (!sys_rst_sync) begin
+        ddr4_error_count <= 8'b0;
+        ddr4_error_flag <= 1'b0;
+    end else begin
+        // Detect consecutive timeout errors using defined constant
+        if (ddr4_timeout_counter >= DDR4_TIMEOUT_CYCLES) begin
+            ddr4_error_count <= ddr4_error_count + 1;
+            if (ddr4_error_count >= DDR4_MAX_ERRORS) begin
+                ddr4_error_flag <= 1'b1;
+                $display("[%0t] [DDR4] CRITICAL ERROR: Too many timeouts - entering safe mode", $time);
+            end
+        end else if (ddr4_state == DDR4_IDLE) begin
+            ddr4_error_count <= 8'b0;
+            ddr4_error_flag <= 1'b0;
+        end
+    end
+end
+
 //-----------------------------------------------------------------------------
 fpga_clock_distribution clock_dist (
     .sys_clk_p          (sys_clk_p),
@@ -220,33 +299,69 @@ aurora_172_top #(
 // DDR4 Memory Controller Implementation
 // Simplified MIG-compatible interface with proper timing
 //-----------------------------------------------------------------------------
-reg [3:0]  ddr4_state = 0;
-reg [15:0] ddr4_latency_counter = 0;
-reg [71:0] ddr4_dq_int = 0;
-reg        ddr4_dq_oe = 0;
+reg [3:0]  ddr4_state;
+reg [3:0]  ddr4_state_prev;
+reg [15:0] ddr4_latency_counter;
+reg [71:0] ddr4_dq_int;
+reg        ddr4_dq_oe;
 
 localparam DDR4_IDLE     = 4'b0000;
 localparam DDR4_ACTIVATE = 4'b0001;
 localparam DDR4_READ     = 4'b0010;
 localparam DDR4_WRITE    = 4'b0011;
 localparam DDR4_PRECHARGE= 4'b0100;
-localparam DDR4_REFRESH  = 4'b1000;
+// DDR4 timing parameters using defined constants
+localparam DDR4_READ_LATENCY = DDR4_READ_LATENCY_CYCLES;
+localparam DDR4_WRITE_LATENCY = DDR4_WRITE_LATENCY_CYCLES;
+localparam DDR4_ACTIVATE_CYCLES = DDR4_ACTIVATE_CYCLES;
 
-// DDR4 timing: ~40ns latency for read (simulated)
-localparam DDR4_READ_LATENCY = 16'd40;
+// DDR4 timeout protection using defined constants
+reg [15:0] ddr4_timeout_counter;
 
+// CDC synchronizer for reset
+reg [2:0] ddr4_reset_sync;
 always @(posedge g_core_clk or negedge sys_rst_sync) begin
     if (!sys_rst_sync) begin
+        ddr4_reset_sync <= 3'b000;
+    end else begin
+        ddr4_reset_sync <= {ddr4_reset_sync[1:0], 1'b1};
+    end
+end
+
+always @(posedge g_core_clk or negedge ddr4_reset_sync[2]) begin
+    if (!ddr4_reset_sync[2]) begin
         ddr4_state <= DDR4_IDLE;
         ddr4_latency_counter <= 0;
         ddr4_dq_int <= 0;
         ddr4_dq_oe <= 0;
+        ddr4_timeout_counter <= 16'd0;
     end else begin
+        ddr4_state_prev <= ddr4_state;
+        // CRITICAL: Add timeout protection to prevent DDR4 state machine hang
+        if (ddr4_state != DDR4_IDLE) begin
+            ddr4_timeout_counter <= ddr4_timeout_counter + 1;
+            if (ddr4_timeout_counter >= 16'd1000) begin  // 1000 cycle timeout
+                $display("[%0t] [DDR4] TIMEOUT - forcing reset to IDLE", $time);
+                ddr4_state <= DDR4_IDLE;
+                ddr4_latency_counter <= 0;
+                ddr4_timeout_counter <= 0;
+                ddr4_dq_oe <= 0;
+                mem_ready <= 1'b0;
+            end
+        end else begin
+            ddr4_timeout_counter <= 0;
+        end
+        
         case (ddr4_state)
             DDR4_IDLE: begin
                 if (mem_rd_en || mem_wr_en) begin
-                    ddr4_state <= DDR4_ACTIVATE;
-                    ddr4_latency_counter <= 16'd4;  // ACT command latency
+                    // Add one cycle setup time for proper DDR4 timing
+                    if (ddr4_latency_counter == 0) begin
+                        ddr4_state <= DDR4_ACTIVATE;
+                        ddr4_latency_counter <= 16'd4;  // ACT command latency
+                    end else begin
+                        ddr4_latency_counter <= ddr4_latency_counter - 1;
+                    end
                 end
             end
             
@@ -284,7 +399,7 @@ always @(posedge g_core_clk or negedge sys_rst_sync) begin
             DDR4_PRECHARGE: begin
                 if (ddr4_latency_counter == 0) begin
                     ddr4_dq_oe <= 1'b0;
-                    mem_ready <= (ddr4_state == DDR4_READ) ? 1'b1 : 1'b0;
+                    mem_ready <= (ddr4_state_prev == DDR4_READ) ? 1'b1 : 1'b0;
                     ddr4_state <= DDR4_IDLE;
                 end else begin
                     ddr4_latency_counter <= ddr4_latency_counter - 1;
@@ -305,7 +420,7 @@ always @(posedge g_core_clk or negedge sys_rst_sync) begin
 end
 
 // Auto-refresh every 7.8us (simplified counter at 500MHz)
-reg [20:0] refresh_counter = 0;
+reg [20:0] refresh_counter;
 always @(posedge g_core_clk or negedge sys_rst_sync) begin
     if (!sys_rst_sync) begin
         refresh_counter <= 0;
@@ -321,18 +436,53 @@ always @(posedge g_core_clk or negedge sys_rst_sync) begin
     end
 end
 
-assign ddr4_addr = (ddr4_state == DDR4_IDLE) ? 17'b0 : mem_addr[16:0];
-assign ddr4_ba = (ddr4_state == DDR4_IDLE) ? 3'b0 : mem_addr[18:16];
-assign ddr4_cke = (ddr4_state != DDR4_IDLE) ? 2'b11 : 2'b00;
-assign ddr4_cs_n = (ddr4_state == DDR4_IDLE) ? 1'b1 : 1'b0;
-assign ddr4_ras_n = (ddr4_state == DDR4_ACTIVATE || ddr4_state == DDR4_PRECHARGE) ? 1'b0 : 1'b1;
-assign ddr4_cas_n = (ddr4_state == DDR4_READ || ddr4_state == DDR4_WRITE) ? 1'b0 : 1'b1;
-assign ddr4_we_n = (ddr4_state == DDR4_PRECHARGE || ddr4_state == DDR4_WRITE) ? 1'b0 : 1'b1;
+// DDR4 control signals - CRITICAL: Explicit logic for safety
+reg [16:0] ddr4_addr_reg;
+reg [2:0]  ddr4_ba_reg;
+reg [1:0]  ddr4_cke_reg;
+reg        ddr4_cs_n_reg;
+reg        ddr4_ras_n_reg;
+reg        ddr4_cas_n_reg;
+reg        ddr4_we_n_reg;
+reg        ddr4_act_n_reg;
+
+// ENHANCED: Use always @(*) for proper combinational logic
+always @(*) begin
+    // Default values for safety
+    ddr4_addr_reg = 17'b0;
+    ddr4_ba_reg = 3'b0;
+    ddr4_cke_reg = 2'b00;
+    ddr4_cs_n_reg = 1'b1;
+    ddr4_ras_n_reg = 1'b1;
+    ddr4_cas_n_reg = 1'b1;
+    ddr4_we_n_reg = 1'b1;
+    ddr4_act_n_reg = 1'b1;
+
+    // State-dependent assignments
+    if (ddr4_state != DDR4_IDLE) begin
+        ddr4_addr_reg = mem_addr[16:0];
+        ddr4_ba_reg = mem_addr[18:16];
+        ddr4_cke_reg = 2'b11;
+        ddr4_cs_n_reg = 1'b0;
+        ddr4_act_n_reg = (ddr4_state == DDR4_ACTIVATE) ? 1'b0 : 1'b1;
+        ddr4_ras_n_reg = (ddr4_state == DDR4_ACTIVATE || ddr4_state == DDR4_PRECHARGE) ? 1'b0 : 1'b1;
+        ddr4_cas_n_reg = (ddr4_state == DDR4_READ || ddr4_state == DDR4_WRITE) ? 1'b0 : 1'b1;
+        ddr4_we_n_reg = (ddr4_state == DDR4_PRECHARGE || ddr4_state == DDR4_WRITE) ? 1'b0 : 1'b1;
+    end
+end
+
+assign ddr4_addr = ddr4_addr_reg;
+assign ddr4_ba = ddr4_ba_reg;
+assign ddr4_cke = ddr4_cke_reg;
+assign ddr4_cs_n = ddr4_cs_n_reg;
+assign ddr4_ras_n = ddr4_ras_n_reg;
+assign ddr4_cas_n = ddr4_cas_n_reg;
+assign ddr4_we_n = ddr4_we_n_reg;
 assign ddr4_reset_n = sys_rst_n;
-assign ddr4_act_n = (ddr4_state == DDR4_ACTIVATE) ? 1'b0 : 1'b1;
+assign ddr4_act_n = ddr4_act_n_reg;
 
 // Tri-state DQ buffer
-assign ddr4_dq = ddr4_dq_oe ? ddr4_dq_int : {72{1'bz}};
+assign ddr4_dq = ddr4_dq_oe ? ddr4_dq_int[31:0] : {32{1'bz}};
 
 // Read data to memory fabric
 always @(posedge g_core_clk or negedge sys_rst_sync) begin
@@ -347,17 +497,17 @@ end
 // PCIe Gen5 Interface (x16 lanes) - Simplified DMA Engine
 // Implements basic TLP (Transaction Layer Packet) handling
 //-----------------------------------------------------------------------------
-reg [15:0]  pcie_tx_data = 0;
-reg         pcie_tx_valid = 0;
-reg [15:0]  pcie_rx_data_reg = 0;
-reg         pcie_rx_valid_reg = 0;
-reg [31:0]  pcie_dma_addr = 0;
-reg         pcie_dma_active = 0;
+reg [7:0]   pcie_tx_data;
+reg         pcie_tx_valid;
+reg [7:0]   pcie_rx_data_reg;
+reg         pcie_rx_valid_reg;
+reg [31:0]  pcie_dma_addr;
+reg         pcie_dma_active;
 
 // TX: Aurora -> PCIe (MMIO reads, DMA writes)
 always @(posedge g_core_clk or negedge sys_rst_sync) begin
     if (!sys_rst_sync) begin
-        pcie_tx_data <= 16'b0;
+        pcie_tx_data <= 8'b0;
         pcie_tx_valid <= 0;
         pcie_dma_active <= 0;
     end else begin
@@ -365,7 +515,7 @@ always @(posedge g_core_clk or negedge sys_rst_sync) begin
         if (mem_rd_en || mem_wr_en) begin
             pcie_tx_data <= {
                 mem_rd_en ? 4'b0000 : 4'b0100,  // TLP type: MRd/MWr
-                mem_addr[15:0]                    // Address
+                mem_addr[3:0]                     // Address
             };
             pcie_tx_valid <= 1'b1;
         end else begin
@@ -383,7 +533,7 @@ always @(posedge g_core_clk or negedge sys_rst_sync) begin
     end
 end
 
-assign pcie_tx_p = pcie_tx_valid ? pcie_tx_data : 16'b0;
+assign pcie_tx_p = pcie_tx_valid ? pcie_tx_data : 8'b0;
 assign pcie_tx_n = ~pcie_tx_p;  // Differential pair
 
 // RX: PCIe -> Aurora (interrupts, config writes)
@@ -402,9 +552,9 @@ end
 // JTAG Debug Interface - Basic TAP Controller
 // Implements IEEE 1149.1 JTAG state machine for debug access
 //-----------------------------------------------------------------------------
-reg [3:0]  jtag_state = 0;
-reg [31:0] jtag_shift_reg = 0;
-reg [7:0]  jtag_bit_count = 0;
+reg [3:0]  jtag_state;
+reg [31:0] jtag_shift_reg;
+reg [7:0]  jtag_bit_count;
 
 localparam JTAG_TEST_LOGIC_RESET = 4'b0000;
 localparam JTAG_RUN_TEST_IDLE    = 4'b0001;
@@ -477,19 +627,20 @@ assign jtag_tdo = (jtag_state == JTAG_SHIFT_DR || jtag_state == JTAG_PAUSE_DR) ?
 // UART Console (115200 baud, 8N1) - Full Transmitter Implementation
 // Baud rate generator with start/stop bits and framing
 //-----------------------------------------------------------------------------
-localparam UART_CLK_FREQ = 50_000_000;  // debug_clk = 50 MHz
+localparam UART_CLK_FREQ = 100_000_000; // debug_clk = 100 MHz
 localparam UART_BAUD_RATE = 115200;
 localparam UART_BAUD_DIVIDER = (UART_CLK_FREQ / UART_BAUD_RATE);
 
-reg [15:0]  uart_baud_counter = 0;
-reg [3:0]   uart_tx_state = 0;  // 0=IDLE, 1=START, 2-9=DATA, 10=STOP
-reg [7:0]   uart_tx_shift_reg = 0;
-reg [3:0]   uart_tx_bit_count = 0;
-reg         uart_tx_line = 1'b1;  // Idle high
+reg [15:0]  uart_baud_counter;
+reg [3:0]   uart_tx_state;  // 0=IDLE, 1=START, 2-9=DATA, 10=STOP
+reg [7:0]   uart_tx_shift_reg;
+reg [3:0]   uart_tx_bit_count;
+reg         uart_tx_line;  // Idle high
+
 reg [7:0]   uart_tx_fifo [0:15];
-reg [3:0]   uart_tx_fifo_count = 0;
-reg [3:0]   uart_tx_fifo_head = 0;
-reg [3:0]   uart_tx_fifo_tail = 0;
+reg [3:0]   uart_tx_fifo_count;
+reg [3:0]   uart_tx_fifo_head;
+reg [3:0]   uart_tx_fifo_tail;
 
 localparam UART_IDLE  = 4'b0000;
 localparam UART_START = 4'b0001;
@@ -508,12 +659,21 @@ always @(posedge debug_clk or negedge sys_rst_sync) begin
         uart_tx_fifo_head <= 0;
         uart_tx_fifo_tail <= 0;
     end else begin
-        // Enqueue status messages
-        if (uart_tx_fifo_count < 12) begin
+        // UART constants
+        localparam UART_FIFO_DEPTH = 12;
+        localparam UART_FIFO_SIZE = 16;
+        localparam UART_SYNC_BYTE = 8'h55;  // Sync byte
+        localparam UART_TX_LINE_IDLE = 1'b1;
+        localparam UART_TX_LINE_ACTIVE = 1'b0;
+        localparam UART_BIT_COUNT_RESET = 4'd0;
+        localparam UART_BAUD_COUNTER_RESET = 16'd0;
+        
+        // Enqueue status messages using defined constants
+        if (uart_tx_fifo_count < UART_FIFO_DEPTH) begin
             // Simple heartbeat message
-            if (uart_baud_counter[15:0] % 16'd10000 == 0) begin
-                uart_tx_fifo[uart_tx_fifo_tail] <= 8'h55;  // Sync byte
-                uart_tx_fifo_tail <= (uart_tx_fifo_tail == 4'd15) ? 0 : uart_tx_fifo_tail + 1;
+            if (uart_baud_counter[15:0] % UART_HEARTBEAT_INTERVAL == 0) begin
+                uart_tx_fifo[uart_tx_fifo_tail] <= UART_SYNC_BYTE;  // Sync byte
+                uart_tx_fifo_tail <= (uart_tx_fifo_tail == (UART_FIFO_SIZE-1)) ? 4'd0 : uart_tx_fifo_tail + 1;
                 uart_tx_fifo_count <= uart_tx_fifo_count + 1;
             end
         end
@@ -521,14 +681,14 @@ always @(posedge debug_clk or negedge sys_rst_sync) begin
         // TX state machine
         case (uart_tx_state)
             UART_IDLE: begin
-                uart_tx_line <= 1'b1;
+                uart_tx_line <= UART_TX_LINE_IDLE;
                 if (uart_tx_fifo_count > 0) begin
                     uart_tx_shift_reg <= uart_tx_fifo[uart_tx_fifo_head];
-                    uart_tx_fifo_head <= (uart_tx_fifo_head == 4'd15) ? 0 : uart_tx_fifo_head + 1;
+                    uart_tx_fifo_head <= (uart_tx_fifo_head == (UART_FIFO_SIZE-1)) ? 4'd0 : uart_tx_fifo_head + 1;
                     uart_tx_fifo_count <= uart_tx_fifo_count - 1;
-                    uart_tx_bit_count <= 0;
+                    uart_tx_bit_count <= UART_BIT_COUNT_RESET;
                     uart_tx_state <= UART_START;
-                    uart_baud_counter <= 0;
+                    uart_baud_counter <= UART_BAUD_COUNTER_RESET;
                 end
             end
             
@@ -574,8 +734,8 @@ end
 assign uart_tx = uart_tx_line;
 
 // UART RX (simplified - just monitor for break condition)
-reg [7:0] uart_rx_data = 0;
-reg       uart_rx_valid = 0;
+reg [7:0] uart_rx_data;
+reg       uart_rx_valid;
 
 always @(posedge debug_clk or negedge sys_rst_sync) begin
     if (!sys_rst_sync) begin
@@ -606,9 +766,9 @@ assign led_status = {
 };
 
 //-----------------------------------------------------------------------------
-// System Interrupt Generation
+// Enhanced System Interrupt Generation with CDC protection
 //-----------------------------------------------------------------------------
-assign sys_interrupt = ~gpio_int_n | ~pcie_perst_n;
+assign sys_interrupt = sys_interrupt_sync | ~gpio_int_sync | ~pcie_perst_sync;
 
 //-----------------------------------------------------------------------------
 // Power Mode Configuration
@@ -618,9 +778,18 @@ assign sys_interrupt = ~gpio_int_n | ~pcie_perst_n;
 assign sys_power_mode = 16'b0011;  // Mixed mode
 
 //-----------------------------------------------------------------------------
-// Test Mode Support
+// Test Mode Support with Enhanced Error Handling
 //-----------------------------------------------------------------------------
-// In test mode, bypass normal operation and run BIST
 wire test_mode_active = test_mode_en;
+
+// Display DDR4 status in test mode
+`ifdef AURORA_DEBUG_DDR4
+    always @(posedge g_core_clk) begin
+        if (ddr4_error_flag) begin
+            $display("[%0t] [DDR4] ERROR FLAG ACTIVE - State: %0d, Timeout: %0d", 
+                    $time, ddr4_state, ddr4_timeout_counter);
+        end
+    end
+`endif
 
 endmodule

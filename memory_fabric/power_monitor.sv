@@ -238,58 +238,60 @@ module power_monitor #(
             end
 
             // ─────────────────────────────────────────────────
-            // PL1 Limit Enforcement (Long-term)
-            // Intel RAPL: Auto-throttle to stay within PL1
+            // PL1 & PL2 Limit Enforcement (Combined)
+            // Intel RAPL: Auto-throttle to stay within limits
+            // PL2 (short-term turbo) takes priority over PL1
             // ─────────────────────────────────────────────────
             if (enable_limit_enforce) begin
+                // PL1 count
                 if (total_pl1_exceed) begin
                     pl1_violation_count <= pl1_violation_count + 32'd1;
-
-                    // Throttle the highest power domain
-                    if (g_pl1_exceed) begin
-                        throttle_request <= 1'b1;
-                        throttle_domain <= 4'd0;  // G-Core
-                    end else if (a_pl1_exceed) begin
-                        throttle_request <= 1'b1;
-                        throttle_domain <= 4'd1;  // A-Core
-                    end else if (h_pl1_exceed) begin
-                        // FIX v2: H-Core throttle path
-                        throttle_request <= 1'b1;
-                        throttle_domain <= 4'd2;  // H-Core
-                    end else if (npu_pl1_exceed) begin
-                        // FIX v2: NPU throttle path
-                        throttle_request <= 1'b1;
-                        throttle_domain <= 4'd3;  // NPU
-                    end else begin
-                        throttle_request <= 1'b1;
-                        throttle_domain <= 4'd2;  // H-Core (fallback)
-                    end
-
-                    throttle_event_count <= throttle_event_count + 32'd1;
-                end else begin
-                    // FIX v2: Auto-clear throttle_request after 1 cycle (pulse behavior)
-                    throttle_request <= 1'b0;
                 end
-
-                // ─────────────────────────────────────────────
-                // PL2 Limit Enforcement (Short-term turbo)
-                // More aggressive, immediate response
-                // ─────────────────────────────────────────────
+                // PL2 count
                 if (total_pl2_exceed) begin
                     pl2_violation_count <= pl2_violation_count + 32'd1;
+                end
 
-                    // Immediate hard throttle
-                    if (g_pl2_exceed) begin
-                        throttle_request <= 1'b1;
-                        throttle_domain <= 4'd0;
+                // Combined throttle decision: OR both conditions
+                if (total_pl1_exceed || total_pl2_exceed) begin
+                    // PL2 has priority (more urgent)
+                    if (total_pl2_exceed) begin
+                        if (g_pl2_exceed) begin
+                            throttle_request <= 1'b1;
+                            throttle_domain <= 4'd0;
+                        end else begin
+                            throttle_request <= 1'b1;
+                            throttle_domain <= 4'd1;
+                        end
                     end else begin
-                        throttle_request <= 1'b1;
-                        throttle_domain <= 4'd1;
+                        // PL1 throttle
+                        if (g_pl1_exceed) begin
+                            throttle_request <= 1'b1;
+                            throttle_domain <= 4'd0;  // G-Core
+                        end else if (a_pl1_exceed) begin
+                            throttle_request <= 1'b1;
+                            throttle_domain <= 4'd1;  // A-Core
+                        end else if (h_pl1_exceed) begin
+                            throttle_request <= 1'b1;
+                            throttle_domain <= 4'd2;  // H-Core
+                        end else if (npu_pl1_exceed) begin
+                            throttle_request <= 1'b1;
+                            throttle_domain <= 4'd3;  // NPU
+                        end else begin
+                            throttle_request <= 1'b1;
+                            throttle_domain <= 4'd2;  // H-Core (fallback)
+                        end
                     end
 
-                    throttle_event_count <= throttle_event_count + 32'd1;
+                    // Count events separately to avoid PL2 overriding PL1
+                    if (total_pl2_exceed) begin
+                        throttle_event_count <= throttle_event_count + 32'd1;
+                    end
+                    if (total_pl1_exceed) begin
+                        throttle_event_count <= throttle_event_count + 32'd1;
+                    end
                 end else begin
-                    // FIX v2: Auto-clear throttle when PL2 not exceeded (pulse behavior)
+                    // FIX v2: Auto-clear throttle when no limit exceeded (pulse behavior)
                     throttle_request <= 1'b0;
                 end
             end else begin

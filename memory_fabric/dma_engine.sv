@@ -261,20 +261,15 @@ module dma_engine #(
             // Original: interrupt_req <= 1'b0 here overrode set in same cycle
             
             // Clear complete flags - Phase 1: only channel 0
-            channel_complete[0] <= 1'b0;
-        end
+            if (channels[0].state != ST_DONE) begin
+                channel_complete[0] <= 1'b0;
+            end
 
-    // =========================================================================
-    // Interrupt clear (separate always block to avoid race with set)
-    // FIXED: Clear happens at least 1 cycle after set
-    // =========================================================================
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
-            interrupt_req <= 1'b0;
-        end else if (interrupt_req && !(|channel_busy)) begin
-            interrupt_req <= 1'b0;
+            // Clear interrupt when no channels busy
+            if (interrupt_req && !(|channel_busy)) begin
+                interrupt_req <= 1'b0;
+            end
         end
-    end
 
     // =========================================================================
     // Mem write data assignment (from buffer)

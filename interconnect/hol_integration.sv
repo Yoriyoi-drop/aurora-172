@@ -1,6 +1,7 @@
 `timescale 1ns / 1ps
 
 // Import global package for parameters
+`include "interfaces/aurora_params.svh"
 import aurora_global_pkg::*;
 
 //////////////////////////////////////////////////////////////////////////////////

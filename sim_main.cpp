@@ -5,7 +5,9 @@
 // ============================================================================
 
 #include "verilated.h"
-#include "verilated_fst_c.h"  // FST tracing
+#if VM_TRACE
+#include "verilated_vcd_c.h"  // VCD tracing (only when compiled with --trace)
+#endif
 #include <cinttypes>
 #include <cstdio>
 #include <memory>
@@ -40,47 +42,42 @@
 #define TB_NAME "tb_aurora_172"
 #endif
 
-// FIXED: Make hierarchy paths configurable (less fragile approach)
-#if defined(STRESS_TEST)
-#define TB_CLK_PATH tb_stress_test__DOT__tb_clk
-#define TB_RST_PATH tb_stress_test__DOT__tb_rst_n
-#else
-#define TB_CLK_PATH tb_aurora_172__DOT__tb_clk
-#define TB_RST_PATH tb_aurora_172__DOT__tb_rst_n
-#endif
+// FIXED: Let testbench control clock and reset - no manual control needed
 
 // Global tick counter
 static vluint64_t main_time = 0;
 
 int main(int argc, char** argv, char** env) {
     Verilated::commandArgs(argc, argv);
+#if VM_TRACE
+    Verilated::traceEverOn(true); // REQUIRED by Verilator if --trace is used
+#endif
 
     // Create testbench instance
     std::unique_ptr<TB_CLASS> tb = std::make_unique<TB_CLASS>();
 
-    // OPTIMIZATION 1: Conditional FST tracing (5-10x speedup when disabled)
+    // OPTIMIZATION 1: Conditional VCD tracing (5-10x speedup when disabled)
     // Only enable tracing if explicitly requested AND compiled with trace support
+#if VM_TRACE
     bool enable_trace = false;
-    std::unique_ptr<VerilatedFstC> tfp;
-    
-    // Check if compiled with trace support (not FAST_MODE)
-#ifndef FAST_MODE
+    std::unique_ptr<VerilatedVcdC> tfp;
+
     if (getenv("ENABLE_TRACE") != nullptr) {
         enable_trace = true;
         Verilated::traceEverOn(true);
-        tfp = std::make_unique<VerilatedFstC>();
-        const char* fst_filename = "sim_output.fst";
-        printf("[INFO] FST tracing ENABLED (debug mode): %s\n", fst_filename);
+        tfp = std::make_unique<VerilatedVcdC>();
+        const char* vcd_filename = "sim_output.vcd";
+        printf("[INFO] VCD tracing ENABLED (debug mode): %s\n", vcd_filename);
         printf("[INFO] For 5-10x faster simulation, unset ENABLE_TRACE\n");
         tb->trace(tfp.get(), 9);  // Reduced from 99 to 9 (top-level only)
-        tfp->open(fst_filename);
+        tfp->open(vcd_filename);
     } else {
-        printf("[INFO] FST tracing DISABLED (fast mode)\n");
+        printf("[INFO] VCD tracing DISABLED (fast mode)\n");
         printf("[INFO] Set ENABLE_TRACE=1 to enable for debugging\n");
     }
 #else
-    printf("[INFO] FAST MODE: Tracing disabled at compile time\n");
-    printf("[INFO] For debugging, use: make sim (with tracing support)\n");
+    printf("[INFO] Tracing disabled at compile time (no --trace flag)\n");
+    printf("[INFO] For debugging, use: make sim_debug\n");
 #endif
 
     // Print startup message
@@ -106,20 +103,8 @@ int main(int argc, char** argv, char** env) {
     printf("========================================\n\n");
 #endif
 
-    // Initialize
-    tb->rootp->TB_CLK_PATH = 0;
-    tb->rootp->TB_RST_PATH = 0;
-
-    // Reset sequence (10 ticks)
-    for (int i = 0; i < 10; i++) {
-        tb->rootp->TB_CLK_PATH = !tb->rootp->TB_CLK_PATH;
-        tb->eval();
-        tfp->dump(main_time);  // Dump VCD
-        main_time += 5;
-    }
-
-    tb->rootp->TB_RST_PATH = 1;
-    printf("[INFO] Reset complete\n");
+    // Initialize - Let testbench control clock and reset
+    printf("[INFO] Letting testbench control clock and reset...\n");
 
     // OPTIMIZATION 2: Configurable timeout via environment variable
     vluint64_t timeout = getenv("SIM_TIMEOUT") ? atol(getenv("SIM_TIMEOUT")) : 1000000;
@@ -129,16 +114,18 @@ int main(int argc, char** argv, char** env) {
     }
     printf("\n");
 
-    // Run simulation loop
+    // Run simulation loop - let testbench control everything
     while (!Verilated::gotFinish() && main_time < timeout) {
-        tb->rootp->TB_CLK_PATH = !tb->rootp->TB_CLK_PATH;
+        // Just eval - testbench controls clock internally
         tb->eval();
-        
+
+#if VM_TRACE
         // Only dump trace if tracing is enabled
         if (enable_trace) {
             tfp->dump(main_time);
         }
-        main_time += 5;
+#endif
+        main_time += 1;  // Increment by 1 time unit
 
         // OPTIMIZATION 3: Reduce progress print frequency (500K -> 1M)
         if (main_time % 1000000 == 0) {
@@ -149,11 +136,13 @@ int main(int argc, char** argv, char** env) {
     printf("\n[INFO] Simulation complete (tick=%" PRIu64 ")\n", main_time);
     printf("========================================\n");
 
-    // Close FST file only if it was opened
+    // Close VCD file only if it was opened
+#if VM_TRACE
     if (enable_trace) {
         tfp->close();
-        printf("[INFO] FST trace file closed\n");
+        printf("[INFO] VCD trace file closed\n");
     }
+#endif
 
     return 0;
 }

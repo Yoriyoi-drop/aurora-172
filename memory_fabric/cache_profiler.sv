@@ -1,5 +1,8 @@
 `timescale 1ns / 1ps
 
+// Include parameters (Icarus compatibility)
+`include "interfaces/aurora_params.svh"
+
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
 // Engineer: Memory Architecture Team
@@ -20,9 +23,9 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module cache_profiler #(
-    parameter ADDR_WIDTH    = 48,
-    parameter NUM_CORES     = 3,          // G, A, NPU
-    parameter HISTOGRAM_BINS = 16         // Latency histogram bins
+    parameter ADDR_WIDTH    = AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
+    parameter NUM_CORES     = 16,        // OPTIMIZED: 32->16 (smaller profiler)
+    parameter HISTOGRAM_BINS = 8         // OPTIMIZED: 16->8 (simpler histogram)
 )(
     input  wire                         clk,
     input  wire                         rst_n,
@@ -145,10 +148,11 @@ module cache_profiler #(
             end
 
             // Compute deltas (current - previous) to get per-cycle changes
-            delta_l1_hits = cycle_l1_hits - prev_l1_hits_sum;
-            delta_l1_misses = cycle_l1_misses - prev_l1_misses_sum;
-            delta_l1_writebacks = cycle_writebacks - prev_l1_writebacks_sum;
-            delta_l1_invalidations = cycle_invalidations - prev_l1_invalidations_sum;
+            // FIX: Use unsigned subtraction to prevent underflow - deltas should never be negative
+            delta_l1_hits = (cycle_l1_hits >= prev_l1_hits_sum) ? (cycle_l1_hits - prev_l1_hits_sum) : 32'd0;
+            delta_l1_misses = (cycle_l1_misses >= prev_l1_misses_sum) ? (cycle_l1_misses - prev_l1_misses_sum) : 32'd0;
+            delta_l1_writebacks = (cycle_writebacks >= prev_l1_writebacks_sum) ? (cycle_writebacks - prev_l1_writebacks_sum) : 32'd0;
+            delta_l1_invalidations = (cycle_invalidations >= prev_l1_invalidations_sum) ? (cycle_invalidations - prev_l1_invalidations_sum) : 32'd0;
 
             // Update previous values for next cycle
             prev_l1_hits_sum <= cycle_l1_hits;

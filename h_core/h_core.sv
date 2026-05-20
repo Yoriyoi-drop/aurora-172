@@ -23,17 +23,17 @@
 module h_core #(
     parameter CORE_ID       = 0,
     // Use standardized parameters from aurora_global_pkg
-    parameter DATA_WIDTH    = AURORA_DATA_WIDTH,   // From package
-    parameter ADDR_WIDTH    = AURORA_ADDR_WIDTH,   // From package
+    parameter DATA_WIDTH    = `AURORA_DATA_WIDTH,   // From package
+    parameter ADDR_WIDTH    = `AURORA_ADDR_WIDTH,   // From package
     parameter ROB_SIZE      = 16,    // OPTIMIZED: smaller ROB
 
     // Simplified pipeline latencies from params
-    parameter H_PIPE_ALU    = AURORA_H_PIPE_ALU,    // From params
-    parameter H_PIPE_MUL    = AURORA_H_PIPE_MUL,    // From params
-    parameter H_PIPE_DIV    = AURORA_H_PIPE_DIV,    // From params
-    parameter H_PIPE_LOAD   = AURORA_H_PIPE_LOAD,   // From params
-    parameter H_PIPE_STORE  = AURORA_H_PIPE_STORE,  // From params
-    parameter H_PIPE_BRANCH = AURORA_H_PIPE_BRANCH  // From params
+    parameter H_PIPE_ALU    = `AURORA_H_PIPE_ALU,    // From params
+    parameter H_PIPE_MUL    = `AURORA_H_PIPE_MUL,    // From params
+    parameter H_PIPE_DIV    = `AURORA_H_PIPE_DIV,    // From params
+    parameter H_PIPE_LOAD   = `AURORA_H_PIPE_LOAD,   // From params
+    parameter H_PIPE_STORE  = `AURORA_H_PIPE_STORE,  // From params
+    parameter H_PIPE_BRANCH = `AURORA_H_PIPE_BRANCH  // From params
 )(
     input  wire                         clk,
     input  wire                         rst_n,
@@ -90,9 +90,6 @@ module h_core #(
     reg [DATA_WIDTH-1:0]    saved_cmd_data;
     reg [7:0]               saved_opcode;
 
-    // Timeout protection
-    integer                 retire_timeout;
-
     localparam IDLE         = 3'b000;
     localparam FETCH        = 3'b001;
     localparam DECODE       = 3'b010;
@@ -116,7 +113,7 @@ module h_core #(
     localparam OP_BRANCH    = 8'h0A;
 
     // Error codes - using standardized definitions from aurora_error_codes.svh
-    // No local error codes needed - use ERR_ILLEGAL_OPCODE from include file
+    // No local error codes needed - use `ERR_ILLEGAL_OPCODE from include file
 
     // =========================================================================
     // Main pipeline
@@ -242,7 +239,7 @@ module h_core #(
                             end
                             default: begin
                                 error_flag <= 1'b1;
-                                error_code <= ERR_ILLEGAL_OPCODE;
+                                error_code <= `ERR_ILLEGAL_OPCODE;
                                 error_valid <= 1'b1;
                                 busy <= 1'b0;
                                 pipeline_state <= ERROR_STATE;
@@ -370,24 +367,10 @@ module h_core #(
                     current_head = rob_head;
                     
                     // Count consecutive valid entries from head (with wrap-around)
-                    // CRITICAL FIX: Add timeout protection to prevent infinite loop
-                    retire_timeout = 0;
-                    while (retire_count < ROB_SIZE && 
-                           current_head != rob_tail && 
-                           rob_valid[current_head] &&
-                           retire_timeout < ROB_SIZE) begin
-                        retire_count = retire_count + 1;
-                        current_head = (current_head + 1) % ROB_SIZE;
-                        retire_timeout = retire_timeout + 1;
-                    end
-                    
-                    // CRITICAL FIX: Force retirement if timeout detected
-                    if (retire_timeout >= ROB_SIZE) begin
-                        $display("[%0t] [H-CORE#%0d] WARNING: ROB retirement timeout - forcing retirement", $time, CORE_ID);
-                        // Force retire at least one entry to prevent deadlock
-                        if (rob_valid[rob_head]) begin
-                            retire_count = 1;
-                            rob_valid[rob_head] = 1'b0;
+                    for (int loop_i = 0; loop_i < ROB_SIZE; loop_i = loop_i + 1) begin
+                        if (current_head != rob_tail && rob_valid[current_head]) begin
+                            retire_count = retire_count + 1;
+                            current_head = (current_head + 1) % ROB_SIZE;
                         end
                     end
                     

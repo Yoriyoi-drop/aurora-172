@@ -25,8 +25,8 @@
 
 module l1_cache #(
     // Use standardized parameters from aurora_global_pkg
-    parameter DATA_WIDTH    = AURORA_DATA_WIDTH,   // From package
-    parameter ADDR_WIDTH    = AURORA_ADDR_WIDTH,   // From package
+    parameter DATA_WIDTH    = `AURORA_DATA_WIDTH,   // From package
+    parameter ADDR_WIDTH    = `AURORA_ADDR_WIDTH,   // From package
     parameter CACHE_SIZE    = 16384,      // OPTIMIZED: 32KB->16KB (smaller cache)
     parameter ASSOCIATIVITY = 4,          // OPTIMIZED: 8->4 (simpler associativity)
     parameter LINE_SIZE     = 64,         // OPTIMIZED: smaller line size

@@ -30,22 +30,22 @@
 module g_core #(
     parameter CORE_ID       = 0,
     // Use standardized parameters from aurora_global_pkg
-    parameter DATA_WIDTH    = AURORA_DATA_WIDTH,
-    parameter ADDR_WIDTH    = AURORA_ADDR_WIDTH,
-    parameter INST_WIDTH    = AURORA_INST_WIDTH,
-    parameter L1_CACHE_SIZE = AURORA_L1_CACHE_SIZE,
+    parameter DATA_WIDTH    = `AURORA_DATA_WIDTH,
+    parameter ADDR_WIDTH    = `AURORA_ADDR_WIDTH,
+    parameter INST_WIDTH    = `AURORA_INST_WIDTH,
+    parameter L1_CACHE_SIZE = `AURORA_L1_CACHE_SIZE,
     parameter MAX_ADDR      = 48'h0000_0000_FFFF, // 1MB address space limit
-    parameter LINE_SIZE     = AURORA_LINE_SIZE,
+    parameter LINE_SIZE     = `AURORA_LINE_SIZE,
 
     // Use standardized pipeline latencies from params
-    parameter G_PIPE_DRAW       = AURORA_G_PIPE_DRAW,       // From params
-    parameter G_PIPE_TEXTURE   = AURORA_G_PIPE_TEXTURE,   // From params
-    parameter G_PIPE_PHYSICS   = AURORA_G_PIPE_PHYSICS,   // From params
-    parameter G_PIPE_COLLISION = AURORA_G_PIPE_COLLISION, // From params
-    parameter G_PIPE_RAYTRACE  = AURORA_G_PIPE_RAYTRACE,  // From params
-    parameter G_PIPE_FRAMEGEN = AURORA_G_PIPE_FRAMEGEN, // From params
-    parameter G_PIPE_SHADING   = AURORA_G_PIPE_SHADING,   // From params
-    parameter G_PIPE_BRANCH    = AURORA_G_PIPE_BRANCH    // From params
+    parameter G_PIPE_DRAW       = `AURORA_G_PIPE_DRAW,       // From params
+    parameter G_PIPE_TEXTURE   = `AURORA_G_PIPE_TEXTURE,   // From params
+    parameter G_PIPE_PHYSICS   = `AURORA_G_PIPE_PHYSICS,   // From params
+    parameter G_PIPE_COLLISION = `AURORA_G_PIPE_COLLISION, // From params
+    parameter G_PIPE_RAYTRACE  = `AURORA_G_PIPE_RAYTRACE,  // From params
+    parameter G_PIPE_FRAMEGEN = `AURORA_G_PIPE_FRAMEGEN, // From params
+    parameter G_PIPE_SHADING   = `AURORA_G_PIPE_SHADING,   // From params
+    parameter G_PIPE_BRANCH    = `AURORA_G_PIPE_BRANCH    // From params
 )(
     input  wire                         clk,
     input  wire                         rst_n,
@@ -85,8 +85,8 @@ module g_core #(
 
     // FIXED: Proper fabric interface handling
     // Use tri-state buffers instead of hard ties
-    assign fabric_addr = fabric_rd_en ? cmd_addr : {ADDR_WIDTH{1'bZ}};
-    assign fabric_wr_data = fabric_wr_en ? result : {DATA_WIDTH{1'bZ}};
+    assign fabric_addr = fabric_rd_en ? cmd_addr : {ADDR_WIDTH{1'b0}};
+    assign fabric_wr_data = fabric_wr_en ? result : {DATA_WIDTH{1'b0}};
 
     // =========================================================================
     // Internal registers
@@ -116,7 +116,7 @@ module g_core #(
 
     // FIXED: Proper snoop interface handling
     // Implement basic snoop protocol for cache coherency
-    assign snoop_addr = (l1_rd_en || l1_wr_en) ? l1_addr : {ADDR_WIDTH{1'bZ}};
+    assign snoop_addr = (l1_rd_en || l1_wr_en) ? l1_addr : {ADDR_WIDTH{1'b0}};
     
     // Basic snoop logic: invalidate on write operations, update on read-modify-write
     assign snoop_invalidate = l1_wr_en && (pipeline_state == OP_STORE);
@@ -262,7 +262,7 @@ module g_core #(
                 if (pipeline_state == MEMORY || pipeline_state == WAIT_L1) begin
                     pipeline_state <= ERROR_STATE;
                     error_flag <= 1'b1;
-                    error_code <= ERR_TIMEOUT;
+                    error_code <= `ERR_TIMEOUT;
                     error_valid <= 1'b1;
                 end
             end
@@ -296,7 +296,7 @@ module g_core #(
                                 result_valid <= 1'b0;  // Clear old result
                                 cmd_ready <= 1'b0;
                                 busy <= 1'b1;
-                                instruction_reg <= {cmd_data, cmd_addr[31:0]};
+                                instruction_reg <= cmd_data;
                                 pc_reg <= cmd_addr;
                                 pipeline_state <= FETCH;
                                 error_flag <= 1'b0;
@@ -310,7 +310,7 @@ module g_core #(
                                              $time, CORE_ID, cmd_data[31:24], cmd_addr);
                                 end
                                 error_flag <= 1'b1;
-                                error_code <= ERR_ILLEGAL_OPCODE;
+                                error_code <= `ERR_ILLEGAL_OPCODE;
                                 error_valid <= 1'b1;
                                 // FIXED: Generate error result instead of hanging
                                 result <= {DATA_WIDTH{1'b1}};  // All ones = error indicator
@@ -396,7 +396,7 @@ module g_core #(
                                              $time, pipeline_stage_1[23:0], MAX_ADDR[23:0]);
                                 end
                                 error_flag <= 1'b1;
-                                error_code <= ERR_OOB_ADDRESS;
+                                error_code <= `ERR_OOB_ADDRESS;
                                 error_valid <= 1'b1;
                                 result_valid <= 1'b0;
                                 busy <= 1'b0;
@@ -420,7 +420,7 @@ module g_core #(
                                              $time, pipeline_stage_1[23:0], MAX_ADDR[23:0]);
                                 end
                                 error_flag <= 1'b1;
-                                error_code <= ERR_OOB_ADDRESS;
+                                error_code <= `ERR_OOB_ADDRESS;
                                 error_valid <= 1'b1;
                                 result_valid <= 1'b0;
                                 busy <= 1'b0;
@@ -429,7 +429,7 @@ module g_core #(
                                 // Valid address - Write to L1 cache (FIXED: SKIP_L1 removed)
                                 // Store 64-bit result into lower bits of 512-bit cache line
                                 l1_addr <= pipeline_stage_1[23:0];
-                                l1_wr_data <= {{(LINE_SIZE*8-DATA_WIDTH){1'b0}}, pipeline_stage_1[31:0]};  // Use instruction data, not stale result
+                                l1_wr_data <= { {(LINE_SIZE*8-32){1'b0}}, pipeline_stage_1[31:0] };
                                 l1_wr_en <= 1'b1;
                                 mem_wait_counter <= 16'h0;
                                 mem_is_write <= 1'b1;
@@ -533,7 +533,7 @@ module g_core #(
                             // Timeout after 256 cycles - set proper error
                             $display("[%0t] [G-CORE] ⚠️ L1 CACHE TIMEOUT after %0d cycles", $time, mem_wait_counter);
                             error_flag <= 1'b1;
-                            error_code <= ERR_CACHE_TIMEOUT;
+                            error_code <= `ERR_CACHE_TIMEOUT;
                             error_valid <= 1'b1;
                             pipeline_stage_2 <= {DATA_WIDTH{1'b1}};  // Error pattern instead of DEADBEEF
                             mem_wait_counter <= 16'h0;
@@ -669,10 +669,10 @@ module g_core #(
             // Count errors by type
             if (error_valid) begin
                 case (error_code)
-                    ERR_ILLEGAL_OPCODE: error_illegal_opcode_count <= error_illegal_opcode_count + 1;
-                    ERR_OOB_ADDRESS: error_oob_address_count <= error_oob_address_count + 1;
-                    ERR_ACCESS_VIOLATION: error_access_violation_count <= error_access_violation_count + 1;
-                    ERR_CACHE_TIMEOUT: error_cache_timeout_count <= error_cache_timeout_count + 1;
+                    `ERR_ILLEGAL_OPCODE: error_illegal_opcode_count <= error_illegal_opcode_count + 1;
+                    `ERR_OOB_ADDRESS: error_oob_address_count <= error_oob_address_count + 1;
+                    `ERR_ACCESS_VIOLATION: error_access_violation_count <= error_access_violation_count + 1;
+                    `ERR_CACHE_TIMEOUT: error_cache_timeout_count <= error_cache_timeout_count + 1;
                     default: ; // Ignore unknown error codes
                 endcase
             end

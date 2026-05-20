@@ -1,6 +1,7 @@
 `timescale 1ns / 1ps
 
 // Import global package for parameters
+`include "interfaces/aurora_params.svh"
 import aurora_global_pkg::*;
 
 //////////////////////////////////////////////////////////////////////////////////
@@ -352,7 +353,7 @@ module timing_manager #(
         input integer node;
         begin
             // Receive synchronized data from core domain
-            if (core_to_ic_state[node] == SYNC_COMPLETE) begin
+            if (core_to_ic_valid_sync[node][SYNC_STAGES-1]) begin
                 // Data is ready for processing in interconnect domain
                 // Additional timing checks can be performed here
                 last_sync_time[node] = ic_timestamp[node];
@@ -588,7 +589,7 @@ module timing_manager #(
         input [1:0] domain;
         input [DATA_WIDTH-1:0] data1;
         input [DATA_WIDTH-1:0] data2;
-        reg [31:0] log_entry;
+        reg [47:0] log_entry;
         begin
             // Pack metastability information into log entry
             log_entry = {domain, 6'b000000, node[7:0], data1[15:0], data2[15:0]};
@@ -602,7 +603,7 @@ module timing_manager #(
     endtask
     
     // Update timing health metrics
-    always @(posedge clk) begin
+    always @(posedge interconnect_clk) begin
         if (rst_n) begin
             // Calculate average setup and hold times
             total_setup_time = 32'd0;

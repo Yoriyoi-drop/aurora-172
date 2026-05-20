@@ -387,7 +387,7 @@ module memory_fabric #(
                     end else begin
                         if (req_is_write) begin
                             // Write hit - update data & mark dirty
-                            l2_data[req_set_idx][l2_way] <= {4{req_wr_data}};
+                            l2_data[req_set_idx][l2_way] <= {{(CACHE_LINE_WIDTH-DATA_WIDTH){1'b0}}, req_wr_data};
                             l2_dirty[req_set_idx][l2_way] <= 1'b1;
                         end else begin
                             // Read hit
@@ -474,6 +474,17 @@ module memory_fabric #(
                             state <= S_L2_ALLOCATE;
                         end
                     end
+                end
+
+                S_L2_ALLOCATE: begin
+                    integer alloc_way;
+                    alloc_way = l2_find_victim(req_set_idx);
+                    l2_data[req_set_idx][alloc_way] <= fabric_rd_data;
+                    l2_valid[req_set_idx][alloc_way] <= 1'b1;
+                    l2_dirty[req_set_idx][alloc_way] <= 1'b0;
+                    l2_tags[req_set_idx][alloc_way] <= req_tag;
+                    l2_lru[req_set_idx] <= (1 << alloc_way);
+                    state <= S_COMPLETE;
                 end
 
                 S_L2_MISS: begin

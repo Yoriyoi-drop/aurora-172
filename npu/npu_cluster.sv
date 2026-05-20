@@ -22,8 +22,8 @@
 
 module npu_cluster #(
     parameter CLUSTER_ID    = 0,
-    parameter DATA_WIDTH    = AURORA_DATA_WIDTH,   // FIX: Use standard parameter
-    parameter ADDR_WIDTH    = AURORA_ADDR_WIDTH,   // FIX: Use standard parameter
+    parameter DATA_WIDTH    = `AURORA_DATA_WIDTH,   // FIX: Use standard parameter
+    parameter ADDR_WIDTH    = `AURORA_ADDR_WIDTH,   // FIX: Use standard parameter
     parameter NUM_PE        = 32,
     parameter WEIGHT_BITS   = 8,
     parameter LINE_SIZE     = 64,
@@ -439,8 +439,8 @@ module npu_cluster #(
                             OP_RELU: begin
                                 // ReLU: max(0, x)
                                 for (int p = 0; p < NUM_PE; p++) begin
-                                    if (act_in[p] > 0)
-                                        act_out[p] <= act_in[p];
+                                    if (pe_acc[p] > 0)
+                                        act_out[p] <= pe_acc[p];
                                     else
                                         act_out[p] <= 32'sb0;
                                 end
@@ -448,28 +448,28 @@ module npu_cluster #(
                             OP_SIGMOID: begin
                                 // Sigmoid approximation: 1 / (1 + exp(-x))
                                 for (int p = 0; p < NUM_PE; p++) begin
-                                    if (act_in[p] > 32'sd64)
+                                    if (pe_acc[p] > 32'sd64)
                                         act_out[p] <= 32'sd128;  // ~1.0 in Q7.8
-                                    else if (act_in[p] < -32'sd64)
+                                    else if (pe_acc[p] < -32'sd64)
                                         act_out[p] <= 32'sb0;    // ~0.0
                                     else
-                                        act_out[p] <= 32'sd64 + (act_in[p] >> 1);  // Linear approx
+                                        act_out[p] <= 32'sd64 + (pe_acc[p] >> 1);  // Linear approx
                                 end
                             end
                             OP_SOFTMAX: begin
                                 // Softmax approximation
-                                act_out[0] <= act_in[0];
+                                act_out[0] <= pe_acc[0];
                             end
                             OP_POOL: begin
                                 // Max pooling
-                                act_out[0] <= act_in[0];
+                                act_out[0] <= pe_acc[0];
                                 for (int p = 1; p < 4; p++) begin
-                                    if (act_in[p] > act_out[0])
-                                        act_out[0] <= act_in[p];
+                                    if (pe_acc[p] > act_out[0])
+                                        act_out[0] <= pe_acc[p];
                                 end
                             end
                             default: begin
-                                act_out[0] <= act_in[0];
+                                act_out[0] <= pe_acc[0];
                             end
                         endcase
 
