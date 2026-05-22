@@ -22,6 +22,11 @@ IVERILOG  := iverilog
 VVP       := vvp
 GTKWAVE   := gtkwave
 
+# Default empty test file variables (used as prerequisites)
+TB_ENHANCED_FILES := 
+TB_STRESS_FILES := 
+TB_ADVANCED_FILES := 
+
 # UVM Configuration
 UVM_HOME := $(PWD)/uvm-core-2020.3.1/src
 UVM_PKG := $(UVM_HOME)/uvm_pkg.sv
@@ -46,10 +51,8 @@ VERILATOR     := verilator
 VERILATOR_CCI := verilator_cc
 GTKWAVE       := gtkwave
 
-# Icarus Verilog support
-IVERILOG      := iverilog
-VVP           := vvp
 IVERILOG_OPTS := -g2012 -Wall -Wno-fatal -DAURORA_FEATURES_POWER -DAURORA_FEATURES_CACHE -DAURORA_FEATURES_PERFORMANCE -DAURORA_FEATURES_SECURITY -DAURORA_DEBUG_CORE_STATE
+IVERILOG_G := -g2012
 
 # Verilator WAJIB - mode debug dengan trace
 # Default optimized options (no tracing for fast compile)
@@ -60,6 +63,7 @@ VERILATOR_OPTS := \
 	--threads 1 \
 	--output-split 20000 \
 	-O2 \
+	-Iinterfaces \
 	-f iv_compile.f \
 	-Wno-fatal -Wno-STMTDLY
 
@@ -76,6 +80,7 @@ VERILATOR_OPTS_FAST := \
 	--threads 8 \
 	--output-split 20000 \
 	-O3 \
+	-Iinterfaces \
 	-f iv_compile.f \
 	-Wno-fatal -Wno-STMTDLY \
 	-DFAST_MODE
@@ -188,7 +193,7 @@ $(BIN_DIR)/V$(TB_MODULE)_advanced: $(SRC_FILES) $(TB_ADVANCED_FILES) $(CURDIR)/s
 		$(TB_ADVANCED_FILES)
 	@echo "[OK] Advanced testbench compilation successful"
 
-$(BIN_DIR)/V$(TB_MODULE): $(CURDIR)/$(WRAPPER_FILE) | $(BIN_DIR) $(OBJ_DIR)
+$(BIN_DIR)/V$(TB_MODULE): $(SRC_FILES) $(TB_FILES) $(CURDIR)/$(WRAPPER_FILE) | $(BIN_DIR) $(OBJ_DIR)
 	@echo "[INFO] Compiling dengan Verilator (DEBUG mode)..."
 	cd $(CURDIR) && $(VERILATOR) $(VERILATOR_OPTS) \
 		-Mdir $(CURDIR)/$(OBJ_DIR) \
@@ -291,10 +296,10 @@ $(BIN_DIR) $(OBJ_DIR):
 clean:
 	@echo "[INFO] Cleaning build artifacts..."
 	rm -rf $(BUILD_DIR)
-	# FIXED: Don't delete repository VCD file (aurora_172_tb.vcd)
+	# Clean VCD and log files
 	rm -f *.vcd
-	@# Keep *.log files as they may contain useful simulation history
-	 rm -f *.log
+	# Keep *.log files as they may contain useful simulation history
+	# rm -f *.log
 	@echo "[OK] Clean complete"
 
 # ATM testbench build (Intel + AMD features)
@@ -331,7 +336,8 @@ lint: $(ALL_FILES)
 	$(VERILATOR) --lint-only \
 		--top-module $(TOP_MODULE) \
 		-Wall \
-		-Wno-fatal \
+		-Wno-fatal -Wno-BLKSEQ -Wno-BLKLOOPINIT \
+		-Iinterfaces -I. \
 		$(ALL_FILES)
 	@echo "[OK] Lint check complete"
 
@@ -351,6 +357,7 @@ compile_with_trace: clean
 		-Wno-fatal \
 		-Wno-STMTDLY \
 		--timescale 1ns/1ps \
+		-Iinterfaces \
 		--CFLAGS "-std=c++17 -O0" \
 		--LDFLAGS "-lstdc++" \
 		$(CURDIR)/$(WRAPPER_FILE) \
@@ -456,8 +463,6 @@ help:
 	@echo "========================================="
 
 # Phony targets
-.PHONY: all compile sim wave clean lint help
-
 # ============================================================================
 # Icarus Verilog Targets (Lebih ringan & cepat dari Verilator)
 # ============================================================================
@@ -520,13 +525,6 @@ iv_wave:
 # ============================================================================
 # REAL TARGETS (bukan khayalan)
 # ============================================================================
-
-# Syntax check tercepat
-.PHONY: icarus_syntax
-icarus_syntax:
-	@echo "[INFO] Cek syntax dengan Icarus..."
-	cd $(CURDIR) && $(IVERILOG) -g2012 -Wall -t -f iv_compile.f
-	@echo "[OK] Syntax check complete"
 
 # ============================================================================
 # ICARUS VERILOG TARGETS

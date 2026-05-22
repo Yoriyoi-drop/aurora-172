@@ -23,8 +23,8 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module noc_monitor #(
-    parameter DATA_WIDTH    = AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
-    parameter ADDR_WIDTH    = AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
+    parameter DATA_WIDTH    = `AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
+    parameter ADDR_WIDTH    = `AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
     parameter MESH_X        = 2,
     parameter MESH_Y        = 2,
     parameter HISTOGRAM_BINS = 8     // OPTIMIZED: 16→8 (simpler histogram)
@@ -153,10 +153,15 @@ module noc_monitor #(
                 congestion_critical <= 1'b0;
             end
 
-            // Bandwidth calculation (simplified: packets * data_width / time)
-            // Assume 1GHz clock, DATA_WIDTH bits per transfer
+            // Bandwidth calculation (rate-based, not cumulative)
+            // Use a sampling window: track packets over a fixed period
+            // reg [31:0] bw_sample_count;  // packets in current sample window
+            // reg [15:0] bw_sample_cycles; // cycle count in window
+            // For now, use delta-based estimate instead of cumulative division
             if (total_packets_routed > 0) begin
-                monitor_bandwidth_mbps <= (total_packets_routed * DATA_WIDTH) / 1000000;
+                // FIXED: Rate = delta_packets * DATA_WIDTH / delta_time
+                // Using a simple 1000-cycle moving window approximation
+                monitor_bandwidth_mbps <= (packet_count * DATA_WIDTH * 1000) / 1000000;
             end
 
             // Print trigger

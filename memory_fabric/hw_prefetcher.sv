@@ -49,10 +49,10 @@
 `include "interfaces/aurora_params.svh"
 
 module hw_prefetcher #(
-    parameter DATA_WIDTH            = AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
+    parameter DATA_WIDTH            = `AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
     parameter PREFETCH_DISTANCE     = 2,    // OPTIMIZED: 4->2 (less aggressive)
     parameter CACHE_LINE_BITS       = 5,    // 32-byte lines
-    parameter ADDR_WIDTH            = AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
+    parameter ADDR_WIDTH            = `AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
     parameter NUM_STREAMS           = 4,    // OPTIMIZED: 8->4 (simpler tracking)
     parameter MAX_STRIDE_BITS       = 12,   // OPTIMIZED: 16->12 (smaller stride)
     parameter CONFIDENCE_MAX        = 8,    // Max confidence level
@@ -128,6 +128,7 @@ module hw_prefetcher #(
     reg                         stream_valid  [0:NUM_STREAMS-1];      // Stream active
     reg [7:0]                   stream_useless [0:NUM_STREAMS-1];     // Useless counter
     reg [3:0]                   stream_pf_dist [0:NUM_STREAMS-1];     // Current prefetch distance
+    reg [3:0]                   pf_dist_at_send [0:NUM_STREAMS-1];    // Saved pf_dist at send time
 
     assign stream_active[0] = stream_valid[0];
     assign stream_active[1] = stream_valid[1];
@@ -267,6 +268,17 @@ module hw_prefetcher #(
             pf_stream_select <= 2'b00;
             pf_pending_mask <= {NUM_STREAMS{1'b0}};
 
+            for (int s = 0; s < NUM_STREAMS; s++) begin
+                stream_base[s] <= {ADDR_WIDTH{1'b0}};
+                stream_stride[s] <= {MAX_STRIDE_BITS{1'b0}};
+                stream_confidence[s] <= 4'd0;
+                stream_dir[s] <= 1'b0;
+                stream_valid[s] <= 1'b0;
+                stream_useless[s] <= 8'd0;
+                stream_pf_dist[s] <= 4'd1;
+                pf_dist_at_send[s] <= 4'd0;
+            end
+
             total_pf_req <= 32'd0;
             total_pf_useful <= 32'd0;
             total_pf_useless <= 32'd0;
@@ -335,17 +347,24 @@ module hw_prefetcher #(
 
                         pf_stream_id <= sel;
                         pf_pending_mask[sel] <= 1'b1;
+                        pf_dist_at_send[sel] <= stream_pf_dist[sel];
 
                         total_pf_req <= total_pf_req + 32'd1;
 
-                        if (pf_ready) begin
-                            // Advance prefetch distance
-                            stream_pf_dist[sel] <= stream_pf_dist[sel] + 4'd1;
-                            pf_pending_mask[sel] <= 1'b0;
-                        end
+                        pf_state <= PF_WAIT;
+                    end else begin
+                        pf_state <= PF_IDLE;
                     end
+                end
 
-                    pf_state <= PF_IDLE;
+                PF_WAIT: begin
+                    if (pf_ready) begin
+                        pf_valid <= 1'b0;
+                        stream_pf_dist[pf_stream_id] <= stream_pf_dist[pf_stream_id] + 4'd1;
+                        pf_state <= PF_IDLE;
+                    end else begin
+                        pf_valid <= 1'b1;
+                    end
                 end
 
                 default: pf_state <= PF_IDLE;
@@ -360,7 +379,7 @@ module hw_prefetcher #(
                 total_pf_useful <= total_pf_useful + 32'd1;
                 // Clear pending for the stream that used this
                 for (i = 0; i < NUM_STREAMS; i = i + 1) begin
-                    prefetch_addr = stream_base[i] + stream_stride[i] * stream_pf_dist[i];
+                    prefetch_addr = stream_base[i] + stream_stride[i] * pf_dist_at_send[i];
                     if (pf_result_addr == prefetch_addr) begin
                         pf_pending_mask[i] <= 1'b0;
                         stream_useless[i] <= 8'd0;  // Reset useless
@@ -374,7 +393,7 @@ module hw_prefetcher #(
                 total_pf_useless <= total_pf_useless + 32'd1;
                 // Increment useless counter
                 for (i = 0; i < NUM_STREAMS; i = i + 1) begin
-                    prefetch_addr = stream_base[i] + stream_stride[i] * stream_pf_dist[i];
+                    prefetch_addr = stream_base[i] + stream_stride[i] * pf_dist_at_send[i];
                     if (pf_result_addr == prefetch_addr) begin
                         if (stream_useless[i] < USELESS_THRESHOLD) begin
                             stream_useless[i] <= stream_useless[i] + 8'd1;

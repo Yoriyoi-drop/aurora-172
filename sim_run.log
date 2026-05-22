@@ -1,0 +1,227 @@
+[INFO] Tracing disabled at compile time (no --trace flag)
+[INFO] For debugging, use: make sim_debug
+========================================
+  AURORA-172 Basic Simulation Starting
+========================================
+
+[INFO] Letting testbench control clock and reset...
+[INFO] Simulation timeout: 500000000 cycles
+[0] [ASSERTIONS] Memory assertions initialized
+[0] [TRACE] TB INIT: rst_n=0, clk=0
+[0] [TRACE] RESET START: Applying reset for 50 ns...
+[5000] [CLOCK_GEN] Clock toggle: clk=0
+[10000] [CLOCK_GEN] Clock toggle: clk=1
+[15000] [CLOCK_GEN] Clock toggle: clk=0
+[20000] [CLOCK_GEN] Clock toggle: clk=1
+[25000] [CLOCK_GEN] Clock toggle: clk=0
+[30000] [CLOCK_GEN] Clock toggle: clk=1
+[35000] [CLOCK_GEN] Clock toggle: clk=0
+[40000] [CLOCK_GEN] Clock toggle: clk=1
+[45000] [CLOCK_GEN] Clock toggle: clk=0
+[50000] [TRACE] PRE-RELEASE: rst_n=0, game_cmd_ready=1
+[50000] [TRACE] RESET RELEASED: rst_n=1
+[50000] [CLOCK_GEN] Clock toggle: clk=1
+[55000] [CLOCK_GEN] Clock toggle: clk=0
+[60000] [CLOCK_GEN] Clock toggle: clk=1
+[65000] [CLOCK_GEN] Clock toggle: clk=0
+[70000] [TRACE] POST-RESET+2: rst_n=1, game_cmd_ready=1, queue_depth=0
+[70000] [CLOCK_GEN] Clock toggle: clk=1
+[75000] [CLOCK_GEN] Clock toggle: clk=0
+[80000] [CLOCK_GEN] Clock toggle: clk=1
+[85000] [CLOCK_GEN] Clock toggle: clk=0
+[90000] [CLOCK_GEN] Clock toggle: clk=1
+[95000] [CLOCK_GEN] Clock toggle: clk=0
+[150000] [TRACE] POST-RESET+10: rst_n=1, game_cmd_ready=1, queue_depth=0
+[150000] [TRACE] dispatched=0, completed=0
+[150000] [TRACE] Reset sequence completed - starting test_sequence()
+[150000] [TRACE] === STARTING TEST SEQUENCE ===
+[150000] [TRACE] ENTRY: game_cmd_ready=1, queue_depth=0
+[150000] [TRACE] CALLING test_basic_connectivity()
+[150000] [TEST] Test 1: Checking basic connectivity...
+[250000] [TEST] SUCCESS: Scheduler is ready
+[250000] [TEST] Queue depth: 0
+[250000] [TEST] Total dispatched: 0
+[250000] [TEST] Total completed: 0
+[250000] [TRACE] RETURNED from test_basic_connectivity()
+[250000] [TRACE] CALLING test_single_task()
+[250000] [TEST] Test 2: Injecting single gaming task...
+[250000] [TRACE] TASK_INJECT: Checking scheduler ready state...
+[250000] [TRACE] PRE-INJECT: game_cmd_ready=1, queue_depth=0
+[350000] [TRACE] POST-10CYC: game_cmd_ready=1, queue_depth=0
+[350000] [TRACE] Scheduler ready, injecting task
+[350000] [TRACE] SETTING: game_cmd_valid=1, addr=0x000000000100, data=0xdeadbeef
+[350000] [TRACE] TASK_INJECTED: addr=0x000000000100, data=0x01000001
+[350000] [TRACE] IMMEDIATE: game_cmd_ready=1, queue_depth=0
+[355000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=1
+[355000] [SCHED-G] g_task_valid changed: 0 -> 1, credits=100
+[355000] [SCHED-G] G-Task ACCEPTED! g_task_valid=1, credits=100, counter_dispatched=0
+[355000] [SCHEDULER_G] G-Task ACCEPTED: credits=100, q_count=0
+[370000] [TRACE] +2CYC: game_cmd_ready=1, queue_depth=0
+[370000] [TRACE] +2CYC: dispatched=1, completed=0
+[370000] [TRACE] WAITING: for task acceptance...
+[370000] [TRACE] Task accepted by scheduler
+[370000] [TRACE] CLEARING: game_cmd_valid=0
+[380000] [TRACE] Task injection completed
+[380000] [TRACE] FINAL: game_cmd_ready=1, queue_depth=0
+[380000] [TRACE] RETURNED from test_single_task()
+[380000] [TRACE] CALLING test_wait_completion()
+[380000] [TEST] Test 3: Waiting for task completion...
+[380000] [TRACE] COMPLETION_WAIT: Starting event-driven monitoring
+[380000] [TRACE] COMPLETION_WAIT: Initial dispatched=1, completed=0
+[380000] [TRACE] WAITING: for dispatched event...
+[380000] [TRACE] WAITING: for completed event...
+[380000] [TRACE] WAITING: for result valid...
+[385000] [SCHED-G] g_task_valid changed: 1 -> 0, credits=99
+[395000] [G-CORE#0] STATE: FETCH | PC=0x000000000100 | INST=0x01000001 | FETCH_EN=1
+[405000] [G-CORE#0] STATE: DECODE
+[1065000] [G-CORE#0] ✅ Command completed (actual pipeline latency: 64 cycles, expected: 64)
+[1065000] [G-CORE#0] ✍️ RESULT_VALID=1, result=0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+[1075000] [MQ-DEBUG] G-Core COMPLETE detected! g_active_task_valid=0
+[1075000] [TRACE] COMPLETED: 1
+[1075000] [TRACE] Completion wait finished
+[1075000] [TRACE] FINAL_STATE: dispatched=1, completed=1, result_valid=1, result=0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000ec936437
+[1075000] [TRACE] RETURNED from test_wait_completion()
+[1075000] [TRACE] CALLING test_multicore()
+[1075000] [TEST] Test 4: Multicore — injecting 4 tasks...
+[1075000] [TRACE] Pre-inject: dispatched=1, completed=1
+[1075000] [TRACE] game_cmd_ready=1, starting injection
+[1085000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=1
+[1085000] [SCHED-G] g_task_valid changed: 0 -> 1, credits=100
+[1085000] [SCHED-G] G-Task ACCEPTED! g_task_valid=1, credits=100, counter_dispatched=1
+[1085000] [SCHEDULER_G] G-Task ACCEPTED: credits=100, q_count=0
+[1090000] [TRACE] Task 0 injected: addr=0x000000000100, data=0x01000001 (opcode=0x1)
+[1095000] [SCHED-G] g_task_valid changed: 1 -> 0, credits=99
+[1105000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=2
+[1105000] [SCHED-G] g_task_valid changed: 0 -> 1, credits=99
+[1105000] [SCHED-G] G-Task ACCEPTED! g_task_valid=1, credits=99, counter_dispatched=2
+[1105000] [SCHEDULER_G] G-Task ACCEPTED: credits=99, q_count=0
+[1110000] [TRACE] Task 1 injected: addr=0x000000000200, data=0x02000002 (opcode=0x2)
+[1115000] [SCHED-G] g_task_valid changed: 1 -> 0, credits=98
+[1125000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=3
+[1125000] [G-CORE#1] STATE: FETCH | PC=0x000000000100 | INST=0x01000001 | FETCH_EN=1
+[1125000] [SCHED-G] g_task_valid changed: 0 -> 1, credits=98
+[1125000] [SCHED-G] G-Task ACCEPTED! g_task_valid=1, credits=98, counter_dispatched=3
+[1125000] [SCHEDULER_G] G-Task ACCEPTED: credits=98, q_count=0
+[1130000] [TRACE] Task 2 injected: addr=0x000000000300, data=0x03000003 (opcode=0x3)
+[1135000] [G-CORE#1] STATE: DECODE
+[1135000] [SCHED-G] g_task_valid changed: 1 -> 0, credits=97
+[1145000] [G-CORE#2] STATE: FETCH | PC=0x000000000200 | INST=0x02000002 | FETCH_EN=1
+[1145000] [SQ-SCHEDULER] 📥 Enqueued G task, queue_count=4
+[1145000] [SCHED-G] g_task_valid changed: 0 -> 1, credits=97
+[1145000] [SCHED-G] G-Task ACCEPTED! g_task_valid=1, credits=97, counter_dispatched=3
+[1145000] [SCHEDULER_G] G-Task ACCEPTED: credits=97, q_count=0
+[1150000] [TRACE] Task 3 injected: addr=0x000000000400, data=0x04000004 (opcode=0x4)
+[1150000] [TRACE] All 4 tasks injected. Waiting for completion...
+[1155000] [G-CORE#2] STATE: DECODE
+[1155000] [SCHED-G] g_task_valid changed: 1 -> 0, credits=96
+[1655000] [G-CORE#2] ✅ Command completed (actual pipeline latency: 48 cycles, expected: 48)
+[1655000] [G-CORE#2] ✍️ RESULT_VALID=1, result=0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+[1795000] [G-CORE#1] ✅ Command completed (actual pipeline latency: 64 cycles, expected: 64)
+[1795000] [G-CORE#1] ✍️ RESULT_VALID=1, result=0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+[1805000] [MQ-DEBUG] G-Core COMPLETE detected! g_active_task_valid=0
+[INFO] tick=10000000
+[10000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=20000000
+[20000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=30000000
+[30000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=40000000
+[40000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=50000000
+[50000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=60000000
+[60000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=70000000
+[70000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=80000000
+[80000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=90000000
+[90000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=100000000
+[100000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[100085000] [SCHEDULER_G] DEBUG_READY: g_task_ready=1, credits=97, q_count=0, threshold=15
+[INFO] tick=110000000
+[110000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=120000000
+[120000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=130000000
+[130000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=140000000
+[140000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=150000000
+[150000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=160000000
+[160000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=170000000
+[170000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=180000000
+[180000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=190000000
+[190000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=200000000
+[200000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[200085000] [SCHEDULER_G] DEBUG_READY: g_task_ready=1, credits=97, q_count=0, threshold=15
+[INFO] tick=210000000
+[210000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=220000000
+[220000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=230000000
+[230000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=240000000
+[240000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=250000000
+[250000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=260000000
+[260000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=270000000
+[270000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=280000000
+[280000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=290000000
+[290000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=300000000
+[300000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[300085000] [SCHEDULER_G] DEBUG_READY: g_task_ready=1, credits=97, q_count=0, threshold=15
+[INFO] tick=310000000
+[310000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=320000000
+[320000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=330000000
+[330000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=340000000
+[340000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=350000000
+[350000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=360000000
+[360000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=370000000
+[370000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=380000000
+[380000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=390000000
+[390000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=400000000
+[400000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[400085000] [SCHEDULER_G] DEBUG_READY: g_task_ready=1, credits=97, q_count=0, threshold=15
+[INFO] tick=410000000
+[410000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=420000000
+[420000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=430000000
+[430000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=440000000
+[440000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=450000000
+[450000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=460000000
+[460000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=470000000
+[470000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=480000000
+[480000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=490000000
+[490000000] [TIME_MONITOR] rst_n=1, game_cmd_ready=1, queue_depth=0
+[INFO] tick=500000000
+
+[INFO] Simulation complete (tick=500000000)
+========================================

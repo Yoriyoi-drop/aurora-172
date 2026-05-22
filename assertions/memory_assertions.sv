@@ -18,9 +18,9 @@
 
 module memory_assertions #(
     // Use standardized parameters from aurora_params.svh
-    parameter DATA_WIDTH = AURORA_DATA_WIDTH,      // FIXED: Use standard parameter
-    parameter ADDR_WIDTH = AURORA_ADDR_WIDTH,       // FIXED: Use standard parameter
-    parameter CACHE_LINE_WIDTH = AURORA_CACHE_LINE_WIDTH // FIXED: Use standard parameter
+    parameter DATA_WIDTH = `AURORA_DATA_WIDTH,      // FIXED: Use standard parameter
+    parameter ADDR_WIDTH = `AURORA_ADDR_WIDTH,       // FIXED: Use standard parameter
+    parameter CACHE_LINE_WIDTH = `AURORA_CACHE_LINE_WIDTH // FIXED: Use standard parameter
 )(
     input  wire                         clk,
     input  wire                         rst_n,
@@ -50,25 +50,25 @@ module memory_assertions #(
     
     // Read request detection
     function read_req_seq;
-        input mem_rd_en, mem_wr_en;
+        input rd_en, wr_en;
         begin
-            read_req_seq = mem_rd_en && !mem_wr_en;
+            read_req_seq = rd_en && !wr_en;
         end
     endfunction
     
     // Write request detection
     function write_req_seq;
-        input mem_rd_en, mem_wr_en;
+        input rd_en, wr_en;
         begin
-            write_req_seq = !mem_rd_en && mem_wr_en;
+            write_req_seq = !rd_en && wr_en;
         end
     endfunction
     
     // Cache hit detection
     function cache_hit_seq;
-        input l1_hit, l2_hit, l3_hit;
+        input h1, h2, h3;
         begin
-            cache_hit_seq = l1_hit || l2_hit || l3_hit;
+            cache_hit_seq = h1 || h2 || h3;
         end
     endfunction
     

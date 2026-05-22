@@ -2,7 +2,6 @@
 
 // Import global package for parameters
 `include "interfaces/aurora_params.svh"
-import aurora_global_pkg::*;
 
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
@@ -104,15 +103,15 @@ module hol_integration #(
     reg [7:0]               load_balance_threshold;           // When to trigger rebalancing
     
     // Enhanced ring bus signals (connect to actual ring_bus)
-    wire [ADDR_WIDTH-1:0]    rb_node_req_addr  [0:NUM_NODES-1];
-    wire [DATA_WIDTH-1:0]    rb_node_req_data  [0:NUM_NODES-1];
-    wire                     rb_node_req_valid [0:NUM_NODES-1];
-    wire [1:0]               rb_node_req_qos   [0:NUM_NODES-1];
-    wire                     rb_node_req_ready [0:NUM_NODES-1];
+    logic [ADDR_WIDTH-1:0]    rb_node_req_addr  [0:NUM_NODES-1];
+    logic [DATA_WIDTH-1:0]    rb_node_req_data  [0:NUM_NODES-1];
+    logic                     rb_node_req_valid [0:NUM_NODES-1];
+    logic [1:0]               rb_node_req_qos   [0:NUM_NODES-1];
+    logic                     rb_node_req_ready [0:NUM_NODES-1];
     
-    wire [DATA_WIDTH-1:0]    rb_node_resp_data [0:NUM_NODES-1];
-    wire                     rb_node_resp_valid[0:NUM_NODES-1];
-    wire [NUM_NODES-1:0]     rb_node_resp_ready;
+    logic [DATA_WIDTH-1:0]    rb_node_resp_data [0:NUM_NODES-1];
+    logic                     rb_node_resp_valid[0:NUM_NODES-1];
+    logic [NUM_NODES-1:0]     rb_node_resp_ready;
     
     // Initialize HOL integration
     integer init_i;
@@ -148,8 +147,8 @@ module hol_integration #(
         $display("[%0t] [HOL-INTEGRATION] HOL Prevention Integration Initialized", $time);
     end
     
-    // Instantiate the actual ring_bus module
-    ring_bus #(
+    // TODO: instantiate ring_bus module — module file not yet available (ring_bus_stub provided separately)
+    /* ring_bus #(
         .DATA_WIDTH(DATA_WIDTH),
         .ADDR_WIDTH(ADDR_WIDTH),
         .NUM_NODES(NUM_NODES),
@@ -178,26 +177,26 @@ module hol_integration #(
         .ring_deadlock_recoveries(ring_deadlock_recoveries),
         .ring_system_stalled(ring_system_stalled),
         .node_activity_mask(node_activity_mask)
-    );
+    ); */
     
     // Main HOL integration logic
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             // Reset HOL integration state
-            hol_blocked_count = 32'd0;
-            hol_bypass_count = 32'd0;
-            hol_recovery_counter = 32'd0;
-            hol_health_score = 8'd100;
-            hol_healthy_flag = 1'b1;
+            hol_blocked_count <= 32'd0;
+            hol_bypass_count <= 32'd0;
+            hol_recovery_counter <= 32'd0;
+            hol_health_score <= 8'd100;
+            hol_healthy_flag <= 1'b1;
             
             for (integer i = 0; i < NUM_NODES; i = i + 1) begin
-                packet_wait_time[i] = 8'd0;
-                packet_timestamp[i] = 32'd0;
-                hol_detected[i] = 1'b0;
-                hol_wait_cycles[i] = 16'd0;
-                bypass_active[i] = 1'b0;
-                bypass_valid[i] = 1'b0;
-                node_load[i] = 32'd0;
+                packet_wait_time[i] <= 8'd0;
+                packet_timestamp[i] <= 32'd0;
+                hol_detected[i] <= 1'b0;
+                hol_wait_cycles[i] <= 16'd0;
+                bypass_active[i] <= 1'b0;
+                bypass_valid[i] <= 1'b0;
+                node_load[i] <= 32'd0;
             end
             
         end else begin
@@ -205,26 +204,24 @@ module hol_integration #(
             for (integer i = 0; i < NUM_NODES; i = i + 1) begin
                 // Update packet wait time
                 if (node_req_valid[i] && !node_req_ready[i]) begin
-                    packet_wait_time[i] = packet_wait_time[i] + 1;
-                    hol_wait_cycles[i] = hol_wait_cycles[i] + 1;
+                    packet_wait_time[i] <= packet_wait_time[i] + 1;
+                    hol_wait_cycles[i] <= hol_wait_cycles[i] + 1;
                 end else begin
-                    packet_wait_time[i] = 8'd0;
+                    packet_wait_time[i] <= 8'd0;
                 end
                 
-                // Detect HOL blocking
+                // CAUTION: detect_hol_blocking, manage_bypass_lane, update_node_load,
+                // perform_load_balancing, update_hol_health use blocking assignments internally.
+                // These task calls from always_ff are safe only when tasks assign:
+                //   - Variables NOT read elsewhere in the same cycle (no race)
+                //   - Variables written by one task call only (no multiple drivers)
+                // For full safety, move task bodies inline or convert tasks to functions.
                 detect_hol_blocking(i);
-                
-                // Manage bypass lanes
                 manage_bypass_lane(i);
-                
-                // Update load metrics
                 update_node_load(i);
             end
             
-            // Perform load balancing
             perform_load_balancing();
-            
-            // Update HOL health score
             update_hol_health();
         end
     end

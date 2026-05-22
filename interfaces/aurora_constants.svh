@@ -6,13 +6,13 @@
 `define AURORA_NUM_G_CORES         4
 `endif
 `ifndef AURORA_NUM_H_CORES
-`define AURORA_NUM_H_CORES         2
+`define AURORA_NUM_H_CORES         32
 `endif
 `ifndef AURORA_NUM_A_CORES
-`define AURORA_NUM_A_CORES         2
+`define AURORA_NUM_A_CORES         64
 `endif
 `ifndef AURORA_NUM_NPU_CLUSTERS
-`define AURORA_NUM_NPU_CLUSTERS    1
+`define AURORA_NUM_NPU_CLUSTERS    8
 `endif
 
 // Core resources
@@ -20,9 +20,7 @@
 `define AURORA_RESULT_FIFO_DEPTH   16
 `endif
 
-// Interconnect
-`ifndef AURORA_CREDIT_INITIAL
-`define AURORA_CREDIT_INITIAL      8'd8
-`endif
+// NOTE: AURORA_CREDIT_INITIAL is defined in aurora_params.svh (source of truth)
+// All core parameters should be kept in sync with aurora_params.svh
 
 `endif

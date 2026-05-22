@@ -1,0 +1,3 @@
+Ignoring unknown warning class no-fatal
+interfaces/axi_if.sv:5: Include file aurora_params.svh not found
+No top level modules, and no -s option.

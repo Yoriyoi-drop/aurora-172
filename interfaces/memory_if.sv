@@ -17,8 +17,8 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 interface memory_if #(
-    parameter DATA_WIDTH = 256,  // OPTIMIZED: 512->256 (more efficient)
-    parameter ADDR_WIDTH = 40   // OPTIMIZED: 48->40 (simpler addressing)
+    parameter DATA_WIDTH = 512,
+    parameter ADDR_WIDTH = 48
 )();
     
     // Address and control signals

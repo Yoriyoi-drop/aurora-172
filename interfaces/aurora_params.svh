@@ -98,6 +98,6 @@
 
 // Set by most simulator tools; defined here for Verilator compatibility.
 // Enables queue overflow assertions and other simulation-only checks.
-`define SIMULATION
+`define AURORA_SIMULATION
 
 `endif

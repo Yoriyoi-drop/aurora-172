@@ -3,7 +3,6 @@
 // Import global package for parameters
 // Import global package for parameters
 `include "interfaces/aurora_params.svh"
-import aurora_global_pkg::*;
 
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
@@ -43,6 +42,9 @@ module aurora_172_fpga_top (
     output wire                         ddr4_ras_n,
     output wire                         ddr4_cas_n,
     output wire                         ddr4_we_n,
+    output wire                         ddr4_reset_n,
+    output wire                         ddr4_cke,
+    output wire                         ddr4_act_n,
     inout  wire [31:0]                  ddr4_dq,      // OPTIMIZED: 72->32 bits
     inout wire [3:0]                    ddr4_dqs_p,    // OPTIMIZED: 9->4 bits
     inout wire [3:0]                    ddr4_dqs_n,    // OPTIMIZED: 9->4 bits
@@ -105,17 +107,25 @@ reg [2:0] rst_sync_h = 0;
 reg [2:0] rst_sync_ai = 0;
 reg [2:0] rst_sync_mem = 0;
 
-always @(posedge g_core_clk)
-    rst_sync_g <= {rst_sync_g[1:0], sys_rst_n};
+always @(posedge g_core_clk or negedge sys_rst_n) begin
+    if (!sys_rst_n) rst_sync_g <= 0;
+    else rst_sync_g <= {rst_sync_g[1:0], sys_rst_n};
+end
 
-always @(posedge h_core_clk)
-    rst_sync_h <= {rst_sync_h[1:0], sys_rst_n};
+always @(posedge h_core_clk or negedge sys_rst_n) begin
+    if (!sys_rst_n) rst_sync_h <= 0;
+    else rst_sync_h <= {rst_sync_h[1:0], sys_rst_n};
+end
 
-always @(posedge ai_core_clk)
-    rst_sync_ai <= {rst_sync_ai[1:0], sys_rst_n};
+always @(posedge ai_core_clk or negedge sys_rst_n) begin
+    if (!sys_rst_n) rst_sync_ai <= 0;
+    else rst_sync_ai <= {rst_sync_ai[1:0], sys_rst_n};
+end
 
-always @(posedge mem_fabric_clk)
-    rst_sync_mem <= {rst_sync_mem[1:0], sys_rst_n};
+always @(posedge mem_fabric_clk or negedge sys_rst_n) begin
+    if (!sys_rst_n) rst_sync_mem <= 0;
+    else rst_sync_mem <= {rst_sync_mem[1:0], sys_rst_n};
+end
 
 wire sys_rst_g = rst_sync_g[2];
 wire sys_rst_h = rst_sync_h[2];
@@ -325,7 +335,16 @@ assign sys_power_mode = 16'b0011;
 //-----------------------------------------------------------------------------
 // System Interrupt
 //-----------------------------------------------------------------------------
-assign sys_interrupt = ~gpio_int_n | ~pcie_perst_n;
+// 2-flop synchronizer for async inputs gpio_int_n and pcie_perst_n
+reg gpio_sync1, gpio_sync2;
+reg pcie_sync1, pcie_sync2;
+always @(posedge g_core_clk) begin
+    gpio_sync1 <= gpio_int_n;
+    gpio_sync2 <= gpio_sync1;
+    pcie_sync1 <= pcie_perst_n;
+    pcie_sync2 <= pcie_sync1;
+end
+assign sys_interrupt = ~gpio_sync2 | ~pcie_sync2;
 
 //=============================================================================
 // Simulation-Only Assertions

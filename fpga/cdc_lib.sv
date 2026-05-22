@@ -29,15 +29,15 @@
 module cdc_synchronizer #(
     parameter RESET_VALUE = 1'b0
 )(
-    input  wire src_clk,
     input  wire dst_clk,
-    input  wire src_rst_n,
     input  wire dst_rst_n,
     input  wire src_data,
     output wire dst_data
 );
 
 // Standard 2-flop synchronizer chain
+(* ASYNC_REG = "TRUE" *)
+(* DONT_TOUCH = "TRUE" *)
 reg [1:0] sync_stage = {2{RESET_VALUE}};
 
 always @(posedge dst_clk or negedge dst_rst_n) begin
@@ -48,19 +48,6 @@ always @(posedge dst_clk or negedge dst_rst_n) begin
 end
 
 assign dst_data = sync_stage[1];
-
-// Metastability hardening: gunakan register dengan delay yang lebih panjang
-// Xilinx attribute untuk mencegah optimasi
-(* ASYNC_REG = "TRUE" *)
-(* DONT_TOUCH = "TRUE" *)
-reg metastability_hardened;
-
-always @(posedge dst_clk or negedge dst_rst_n) begin
-    if (!dst_rst_n)
-        metastability_hardened <= RESET_VALUE;
-    else
-        metastability_hardened <= sync_stage[1];
-end
 
 endmodule
 
@@ -106,9 +93,7 @@ wire dst_toggle_sync;
 cdc_synchronizer #(
     .RESET_VALUE(1'b0)
 ) sync_toggle (
-    .src_clk    (src_clk),
     .dst_clk    (dst_clk),
-    .src_rst_n  (src_rst_n),
     .dst_rst_n  (dst_rst_n),
     .src_data   (src_toggle),
     .dst_data   (dst_toggle_sync)
@@ -127,7 +112,8 @@ always @(posedge dst_clk or negedge dst_rst_n) begin
     end else begin
         dst_toggle_d <= dst_toggle_sync;
         
-        if (dst_toggle_d !== dst_toggle_sync) begin  // X detection
+        `ifndef SYNTHESIS
+        if (dst_toggle_d !== dst_toggle_sync) begin  // X detection (simulation only)
             metastability_detector <= metastability_detector + 1;
             if (metastability_detector >= 3) begin
                 metastability_detected <= 1;
@@ -140,6 +126,7 @@ always @(posedge dst_clk or negedge dst_rst_n) begin
                 $display("[%0t] [CDC] Metastability resolved", $time);
             end
         end
+        `endif
     end
 end
 
@@ -181,7 +168,7 @@ endmodule
 // 4. ASYNC FIFO (untuk multi-bit data transfer antar clock domain)
 //=============================================================================
 module cdc_fifo #(
-    parameter DATA_WIDTH = AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
+    parameter DATA_WIDTH = `AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
     parameter ADDR_WIDTH = 4,  // 2^ADDR_DEPTH entries
     parameter DEPTH = (1 << ADDR_WIDTH)
 )(
@@ -232,18 +219,21 @@ cdc_grey_code #(
 cdc_synchronizer #(
     .RESET_VALUE(1'b0)
 ) sync_wr_ptr [ADDR_WIDTH:0](
-    .src_clk    (wr_clk),
     .dst_clk    (rd_clk),
-    .src_rst_n  (wr_rst_n),
     .dst_rst_n  (rd_rst_n),
     .src_data   (wr_ptr_gray),
     .dst_data   (wr_ptr_gray_sync)
 );
 
 // Write data to memory
-always @(posedge wr_clk) begin
-    if (wr_en && !wr_full)
+always @(posedge wr_clk or negedge wr_rst_n) begin
+    if (!wr_rst_n) begin
+        for (int i = 0; i < DEPTH; i++) begin
+            mem[i] <= '0;
+        end
+    end else if (wr_en && !wr_full) begin
         mem[wr_ptr_bin] <= wr_data;
+    end
 end
 
 // Full detection: bandingkan gray pointers
@@ -267,9 +257,7 @@ cdc_grey_code #(
 cdc_synchronizer #(
     .RESET_VALUE(1'b0)
 ) sync_rd_ptr [ADDR_WIDTH:0](
-    .src_clk    (rd_clk),
     .dst_clk    (wr_clk),
-    .src_rst_n  (rd_rst_n),
     .dst_rst_n  (wr_rst_n),
     .src_data   (rd_ptr_gray),
     .dst_data   (rd_ptr_gray_sync)
@@ -302,7 +290,7 @@ endmodule
 // 5. HANDSHAKE SYNCHRONIZER (untuk transfer data terkontrol)
 //=============================================================================
 module cdc_handshake #(
-    parameter DATA_WIDTH = AURORA_DATA_WIDTH   // FIXED: Use standard parameter
+    parameter DATA_WIDTH = `AURORA_DATA_WIDTH   // FIXED: Use standard parameter
 )(
     // Source domain
     input  wire                     src_clk,
@@ -347,9 +335,7 @@ wire dst_req_sync;
 cdc_synchronizer #(
     .RESET_VALUE(1'b0)
 ) sync_req (
-    .src_clk    (src_clk),
     .dst_clk    (dst_clk),
-    .src_rst_n  (src_rst_n),
     .dst_rst_n  (dst_rst_n),
     .src_data   (src_req),
     .dst_data   (dst_req_sync)
@@ -368,9 +354,7 @@ wire src_ack_sync;
 cdc_synchronizer #(
     .RESET_VALUE(1'b0)
 ) sync_ack (
-    .src_clk    (dst_clk),
     .dst_clk    (src_clk),
-    .src_rst_n  (dst_rst_n),
     .dst_rst_n  (src_rst_n),
     .src_data   (dst_ack),
     .dst_data   (src_ack_sync)
@@ -399,7 +383,7 @@ endmodule
 // 6. MULTIBIT MUXED SYNCHRONIZER (untuk bus data lebar)
 //=============================================================================
 module cdc_muxed_synchronizer #(
-    parameter DATA_WIDTH = AURORA_DATA_WIDTH   // FIXED: Use standard parameter
+    parameter DATA_WIDTH = `AURORA_DATA_WIDTH   // FIXED: Use standard parameter
 )(
     input  wire                     src_clk,
     input  wire                     dst_clk,

@@ -107,7 +107,7 @@ int main(int argc, char** argv, char** env) {
     printf("[INFO] Letting testbench control clock and reset...\n");
 
     // OPTIMIZATION 2: Configurable timeout via environment variable
-    vluint64_t timeout = getenv("SIM_TIMEOUT") ? atol(getenv("SIM_TIMEOUT")) : 1000000;
+    vluint64_t timeout = getenv("SIM_TIMEOUT") ? atol(getenv("SIM_TIMEOUT")) : 500000000;
     printf("[INFO] Simulation timeout: %" PRIu64 " cycles", timeout);
     if (getenv("SIM_TIMEOUT")) {
         printf(" (custom)");
@@ -116,8 +116,14 @@ int main(int argc, char** argv, char** env) {
 
     // Run simulation loop - let testbench control everything
     while (!Verilated::gotFinish() && main_time < timeout) {
+        // CRITICAL: Set simulation time before eval for #delay to work
+        Verilated::time(main_time);
+
         // Just eval - testbench controls clock internally
         tb->eval();
+
+        // Flush stdout to ensure $display output is visible in real-time
+        fflush(stdout);
 
 #if VM_TRACE
         // Only dump trace if tracing is enabled
@@ -127,9 +133,9 @@ int main(int argc, char** argv, char** env) {
 #endif
         main_time += 1;  // Increment by 1 time unit
 
-        // OPTIMIZATION 3: Reduce progress print frequency (500K -> 1M)
-        if (main_time % 1000000 == 0) {
-            printf("[INFO] Simulation progress: tick=%" PRIu64 "\n", main_time);
+        // Progress print every 10M ticks
+        if (main_time % 10000000 == 0) {
+            printf("[INFO] tick=%" PRIu64 "\n", main_time);
         }
     }
 

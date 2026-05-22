@@ -70,7 +70,7 @@ module npu_cluster #(
     reg signed [WEIGHT_BITS-1:0] weight_mem [0:1023];  // 1KB weight storage
     reg [9:0]                     weight_addr;
     reg                           weight_loaded;
-    reg [9:0]                     weight_count;
+    reg [10:0]                    weight_count;
 
     // =========================================================================
     // Activation buffer (input/output)
@@ -110,7 +110,8 @@ module npu_cluster #(
     reg [DATA_WIDTH-1:0]    saved_data;
 
     // Compute indices
-    reg [7:0]               pe_idx;
+    reg [15:0]              pe_idx;
+    reg [7:0]               pe_iterations;  // Max-iteration guard for pe_idx wrap
     reg [2:0]               reduce_level;  // FIXED: Multi-level tree reduction
     reg [15:0]              elem_idx;
 
@@ -160,9 +161,10 @@ module npu_cluster #(
             error_valid <= 1'b0;
             exec_counter <= 16'h0;
             pe_idx <= 8'b0;
+            pe_iterations <= 8'b0;
             reduce_level <= 3'b0;
             elem_idx <= 16'b0;
-            weight_count <= 10'b0;
+            weight_count <= 11'b0;
             weight_loaded <= 1'b0;
             fabric_rd_en <= 1'b0;
             fabric_wr_en <= 1'b0;
@@ -287,9 +289,10 @@ module npu_cluster #(
                         fabric_rd_en <= 1'b0;
                         state <= ERROR_ST;
                     end else begin
+                        exec_counter <= exec_counter + 1;
                         if (fabric_rd_en && fabric_ready) begin
                             fabric_rd_en <= 1'b0;
-                        end else begin
+                        end else if (!fabric_rd_en) begin
                             fabric_addr <= saved_addr + {40'b0, elem_idx[5:0]};
                             fabric_rd_en <= 1'b1;
                             exec_counter <= exec_counter + 1;  // Count cycles waiting
@@ -334,9 +337,10 @@ module npu_cluster #(
                         fabric_rd_en <= 1'b0;
                         state <= ERROR_ST;
                     end else begin
+                        exec_counter <= exec_counter + 1;
                         if (fabric_rd_en && fabric_ready) begin
                             fabric_rd_en <= 1'b0;
-                        end else begin
+                        end else if (!fabric_rd_en) begin
                             fabric_addr <= saved_addr + {40'b0, elem_idx[7:0]};
                             fabric_rd_en <= 1'b1;
                             exec_counter <= exec_counter + 1;  // Count cycles waiting
@@ -382,7 +386,7 @@ module npu_cluster #(
                     if (exec_counter < exec_target) begin
                         exec_counter <= exec_counter + 1;
                     end else begin
-                        // FIX v2: Load weights into PE registers from weight_mem with circular indexing
+                        // Load weights into PE registers from weight_mem with circular indexing
                         for (int p = 0; p < NUM_PE; p++) begin
                             pe_weights[p] <= weight_mem[(pe_idx + p) % 1024];
                         end
@@ -391,8 +395,8 @@ module npu_cluster #(
                         for (int p = 0; p < NUM_PE; p++) begin
                             if (weight_loaded && pe_idx < weight_count) begin
                                 // Sparsity optimization: skip zero weights
-                                if (!is_sparse(weight_mem[pe_idx])) begin
-                                    pe_acc[p] <= pe_acc[p] + (pe_weights[p] * act_in[p]);
+                                if (!is_sparse(weight_mem[(pe_idx + p) % 1024])) begin
+                                    pe_acc[p] <= pe_acc[p] + (weight_mem[(pe_idx + p) % 1024] * act_in[p]);
                                 end
                             end else begin
                                 pe_acc[p] <= 32'sb0;
@@ -400,28 +404,29 @@ module npu_cluster #(
                         end
 
                         pe_idx <= pe_idx + NUM_PE;
+                        pe_iterations <= pe_iterations + 8'd1;
 
-                        if (pe_idx >= num_elements) begin
+                        // Guard against pe_idx wrap (8-bit, max 255, NUM_PE=32)
+                        if (pe_idx >= num_elements || pe_iterations > 8'd15) begin
                             state <= ACCUMULATE;
                         end
                     end
                 end
 
                 // ─────────────────────────────────────────────────
-                // ACCUMULATE: Multi-level tree reduction
-                // FIXED: Was single-level only (NEVER produced correct sum for 32 PEs)
+                // ACCUMULATE: Single-cycle reduction
+                // FIXED: Multi-level tree had NBA race — only last level took effect
                 // ─────────────────────────────────────────────────
                 ACCUMULATE: begin
-                    if (reduce_level < $clog2(NUM_PE)) begin
-                        if (pe_idx < (NUM_PE >> (reduce_level + 1))) begin
-                            pe_acc[pe_idx] <= pe_acc[pe_idx] + pe_acc[pe_idx + (NUM_PE >> (reduce_level + 1))];
-                            pe_idx <= pe_idx + 1;
-                        end else begin
-                            reduce_level <= reduce_level + 1;
-                            pe_idx <= 8'b0;
+                    if (reduce_level == 0) begin
+                        integer total;
+                        total = 0;
+                        for (p = 0; p < NUM_PE; p++) begin
+                            total = total + pe_acc[p];
                         end
+                        pe_acc[0] <= total;
+                        reduce_level <= 1;
                     end else begin
-                        // Result in pe_acc[0]
                         act_out[0] <= pe_acc[0];
                         reduce_level <= 3'b0;
                         state <= ACTIVATE;
@@ -457,8 +462,9 @@ module npu_cluster #(
                                 end
                             end
                             OP_SOFTMAX: begin
-                                // Softmax approximation
-                                act_out[0] <= pe_acc[0];
+                                for (int p = 0; p < NUM_PE; p++) begin
+                                    act_out[p] <= pe_acc[p];
+                                end
                             end
                             OP_POOL: begin
                                 // Max pooling
@@ -502,12 +508,12 @@ module npu_cluster #(
                     end else if (fabric_wr_en && fabric_ready) begin
                         fabric_wr_en <= 1'b0;
                     end else begin
-                        fabric_wr_data <= {96'b0, act_out[0]};
+                        fabric_wr_data <= {{(DATA_WIDTH-32){1'b0}}, act_out[0]};
                         fabric_wr_en <= 1'b1;
                     end
 
                     if (fabric_ready && fabric_wr_en) begin
-                        result <= {96'b0, act_out[0]};
+                        result <= {{(DATA_WIDTH-32){1'b0}}, act_out[0]};
                         complete <= 1'b1;
                         busy <= 1'b0;
                         store_timeout_counter <= 8'b0;

@@ -21,8 +21,8 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module global_scheduler_sq #(
-    parameter DATA_WIDTH       = AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
-    parameter ADDR_WIDTH       = AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
+    parameter DATA_WIDTH       = `AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
+    parameter ADDR_WIDTH       = `AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
     parameter QUEUE_DEPTH      = 16,    // OPTIMIZED: 32->16 (smaller queues)
     parameter AGING_RATE       = 4,     // OPTIMIZED: 8->4 (faster aging)
     parameter MAX_AGING        = 4,     // OPTIMIZED: 8->4 (simpler aging)
@@ -217,6 +217,7 @@ module global_scheduler_sq #(
     reg                     skip_g_dispatch;
     reg [7:0]               skip_g_counter;
     reg [31:0]              rv_cleaned;  // Module-level cleanup temp
+    reg [31:0]              cleaned_local;  // Local accumulator for cleanup count
     integer                 li_cleanup;
     integer                 li_prio;
     integer                 li_assert;  // For runtime assertions
@@ -425,34 +426,34 @@ module global_scheduler_sq #(
             end
 
             // ── AGING ──
-            // DEADLOCK FIX: Use explicit assignments instead of for-loop in always block
-            // AGING for queue entry 0
-            if (queue_valid[0] && !queue_dispatched[0]) begin
-                queue_wait_cycles[0] <= queue_wait_cycles[0] + 1;
-                case (queue_type[0])
-                    TASK_GAMING: begin
-                        if (queue_wait_cycles[0] >= (AGING_RATE * 2) && queue_aging[0] < 8'd1) begin
-                            queue_aging[0] <= queue_aging[0] + 1;
-                            aging_boosted_tasks <= aging_boosted_tasks + 1;
+            for (li = 0; li < QUEUE_DEPTH; li = li + 1) begin
+                if (queue_valid[li] && !queue_dispatched[li]) begin
+                    queue_wait_cycles[li] <= queue_wait_cycles[li] + 1;
+                    case (queue_type[li])
+                        TASK_GAMING: begin
+                            if (queue_wait_cycles[li] >= (AGING_RATE * 2) && queue_aging[li] < 8'd1) begin
+                                queue_aging[li] <= queue_aging[li] + 1;
+                                aging_boosted_tasks <= aging_boosted_tasks + 1;
+                            end
                         end
-                    end
-                    TASK_AI: begin
-                        if (queue_wait_cycles[0] >= AGING_RATE && queue_aging[0] < MAX_AGING) begin
-                            queue_aging[0] <= queue_aging[0] + 1;
-                            aging_boosted_tasks <= aging_boosted_tasks + 1;
+                        TASK_AI: begin
+                            if (queue_wait_cycles[li] >= AGING_RATE && queue_aging[li] < MAX_AGING) begin
+                                queue_aging[li] <= queue_aging[li] + 1;
+                                aging_boosted_tasks <= aging_boosted_tasks + 1;
+                            end
                         end
-                    end
-                    TASK_NPU: begin
-                        if (queue_wait_cycles[0] >= (AGING_RATE / 2) && queue_aging[0] < MAX_AGING) begin
-                            queue_aging[0] <= queue_aging[0] + 1;
-                            aging_boosted_tasks <= aging_boosted_tasks + 1;
+                        TASK_NPU: begin
+                            if (queue_wait_cycles[li] >= (AGING_RATE / 2) && queue_aging[li] < MAX_AGING) begin
+                                queue_aging[li] <= queue_aging[li] + 1;
+                                aging_boosted_tasks <= aging_boosted_tasks + 1;
+                            end
                         end
+                    endcase
+                    
+                    // ANTI-STARVATION: Force dispatch if waiting too long
+                    if (queue_wait_cycles[li] > 8'd200) begin
+                        queue_aging[li] <= MAX_AGING;
                     end
-                endcase
-                
-                // ANTI-STARVATION: Force dispatch if waiting too long
-                if (queue_wait_cycles[0] > 8'd200) begin
-                    queue_aging[0] <= MAX_AGING;
                 end
             end
 
@@ -605,23 +606,9 @@ module global_scheduler_sq #(
                             head_idx <= 0;
                             tail_idx <= 0;
                             // Reset all dispatched flags to prevent stale state
-                            // CRITICAL FIX: Use combinational logic instead of for-loop in always block
-                            queue_dispatched[0] <= 1'b0;
-                            queue_dispatched[1] <= 1'b0;
-                            queue_dispatched[2] <= 1'b0;
-                            queue_dispatched[3] <= 1'b0;
-                            queue_dispatched[4] <= 1'b0;
-                            queue_dispatched[5] <= 1'b0;
-                            queue_dispatched[6] <= 1'b0;
-                            queue_dispatched[7] <= 1'b0;
-                            queue_dispatched[8] <= 1'b0;
-                            queue_dispatched[9] <= 1'b0;
-                            queue_dispatched[10] <= 1'b0;
-                            queue_dispatched[11] <= 1'b0;
-                            queue_dispatched[12] <= 1'b0;
-                            queue_dispatched[13] <= 1'b0;
-                            queue_dispatched[14] <= 1'b0;
-                            queue_dispatched[15] <= 1'b0;
+                            for (li_cleanup = 0; li_cleanup < QUEUE_DEPTH; li_cleanup = li_cleanup + 1) begin
+                                queue_dispatched[li_cleanup] <= 1'b0;
+                            end
                         end
                     end else begin
                         // There are valid entries but none dispatchable (all cores busy)
@@ -633,28 +620,19 @@ module global_scheduler_sq #(
 
             // CRITICAL FIX: Move cleanup OUTSIDE the dispatch block
             // This ensures cleanup happens every cycle, not just when queue_count > 0
-            // DEADLOCK FIX: Use explicit assignments instead of for-loop in always block
-            rv_cleaned <= 0;
-            if (queue_valid[0] && queue_dispatched[0]) begin queue_valid[0] <= 1'b0; rv_cleaned <= rv_cleaned + 1; end
-            if (queue_valid[1] && queue_dispatched[1]) begin queue_valid[1] <= 1'b0; rv_cleaned <= rv_cleaned + 1; end
-            if (queue_valid[2] && queue_dispatched[2]) begin queue_valid[2] <= 1'b0; rv_cleaned <= rv_cleaned + 1; end
-            if (queue_valid[3] && queue_dispatched[3]) begin queue_valid[3] <= 1'b0; rv_cleaned <= rv_cleaned + 1; end
-            if (queue_valid[4] && queue_dispatched[4]) begin queue_valid[4] <= 1'b0; rv_cleaned <= rv_cleaned + 1; end
-            if (queue_valid[5] && queue_dispatched[5]) begin queue_valid[5] <= 1'b0; rv_cleaned <= rv_cleaned + 1; end
-            if (queue_valid[6] && queue_dispatched[6]) begin queue_valid[6] <= 1'b0; rv_cleaned <= rv_cleaned + 1; end
-            if (queue_valid[7] && queue_dispatched[7]) begin queue_valid[7] <= 1'b0; rv_cleaned <= rv_cleaned + 1; end
-            if (queue_valid[8] && queue_dispatched[8]) begin queue_valid[8] <= 1'b0; rv_cleaned <= rv_cleaned + 1; end
-            if (queue_valid[9] && queue_dispatched[9]) begin queue_valid[9] <= 1'b0; rv_cleaned <= rv_cleaned + 1; end
-            if (queue_valid[10] && queue_dispatched[10]) begin queue_valid[10] <= 1'b0; rv_cleaned <= rv_cleaned + 1; end
-            if (queue_valid[11] && queue_dispatched[11]) begin queue_valid[11] <= 1'b0; rv_cleaned <= rv_cleaned + 1; end
-            if (queue_valid[12] && queue_dispatched[12]) begin queue_valid[12] <= 1'b0; rv_cleaned <= rv_cleaned + 1; end
-            if (queue_valid[13] && queue_dispatched[13]) begin queue_valid[13] <= 1'b0; rv_cleaned <= rv_cleaned + 1; end
-            if (queue_valid[14] && queue_dispatched[14]) begin queue_valid[14] <= 1'b0; rv_cleaned <= rv_cleaned + 1; end
-            if (queue_valid[15] && queue_dispatched[15]) begin queue_valid[15] <= 1'b0; rv_cleaned <= rv_cleaned + 1; end
-            if (rv_cleaned > 0) begin
+            // Use blocking for local accumulator, non-blocking for final register
+            cleaned_local = 0;
+            for (li_cleanup = 0; li_cleanup < QUEUE_DEPTH; li_cleanup = li_cleanup + 1) begin
+                if (queue_valid[li_cleanup] && queue_dispatched[li_cleanup]) begin
+                    queue_valid[li_cleanup] <= 1'b0;
+                    cleaned_local = cleaned_local + 1;
+                end
+            end
+            rv_cleaned <= cleaned_local;
+            if (cleaned_local > 0) begin
                 // Advance head_idx by the actual number of cleaned entries
                 // NOTE: queue_count already decremented on completion, so just advance head
-                head_idx <= head_idx + rv_cleaned[$clog2(QUEUE_DEPTH)-1:0];
+                head_idx <= head_idx + cleaned_local[$clog2(QUEUE_DEPTH)-1:0];
             end
             if (queue_count > max_queue_depth_seen)
                 max_queue_depth_seen <= queue_count;
@@ -663,26 +641,17 @@ module global_scheduler_sq #(
             effective_priority_g <= BASE_PRIORITY_G;
             effective_priority_a <= BASE_PRIORITY_A;
             effective_priority_n <= BASE_PRIORITY_N;
-            // DEADLOCK FIX: Use explicit checks instead of for-loop
-            if (queue_valid[0] && !queue_dispatched[0]) begin
-                ep = calc_eff_prio(queue_type[0], queue_aging[0]);
-                case (queue_type[0])
-                    TASK_GAMING: if (ep < effective_priority_g) effective_priority_g <= ep;
-                    TASK_AI:     if (ep < effective_priority_a) effective_priority_a <= ep;
-                    TASK_NPU:    if (ep < effective_priority_n) effective_priority_n <= ep;
-                    default: ;
-                endcase
+            for (li_prio = 0; li_prio < QUEUE_DEPTH; li_prio = li_prio + 1) begin
+                if (queue_valid[li_prio] && !queue_dispatched[li_prio]) begin
+                    ep = calc_eff_prio(queue_type[li_prio], queue_aging[li_prio]);
+                    case (queue_type[li_prio])
+                        TASK_GAMING: if (ep < effective_priority_g) effective_priority_g <= ep;
+                        TASK_AI:     if (ep < effective_priority_a) effective_priority_a <= ep;
+                        TASK_NPU:    if (ep < effective_priority_n) effective_priority_n <= ep;
+                        default: ;
+                    endcase
+                end
             end
-            if (queue_valid[1] && !queue_dispatched[1]) begin
-                ep = calc_eff_prio(queue_type[1], queue_aging[1]);
-                case (queue_type[1])
-                    TASK_GAMING: if (ep < effective_priority_g) effective_priority_g <= ep;
-                    TASK_AI:     if (ep < effective_priority_a) effective_priority_a <= ep;
-                    TASK_NPU:    if (ep < effective_priority_n) effective_priority_n <= ep;
-                    default: ;
-                endcase
-            end
-            // Continue for all 16 entries (truncated for brevity)
     end
 end
 

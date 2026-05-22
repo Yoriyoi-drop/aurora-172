@@ -28,11 +28,11 @@
 
 module cache_hierarchy #(
     // Use standardized parameters from aurora_global_pkg
-    parameter DATA_WIDTH        = AURORA_DATA_WIDTH,
-    parameter ADDR_WIDTH        = AURORA_ADDR_WIDTH,
-    parameter CACHE_LINE_WIDTH  = AURORA_CACHE_LINE_WIDTH,
-    parameter NUM_G_CORES       = AURORA_NUM_G_CORES,   // From package
-    parameter NUM_A_CORES       = AURORA_NUM_A_CORES   // From package
+    parameter DATA_WIDTH        = `AURORA_DATA_WIDTH,
+    parameter ADDR_WIDTH        = `AURORA_ADDR_WIDTH,
+    parameter CACHE_LINE_WIDTH  = `AURORA_CACHE_LINE_WIDTH,
+    parameter NUM_G_CORES       = `AURORA_NUM_G_CORES,   // From package
+    parameter NUM_A_CORES       = `AURORA_NUM_A_CORES   // From package
 )(
     input  wire                         clk,
     input  wire                         rst_n,
@@ -87,6 +87,12 @@ module cache_hierarchy #(
     input  wire [DATA_WIDTH-1:0]        fabric_rd_data,
     output reg [DATA_WIDTH-1:0]         fabric_wr_data,
     input  wire                         fabric_ready,
+
+    // L1 MESI state inputs (2-bit, for MESI → MOESI translation)
+    input  wire [1:0]                   g_l1_mesi_state,
+    input  wire                         g_l1_mesi_valid,
+    input  wire [1:0]                   a_l1_mesi_state,
+    input  wire                         a_l1_mesi_valid,
 
     // Cache profiler outputs
     output wire [31:0]                  profiler_total_accesses,
@@ -154,9 +160,9 @@ module cache_hierarchy #(
     wire [31:0]                   mesi_ai_prefetches_int;
     wire [31:0]                   mesi_owned_trans_int;
 
-    // Snoop forward signals
-    wire                          g_snoop_forward;
-    wire                          a_snoop_forward;
+    // Snoop forward signals (commented out — L1 doesn't have snoop_forward ports)
+    // wire                          g_snoop_forward;
+    // wire                          a_snoop_forward;
     wire                          snoop_2_forward_npu;
 
     // L2 performance counters
@@ -208,6 +214,16 @@ module cache_hierarchy #(
     // FIX v2: Fairness — alternate G-Core/A-Core L2 priority using toggle
     reg                           l2_priority_toggle;
 
+    // Connect L1 output ports to internal _int wires for L2 multiplexing
+    assign g_l2_addr_int = g_l2_addr;
+    assign g_l2_wr_data_int = g_l2_wr_data;
+    assign g_l2_rd_en_int = g_l2_rd_en;
+    assign g_l2_wr_en_int = g_l2_wr_en;
+    assign a_l2_addr_int = a_l2_addr;
+    assign a_l2_wr_data_int = a_l2_wr_data;
+    assign a_l2_rd_en_int = a_l2_rd_en;
+    assign a_l2_wr_en_int = a_l2_wr_en;
+
     // L2 arbitration constants
     localparam G_CORE_PRIORITY = 1'b0;  // G-Core has priority when toggle is 0
     localparam A_CORE_PRIORITY = 1'b1;  // A-Core has priority when toggle is 1
@@ -242,11 +258,6 @@ module cache_hierarchy #(
     reg                          bandwidth_saturated;
     
     // Request coalescing for efficiency
-    localparam COALESCE_BUFFER_SIZE = 8;
-    reg [ADDR_WIDTH-1:0]         coalesce_buffer [0:COALESCE_BUFFER_SIZE-1];
-    reg [$clog2(COALESCE_BUFFER_SIZE)-1:0] coalesce_wr_ptr;
-    reg [$clog2(COALESCE_BUFFER_SIZE)-1:0] coalesce_rd_ptr;
-    reg [31:0]                   coalesce_merged_requests;
     reg                          coalesce_active;
     
     // FIX v2: Arbitration alternates priority based on l2_priority_toggle
@@ -266,12 +277,26 @@ module cache_hierarchy #(
 
     assign l2_addr = g_wins_arb ? g_l2_addr_int : a_l2_addr_int;
     assign l2_wr_data = g_wins_arb ? g_l2_wr_data_int : a_l2_wr_data_int;
-    assign l2_rd_en = g_l2_rd_en_int | a_l2_rd_en_int;
-    assign l2_wr_en = g_l2_wr_en_int | a_l2_wr_en_int;
+    // FIX: Mux enables with arbitration (g_wins_arb) to prevent address/enable mismatch
+    assign l2_rd_en = g_wins_arb ? g_l2_rd_en_int : a_l2_rd_en_int;
+    assign l2_wr_en = g_wins_arb ? g_l2_wr_en_int : a_l2_wr_en_int;
 
-    // FIXED: L2 ready to cores based on fixed priority arbitration
-    assign g_l2_ready = l2_ready && (l2_priority_toggle == G_CORE_PRIORITY);
-    assign a_l2_ready = l2_ready && (l2_priority_toggle == A_CORE_PRIORITY);
+    // Intermediate wires for L2 ready signals (avoids multi-driver with port connections)
+    wire g_l2_ready_raw, a_l2_ready_raw;
+    
+    // CRITICAL FIX: Pipeline register untuk memutus combinational ready/arbitration loop
+    reg g_l2_ready_reg, a_l2_ready_reg;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            g_l2_ready_reg <= 1'b0;
+            a_l2_ready_reg <= 1'b0;
+        end else begin
+            g_l2_ready_reg <= g_l2_ready_raw && g_wins_arb;
+            a_l2_ready_reg <= a_l2_ready_raw && !g_wins_arb;
+        end
+    end
+    assign g_l2_ready = g_l2_ready_reg;
+    assign a_l2_ready = a_l2_ready_reg;
     
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -298,12 +323,14 @@ module cache_hierarchy #(
             utilization_percent <= 8'd0;
             bandwidth_saturated <= 1'b0;
             
-            coalesce_wr_ptr <= {$clog2(COALESCE_BUFFER_SIZE){1'b0}};
-            coalesce_rd_ptr <= {$clog2(COALESCE_BUFFER_SIZE){1'b0}};
-            coalesce_merged_requests <= 32'b0;
             coalesce_active <= 1'b0;
         end else begin
             // ADVANCED: Memory Bandwidth Optimization Logic
+            
+            // Fairness: toggle priority every 4 requests to prevent starvation
+            if (g_l2_rd_en_int || g_l2_wr_en_int || a_l2_rd_en_int || a_l2_wr_en_int) begin
+                l2_priority_toggle <= ~l2_priority_toggle;
+            end
             
             // Update access pattern learning
             if (g_l2_rd_en_int || g_l2_wr_en_int) begin
@@ -324,9 +351,9 @@ module cache_hierarchy #(
             update_bandwidth_monitoring();
             
             // Adaptive priority adjustment based on bandwidth saturation
+            // (Priority toggles every request; saturation just triggers logging)
             if (bandwidth_saturated) begin
-                // Switch to round-robin when saturated
-                l2_priority_toggle <= ~l2_priority_toggle;
+                // Bandwidth saturation detected — log for performance monitoring
             end
         end
     end
@@ -428,7 +455,6 @@ module cache_hierarchy #(
             // Simple coalescing logic - merge requests to same cache line
             if ((g_l2_rd_en_int || a_l2_rd_en_int) && !coalesce_active) begin
                 coalesce_active <= 1'b1;
-                coalesce_merged_requests <= coalesce_merged_requests + 1;
             end else if (!l2_ready) begin
                 coalesce_active <= 1'b0;
             end
@@ -466,8 +492,8 @@ module cache_hierarchy #(
         .DATA_WIDTH(DATA_WIDTH),
         .ADDR_WIDTH(ADDR_WIDTH),
         .CACHE_SIZE(8 * 1024 * 1024),
-        .ASSOCIATIVITY(AURORA_ASSOCIATIVITY),  // FIXED: Use standard parameter
-        .LINE_SIZE(512),  // FIX: Use DATA_WIDTH instead of 64
+        .ASSOCIATIVITY(`AURORA_ASSOCIATIVITY),  // FIXED: Use standard parameter
+        .LINE_SIZE(64),   // CRITICAL FIX: 64 bytes true line size (DATA_WIDTH=512 bit = 64 byte)
         .NUM_L1_PORTS(2)
     ) u_l2_cache (
         .clk(clk),
@@ -480,7 +506,7 @@ module cache_hierarchy #(
         .l1_0_rd_en(g_l2_rd_en_int),
         .l1_0_wr_en(g_l2_wr_en_int),
         .l1_0_rd_data(g_l2_rd_data),
-        .l1_0_ready(g_l2_ready),
+        .l1_0_ready(g_l2_ready_raw),
 
         // L1 port 1: A-Core
         .l1_1_addr(a_l2_addr_int),
@@ -488,7 +514,7 @@ module cache_hierarchy #(
         .l1_1_rd_en(a_l2_rd_en_int),
         .l1_1_wr_en(a_l2_wr_en_int),
         .l1_1_rd_data(a_l2_rd_data),
-        .l1_1_ready(a_l2_ready),
+        .l1_1_ready(a_l2_ready_raw),
 
         // L1 port 2: NPU (unused for now)
         .l1_2_addr({ADDR_WIDTH{1'b0}}),
@@ -527,6 +553,29 @@ module cache_hierarchy #(
     wire [2:0]  g_l1_state_out, a_l1_state_out, npu_l1_state_out;
     wire        g_l1_valid_out, a_l1_valid_out, npu_l1_valid_out;
 
+    // FIX: 2-bit MESI to 3-bit MOESI translation
+    function automatic [2:0] mesii2moesi;
+        input [1:0] s;
+        begin
+            case (s)
+                2'b00: mesii2moesi = 3'b000;  // INVALID
+                2'b01: mesii2moesi = 3'b001;  // MODIFIED
+                2'b10: mesii2moesi = 3'b011;  // EXCLUSIVE
+                2'b11: mesii2moesi = 3'b100;  // SHARED
+                default: mesii2moesi = 3'b000;
+            endcase
+        end
+    endfunction
+
+    always_comb begin
+        g_l1_state_out = g_l1_mesi_valid ? mesii2moesi(g_l1_mesi_state) : 3'b000;
+        a_l1_state_out = a_l1_mesi_valid ? mesii2moesi(a_l1_mesi_state) : 3'b000;
+        npu_l1_state_out = 3'b000;
+        g_l1_valid_out = g_l1_mesi_valid;
+        a_l1_valid_out = a_l1_mesi_valid;
+        npu_l1_valid_out = 1'b0;
+    end
+
     mesi_controller #(
         .ADDR_WIDTH(ADDR_WIDTH),
         .NUM_CACHES(2),
@@ -548,7 +597,7 @@ module cache_hierarchy #(
         .snoop_0_addr(mesi_snoop_0_addr),
         .snoop_0_invalidate(g_snoop_invalidate),
         .snoop_0_update(g_snoop_update),
-        .snoop_0_forward(g_snoop_forward),
+        // .snoop_0_forward(g_snoop_forward),  // L1 doesn't have snoop_forward port
         .snoop_0_state(g_l1_state_out),
         .snoop_0_valid(g_l1_valid_out),
 
@@ -556,7 +605,7 @@ module cache_hierarchy #(
         .snoop_1_addr(mesi_snoop_1_addr),
         .snoop_1_invalidate(a_snoop_invalidate),
         .snoop_1_update(a_snoop_update),
-        .snoop_1_forward(a_snoop_forward),
+        // .snoop_1_forward(a_snoop_forward),  // L1 doesn't have snoop_forward port
         .snoop_1_state(a_l1_state_out),
         .snoop_1_valid(a_l1_valid_out),
 
@@ -580,10 +629,10 @@ module cache_hierarchy #(
         .upgrades_sent(mesi_upgrades),
         .writebacks_forced(mesi_writebacks),
         .shared_grants(mesi_shared_grants),
-        .forwards_served(mesi_forwards_served),
-        .gaming_priority_hits(mesi_gaming_hits),
-        .ai_bulk_prefetches(mesi_ai_prefetches),
-        .owned_transitions(mesi_owned_trans)
+        .forwards_served(mesi_forwards_served_int),
+        .gaming_priority_hits(mesi_gaming_hits_int),
+        .ai_bulk_prefetches(mesi_ai_prefetches_int),
+        .owned_transitions(mesi_owned_trans_int)
     );
 
     // =========================================================================
@@ -595,15 +644,15 @@ module cache_hierarchy #(
     wire [31:0] l1_writebacks_tieoff [0:1];
     wire [31:0] l1_invalidations_tieoff [0:1];
     
-    // Initialize tieoff arrays
-    assign l1_hits_tieoff[0] = 32'd0;
-    assign l1_hits_tieoff[1] = 32'd0;
-    assign l1_misses_tieoff[0] = 32'd0;
-    assign l1_misses_tieoff[1] = 32'd0;
-    assign l1_writebacks_tieoff[0] = 32'd0;
-    assign l1_writebacks_tieoff[1] = 32'd0;
-    assign l1_invalidations_tieoff[0] = 32'd0;
-    assign l1_invalidations_tieoff[1] = 32'd0;
+    // Initialize tieoff arrays dengan actual L1 signals
+    assign l1_hits_tieoff[0] = g_l1_hits;
+    assign l1_hits_tieoff[1] = a_l1_hits;
+    assign l1_misses_tieoff[0] = g_l1_misses;
+    assign l1_misses_tieoff[1] = a_l1_misses;
+    assign l1_writebacks_tieoff[0] = g_l1_writebacks;
+    assign l1_writebacks_tieoff[1] = a_l1_writebacks;
+    assign l1_invalidations_tieoff[0] = g_l1_invalidations;
+    assign l1_invalidations_tieoff[1] = a_l1_invalidations;
     
     cache_profiler #(
         .ADDR_WIDTH(ADDR_WIDTH),

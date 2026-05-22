@@ -27,8 +27,8 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module noc_router #(
-    parameter DATA_WIDTH    = AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
-    parameter ADDR_WIDTH    = AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
+    parameter DATA_WIDTH    = `AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
+    parameter ADDR_WIDTH    = `AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
     parameter VC_COUNT      = 2,    // OPTIMIZED: 4->2 (simpler VCs)
     parameter BUFFER_DEPTH  = 16,   // OPTIMIZED: 32->16 (smaller buffers)
     parameter ROUTER_X      = 0,
@@ -182,7 +182,7 @@ module noc_router #(
     // =========================================================================
     reg [7:0] credit_count [0:5];  // FIX: 6 ports (include PORT_NONE for safety)
     // Use single source of truth for credit initialization
-    localparam CREDIT_INIT = AURORA_CREDIT_INITIAL;  // Single source of truth
+    localparam CREDIT_INIT = `AURORA_CREDIT_INITIAL;  // Single source of truth
     
     // DEADLOCK FIX: HOL prevention metrics (declared as output ports above)
 
@@ -327,7 +327,7 @@ module noc_router #(
             // ─────────────────────────────────────────────────
             begin : n_input_block
                 reg [1:0] vc_masked;
-                vc_masked = n_data_in[3:2] & (VC_COUNT - 1);
+                vc_masked = (n_data_in[3:2] < VC_COUNT) ? n_data_in[3:2] : (VC_COUNT-1);
                 if (n_valid_in && n_ready_in && !is_buffer_full(PORT_NORTH, vc_masked)) begin
                     input_buf[PORT_NORTH][vc_masked][input_buf_wr_ptr[PORT_NORTH][vc_masked]] <= n_data_in;
                     input_buf_wr_ptr[PORT_NORTH][vc_masked] <= input_buf_wr_ptr[PORT_NORTH][vc_masked] + 1;
@@ -340,7 +340,7 @@ module noc_router #(
             // ─────────────────────────────────────────────────
             begin : s_input_block
                 reg [1:0] vc_masked;
-                vc_masked = s_data_in[3:2] & (VC_COUNT - 1);
+                vc_masked = (s_data_in[3:2] < VC_COUNT) ? s_data_in[3:2] : (VC_COUNT-1);
                 if (s_valid_in && s_ready_in && !is_buffer_full(PORT_SOUTH, vc_masked)) begin
                     input_buf[PORT_SOUTH][vc_masked][input_buf_wr_ptr[PORT_SOUTH][vc_masked]] <= s_data_in;
                     input_buf_wr_ptr[PORT_SOUTH][vc_masked] <= input_buf_wr_ptr[PORT_SOUTH][vc_masked] + 1;
@@ -353,7 +353,7 @@ module noc_router #(
             // ─────────────────────────────────────────────────
             begin : e_input_block
                 reg [1:0] vc_masked;
-                vc_masked = e_data_in[3:2] & (VC_COUNT - 1);
+                vc_masked = (e_data_in[3:2] < VC_COUNT) ? e_data_in[3:2] : (VC_COUNT-1);
                 if (e_valid_in && e_ready_in && !is_buffer_full(PORT_EAST, vc_masked)) begin
                     input_buf[PORT_EAST][vc_masked][input_buf_wr_ptr[PORT_EAST][vc_masked]] <= e_data_in;
                     input_buf_wr_ptr[PORT_EAST][vc_masked] <= input_buf_wr_ptr[PORT_EAST][vc_masked] + 1;
@@ -366,7 +366,7 @@ module noc_router #(
             // ─────────────────────────────────────────────────
             begin : w_input_block
                 reg [1:0] vc_masked;
-                vc_masked = w_data_in[3:2] & (VC_COUNT - 1);
+                vc_masked = (w_data_in[3:2] < VC_COUNT) ? w_data_in[3:2] : (VC_COUNT-1);
                 if (w_valid_in && w_ready_in && !is_buffer_full(PORT_WEST, vc_masked)) begin
                     input_buf[PORT_WEST][vc_masked][input_buf_wr_ptr[PORT_WEST][vc_masked]] <= w_data_in;
                     input_buf_wr_ptr[PORT_WEST][vc_masked] <= input_buf_wr_ptr[PORT_WEST][vc_masked] + 1;
@@ -382,7 +382,7 @@ module noc_router #(
             // ─────────────────────────────────────────────────
             begin : local_input_block
                 reg [1:0] vc_masked;
-                vc_masked = local_vc & (VC_COUNT - 1);
+                vc_masked = (local_vc < VC_COUNT) ? local_vc : (VC_COUNT-1);
             if (local_valid && local_ready && !is_buffer_full(PORT_LOCAL, vc_masked)) begin
                 // Pack addr into upper bits of data (data is 128-bit, addr is 48-bit)
                 // Use upper 48 bits for addr, lower 80 bits for data
@@ -439,7 +439,8 @@ module noc_router #(
 
             // ─────────────────────────────────────────────────
             // FIX v2: Response path for MSG_RESP type packets
-            // CRITICAL FIX #4: Add backpressure - reject MSG_RESP when resp buffer near full
+            // CRITICAL FIX #4: Add backpressure - reject new responses when resp buffer near full
+            // CRITICAL FIX #5: Arbitration to prevent multiple ports writing same cycle (N>S>E>W)
             // When a response packet arrives, buffer it for local consumption
             // ─────────────────────────────────────────────────
             // Backpressure threshold: reject new responses when buffer > 75% full
@@ -448,25 +449,23 @@ module noc_router #(
                 resp_wr_ptr[PORT_LOCAL] <= (resp_wr_ptr[PORT_LOCAL] == (BUFFER_DEPTH - 1)) ?
                                             8'h0 : resp_wr_ptr[PORT_LOCAL] + 1;
                 resp_count[PORT_LOCAL] <= resp_count[PORT_LOCAL] + 1;
-            end
-            if (s_valid_in && s_data_in[7:4] == MSG_RESP && resp_count[PORT_LOCAL] < (BUFFER_DEPTH * 3 / 4)) begin
+            end else if (s_valid_in && s_data_in[7:4] == MSG_RESP && resp_count[PORT_LOCAL] < (BUFFER_DEPTH * 3 / 4)) begin
                 resp_buf[PORT_LOCAL][resp_wr_ptr[PORT_LOCAL]] <= s_data_in;
                 resp_wr_ptr[PORT_LOCAL] <= (resp_wr_ptr[PORT_LOCAL] == (BUFFER_DEPTH - 1)) ?
                                             8'h0 : resp_wr_ptr[PORT_LOCAL] + 1;
                 resp_count[PORT_LOCAL] <= resp_count[PORT_LOCAL] + 1;
-            end
-            if (e_valid_in && e_data_in[7:4] == MSG_RESP && resp_count[PORT_LOCAL] < (BUFFER_DEPTH * 3 / 4)) begin
+            end else if (e_valid_in && e_data_in[7:4] == MSG_RESP && resp_count[PORT_LOCAL] < (BUFFER_DEPTH * 3 / 4)) begin
                 resp_buf[PORT_LOCAL][resp_wr_ptr[PORT_LOCAL]] <= e_data_in;
                 resp_wr_ptr[PORT_LOCAL] <= (resp_wr_ptr[PORT_LOCAL] == (BUFFER_DEPTH - 1)) ?
                                             8'h0 : resp_wr_ptr[PORT_LOCAL] + 1;
                 resp_count[PORT_LOCAL] <= resp_count[PORT_LOCAL] + 1;
-            end
-            if (w_valid_in && w_data_in[7:4] == MSG_RESP && resp_count[PORT_LOCAL] < (BUFFER_DEPTH * 3 / 4)) begin
+            end else if (w_valid_in && w_data_in[7:4] == MSG_RESP && resp_count[PORT_LOCAL] < (BUFFER_DEPTH * 3 / 4)) begin
                 resp_buf[PORT_LOCAL][resp_wr_ptr[PORT_LOCAL]] <= w_data_in;
                 resp_wr_ptr[PORT_LOCAL] <= (resp_wr_ptr[PORT_LOCAL] == (BUFFER_DEPTH - 1)) ?
                                             8'h0 : resp_wr_ptr[PORT_LOCAL] + 1;
                 resp_count[PORT_LOCAL] <= resp_count[PORT_LOCAL] + 1;
             end
+
 
             // ─────────────────────────────────────────────────
             // DEADLOCK FIX: Age tracking and HOL prevention
@@ -523,11 +522,12 @@ module noc_router #(
     // =========================================================================
     // Ready signals (credit-based)
     // =========================================================================
-    assign n_ready_in = !is_buffer_full(PORT_NORTH, 0);
-    assign s_ready_in = !is_buffer_full(PORT_SOUTH, 0);
-    assign e_ready_in = !is_buffer_full(PORT_EAST, 0);
-    assign w_ready_in = !is_buffer_full(PORT_WEST, 0);
-    assign local_ready = !is_buffer_full(PORT_LOCAL, 0);
+    // Ready signals: check specific VC from incoming data (per-VC flow control)
+    assign n_ready_in = !is_buffer_full(PORT_NORTH, (n_data_in[3:2] < VC_COUNT) ? n_data_in[3:2] : (VC_COUNT-1));
+    assign s_ready_in = !is_buffer_full(PORT_SOUTH, (s_data_in[3:2] < VC_COUNT) ? s_data_in[3:2] : (VC_COUNT-1));
+    assign e_ready_in = !is_buffer_full(PORT_EAST, (e_data_in[3:2] < VC_COUNT) ? e_data_in[3:2] : (VC_COUNT-1));
+    assign w_ready_in = !is_buffer_full(PORT_WEST, (w_data_in[3:2] < VC_COUNT) ? w_data_in[3:2] : (VC_COUNT-1));
+    assign local_ready = !is_buffer_full(PORT_LOCAL, (local_vc < VC_COUNT) ? local_vc : (VC_COUNT-1));
 
     // =========================================================================
     // Main routing state machine
@@ -750,8 +750,8 @@ module noc_router #(
                 // S_COMPLETE: Return credit to input port
                 // ─────────────────────────────────────────────────
                 S_COMPLETE: begin
-                    // Return credit to input port (flow control)
-                    credit_count[current_in_port] <= credit_count[current_in_port] + 1;
+                    // Return credit to output port (downstream consumed the flit)
+                    credit_count[current_out_port] <= credit_count[current_out_port] + 1;
 
                     current_out_port <= PORT_NONE;
                     current_in_port <= PORT_NONE;
@@ -775,8 +775,8 @@ module noc_router #(
         if (rst_n) begin
             integer port;
             for (port = 0; port < 5; port = port + 1) begin
-                if ($signed(credit_count[port]) < 0) begin
-                    $error("[%0t] [NoC-ROUTER] BUG: Negative credit count at port %0d: %0d", 
+                if (credit_count[port] == 8'd0) begin
+                    $error("[%0t] [NoC-ROUTER] BUG: Credit underflow at port %0d: %0d", 
                           $time, port, credit_count[port]);
                 end
             end

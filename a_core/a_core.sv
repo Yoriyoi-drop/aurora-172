@@ -174,6 +174,7 @@ module a_core #(
 
     // MAC unit (multiply-accumulate)
     reg signed [63:0]       mac_accum;
+    reg signed [31:0]       mean_val;
     reg signed [31:0]       mac_a_reg;
     reg signed [31:0]       mac_b_reg;
 
@@ -307,6 +308,7 @@ module a_core #(
     reg [3:0]               state;
     reg [3:0]               state_prev;  // DEBUG: Track previous state
     reg [3:0]               next_compute_state;  // Untuk COMPUTE_INIT transition
+    reg [3:0]               next_state_after_bubble;  // For PIPE_BUBBLE transition (Issue B)
     reg [6:0]               result_wait_timeout;  // FIX #3: Timeout counter untuk RESULT_WAIT
 
     // OPTIMIZED: Parallel Processing Units
@@ -343,6 +345,8 @@ module a_core #(
     localparam STORE_RESULT = 4'b1000;
     localparam RESULT_WAIT  = 4'b1001;  // 1 cycle delay sebelum result_valid
     localparam COMPUTE_INIT = 4'b1010;  // Generic init untuk POOL/ACTIVATE/NORMALIZE
+    localparam DRAIN_FIFO   = 4'b1011;  // Drain FIFO before reset (Issue A)
+    localparam PIPE_BUBBLE  = 4'b1100;  // Pipeline bubble for race condition fix (Issue B)
 
     // State machine deadlock detection
     reg [15:0] state_stuck_counter;
@@ -530,7 +534,7 @@ module a_core #(
             state_prev <= state;
             
             // DEADLOCK DETECTION: Check if state machine is stuck
-            if (state == state_prev) begin
+            if (state != IDLE && state == state_prev) begin
                 state_stuck_counter <= state_stuck_counter + 1;
                 if (state_stuck_counter == 0)  // First cycle stuck
                     state_when_stuck <= state;
@@ -557,20 +561,19 @@ module a_core #(
                             mac_ops_complete <= 1'b0;
                             complete_reg <= 1'b0;
                             
-                            // Emergency FIFO reset
-                            result_fifo_head <= 0;
-                            result_fifo_tail <= 0;
-                            result_fifo_count <= 0;
-                            result_fifo_full <= 1'b0;
-                            result_fifo_empty <= 1'b1;
-                            fifo_occupancy <= 4'b0;
-                            
                             // Reset backpressure counter
                             backpressure_counter <= 8'd0;
                             
-                            // Tetap di IDLE tapi dengan kondisi reset
-                            state <= IDLE;
+                            // FIX Issue A: Instead of hard resetting FIFO (which drops data),
+                            // transition to DRAIN_FIFO to drain entries safely first
+                            if (result_fifo_count > 0) begin
+                                state <= DRAIN_FIFO;
+                            end else begin
+                                // FIFO already empty, safe to stay in IDLE
+                                state <= IDLE;
+                            end
                         end
+                        DRAIN_FIFO, PIPE_BUBBLE: state <= IDLE;
                         default: state <= IDLE;
                     endcase
                 end
@@ -691,7 +694,7 @@ module a_core #(
                         // Command received
 
                         // Seed MAC dengan hash dari addr+data
-                        mac_accum <= {32'b0, cmd_addr[31:0]} ^ cmd_data;
+                        mac_accum <= {32'b0, cmd_addr[31:0]} ^ cmd_data[63:0];
 
                         // Save opcode untuk digunakan di state lain
                         saved_opcode <= cmd_data[63:56];
@@ -719,8 +722,8 @@ module a_core #(
                                 matrix_c[60] <= 32'sb0; matrix_c[61] <= 32'sb0; matrix_c[62] <= 32'sb0; matrix_c[63] <= 32'sb0;
                                 
                                 // Initialize parallel processing units (4 units)
-                                mac_parallel_units[0] <= 64'b0; mac_parallel_units[1] <= 64'b0; 
-                                mac_parallel_units[2] <= 64'b0; mac_parallel_units[3] <= 64'b0;
+                                mac_parallel_units[0] <= {DATA_WIDTH{1'b0}}; mac_parallel_units[1] <= {DATA_WIDTH{1'b0}}; 
+                                mac_parallel_units[2] <= {DATA_WIDTH{1'b0}}; mac_parallel_units[3] <= {DATA_WIDTH{1'b0}};
                                 parallel_unit_active <= 2'b11;  // Activate all 4 units
                                 parallel_stage_counter <= 3'b0;
                                 
@@ -1310,11 +1313,8 @@ module a_core #(
                             // === PARALLEL SIMD PROCESSING ===
                             // Process 4 elements simultaneously using 4 parallel MAC units
                             0: begin
-                                // Initialize 4 parallel MAC units for 4 rows
-                                mac_parallel_units[0] <= $signed(matrix_a[0]) * $signed(matrix_b[0]);    // C[0], row 0, col 0
-                                mac_parallel_units[1] <= $signed(matrix_a[4]) * $signed(matrix_b[0]);    // C[4], row 1, col 0
-                                mac_parallel_units[2] <= $signed(matrix_a[8]) * $signed(matrix_b[0]);    // C[8], row 2, col 0
-                                mac_parallel_units[3] <= $signed(matrix_a[12]) * $signed(matrix_b[0]);   // C[12], row 3, col 0
+                                // Initialize MAC with first product term for C[0]
+                                mac_accum <= $signed(matrix_a[0]) * $signed(matrix_b[0]);    // C[0], first term
                                 parallel_stage_counter <= 3'b1;
                                 stage_counter <= 6'd1;
                             end
@@ -1442,13 +1442,15 @@ module a_core #(
                                         // Keep at 63 to stay in default case until final_stage_counter completes
                                     end else begin
                                         // Completed all 40 cycles (39 + 1 final) - OPTIMIZED
-                                        $display("[%0t] [A-CORE#%0d] MAC: Stage 39 complete - transitioning to STORE_RESULT (target=%0d)", $time, CORE_ID, a_exec_target_cycles);
+                                        $display("[%0t] [A-CORE#%0d] MAC: Stage 39 complete - transitioning through PIPE_BUBBLE (target=%0d)", $time, CORE_ID, a_exec_target_cycles);
                                         final_stage_counter <= 5'h0;  // Reset for next operation
                                         mac_ops_complete <= 1'b0;  // Reset flag
                                         stage_counter <= 6'b0;
                                         a_exec_counter <= 0;
                                         a_pipeline_stage_detail <= 4'd0;
-                                        state <= STORE_RESULT; 
+                                        // FIX Issue B: Insert pipeline bubble to prevent race on matrix_c[]
+                                        next_state_after_bubble <= STORE_RESULT;
+                                        state <= PIPE_BUBBLE; 
                                     end
                                 end else begin
                                     // Normal MAC computation - should not reach here
@@ -1457,7 +1459,9 @@ module a_core #(
                                     stage_counter <= 6'b0;
                                     a_exec_counter <= 0;
                                     a_pipeline_stage_detail <= 4'd0;
-                                    state <= STORE_RESULT;
+                                    // FIX Issue B: Insert pipeline bubble to prevent race on matrix_c[]
+                                    next_state_after_bubble <= STORE_RESULT;
+                                    state <= PIPE_BUBBLE;
                                 end
                             end
                         endcase
@@ -1541,35 +1545,35 @@ module a_core #(
                             12: begin mac_accum <= mac_accum + $signed(matrix_c[12]); stage_counter <= 6'd13; end
                             13: begin mac_accum <= mac_accum + $signed(matrix_c[13]); stage_counter <= 6'd14; end
                             14: begin mac_accum <= mac_accum + $signed(matrix_c[14]); stage_counter <= 6'd15; end
-                            15: begin
-                                // Compute mean = sum / 16 (shift right by 4)
-                                mac_accum <= mac_accum + $signed(matrix_c[15]);
-                                matrix_c[0] <= mac_accum[35:4];  // Store mean in matrix_c[0] temporarily
-                                stage_counter <= 6'd16;
+                                15: begin
+                                    // Compute mean = sum / 16 (shift right by 4)
+                                    mac_accum <= mac_accum + $signed(matrix_c[15]);
+                                    stage_counter <= 6'd16;
+                                    // mean_val updated next cycle via separate logic
                             end
                             // Phase 2: Normalize all 16 elements using mean
                             // Simplified: just subtract mean (variance computation would need more cycles)
                             16: begin
-                                matrix_c[0]  <= matrix_c[0] - matrix_c[0];  // c[0] is mean, so becomes 0
-                                matrix_c[1]  <= matrix_c[1]  - matrix_c[0];
+                                mean_val <= mac_accum[35:4];
+                                matrix_c[0]  <= matrix_c[0]  - mean_val;
+                                matrix_c[1]  <= matrix_c[1]  - mean_val;
                                 stage_counter <= 6'd17;
                             end
-                            17: begin matrix_c[2]  <= matrix_c[2]  - matrix_c[0];  stage_counter <= 6'd18; end
-                            18: begin matrix_c[3]  <= matrix_c[3]  - matrix_c[0];  stage_counter <= 6'd19; end
-                            19: begin matrix_c[4]  <= matrix_c[4]  - matrix_c[0];  stage_counter <= 6'd20; end
-                            20: begin matrix_c[5]  <= matrix_c[5]  - matrix_c[0];  stage_counter <= 6'd21; end
-                            21: begin matrix_c[6]  <= matrix_c[6]  - matrix_c[0];  stage_counter <= 6'd22; end
-                            22: begin matrix_c[7]  <= matrix_c[7]  - matrix_c[0];  stage_counter <= 6'd23; end
-                            23: begin matrix_c[8]  <= matrix_c[8]  - matrix_c[0];  stage_counter <= 6'd24; end
-                            24: begin matrix_c[9]  <= matrix_c[9]  - matrix_c[0];  stage_counter <= 6'd25; end
-                            25: begin matrix_c[10] <= matrix_c[10] - matrix_c[0];  stage_counter <= 6'd26; end
-                            26: begin matrix_c[11] <= matrix_c[11] - matrix_c[0];  stage_counter <= 6'd27; end
-                            27: begin matrix_c[12] <= matrix_c[12] - matrix_c[0];  stage_counter <= 6'd28; end
-                            28: begin matrix_c[13] <= matrix_c[13] - matrix_c[0];  stage_counter <= 6'd29; end
-                            29: begin matrix_c[14] <= matrix_c[14] - matrix_c[0];  stage_counter <= 6'd30; end
+                            17: begin matrix_c[2]  <= matrix_c[2]  - mean_val;  stage_counter <= 6'd18; end
+                            18: begin matrix_c[3]  <= matrix_c[3]  - mean_val;  stage_counter <= 6'd19; end
+                            19: begin matrix_c[4]  <= matrix_c[4]  - mean_val;  stage_counter <= 6'd20; end
+                            20: begin matrix_c[5]  <= matrix_c[5]  - mean_val;  stage_counter <= 6'd21; end
+                            21: begin matrix_c[6]  <= matrix_c[6]  - mean_val;  stage_counter <= 6'd22; end
+                            22: begin matrix_c[7]  <= matrix_c[7]  - mean_val;  stage_counter <= 6'd23; end
+                            23: begin matrix_c[8]  <= matrix_c[8]  - mean_val;  stage_counter <= 6'd24; end
+                            24: begin matrix_c[9]  <= matrix_c[9]  - mean_val;  stage_counter <= 6'd25; end
+                            25: begin matrix_c[10] <= matrix_c[10] - mean_val;  stage_counter <= 6'd26; end
+                            26: begin matrix_c[11] <= matrix_c[11] - mean_val;  stage_counter <= 6'd27; end
+                            27: begin matrix_c[12] <= matrix_c[12] - mean_val;  stage_counter <= 6'd28; end
+                            28: begin matrix_c[13] <= matrix_c[13] - mean_val;  stage_counter <= 6'd29; end
+                            29: begin matrix_c[14] <= matrix_c[14] - mean_val;  stage_counter <= 6'd30; end
                             30: begin
-                                matrix_c[15] <= matrix_c[15] - matrix_c[0];
-                                matrix_c[0]  <= 32'sb0;  // Clear mean placeholder
+                                matrix_c[15] <= matrix_c[15] - mean_val;
                                 stage_counter <= 6'b0;
                                 state <= STORE_RESULT;
                             end
@@ -1667,6 +1671,36 @@ module a_core #(
                             state <= IDLE;
                         end
                     endcase
+                end
+
+                // ─────────────────────────────────────────────────
+                // DRAIN_FIFO: Drain FIFO entries safely before reset (Issue A)
+                // Pops one entry per cycle until empty, then resets and returns to IDLE
+                // ─────────────────────────────────────────────────
+                DRAIN_FIFO: begin
+                    if (result_fifo_count > 0) begin
+                        // Pop one entry
+                        result_fifo_head <= (result_fifo_head == (RESULT_FIFO_DEPTH-1)) ? 0 : result_fifo_head + 1;
+                        result_fifo_count <= result_fifo_count - 1;
+                        result_fifo_full <= 1'b0;
+                        result_fifo_empty <= (result_fifo_count - 1 == 0);
+                        state <= DRAIN_FIFO;
+                    end else begin
+                        // FIFO empty, now safe to reset backpressure/warning flags
+                        cmd_ready <= 1'b1;
+                        fifo_full_warn <= 1'b0;
+                        backpressure_counter <= 8'd0;
+                        state <= IDLE;
+                    end
+                end
+
+                // ─────────────────────────────────────────────────
+                // PIPE_BUBBLE: 1-cycle pipeline bubble between MAC_COMPUTE and next state
+                // Prevents race condition where matrix_c[] writes in MAC_COMPUTE
+                // are read in the same cycle by ACTIVATE/NORMALIZE/POOL/STORE_RESULT
+                // ─────────────────────────────────────────────────
+                PIPE_BUBBLE: begin
+                    state <= next_state_after_bubble;
                 end
 
                 // RESULT_WAIT sudah dihandle di atas - ini untuk backward compatibility

@@ -35,7 +35,9 @@ module l2_cache #(
     parameter NUM_L1_PORTS  = 2               // G-Core, A-Core only
 )(
     input  wire                         clk,
+    /* verilator lint_off UNUSED */
     input  wire                         rst_n,
+    /* verilator lint_on UNUSED */
     input  wire                         rst_n_sync,  // Synchronized reset from top level
 
     // L1 port 0: G-Core interface
@@ -220,12 +222,12 @@ module l2_cache #(
 
     function automatic integer find_victim_cache;
         input [TAG_WIDTH-1:0] t;
-        integer v;
+        integer v_idx;
         begin
             find_victim_cache = -1;
-            for (v = 0; v < 4; v = v + 1) begin
-                if (victim_valid[v] && victim_tags[v] == t) begin
-                    find_victim_cache = v;
+            for (v_idx = 0; v_idx < 4; v_idx = v_idx + 1) begin
+                if (victim_valid[v_idx] && victim_tags[v_idx] == t) begin
+                    find_victim_cache = v_idx;
                 end
             end
         end
@@ -233,16 +235,16 @@ module l2_cache #(
 
     // FIX v2: Find LRU victim cache entry using per-entry timestamp
     function automatic integer find_victim_cache_lru;
-        integer v;
+        integer v_idx;
         int oldest_v;
         int oldest_ts;
         begin
             oldest_v = 0;
             oldest_ts = victim_timestamp[0];
-            for (v = 1; v < 4; v = v + 1) begin
-                if (victim_timestamp[v] < oldest_ts) begin
-                    oldest_ts = victim_timestamp[v];
-                    oldest_v = v;
+            for (v_idx = 1; v_idx < 4; v_idx = v_idx + 1) begin
+                if (victim_timestamp[v_idx] < oldest_ts) begin
+                    oldest_ts = victim_timestamp[v_idx];
+                    oldest_v = v_idx;
                 end
             end
             find_victim_cache_lru = oldest_v;
@@ -309,6 +311,7 @@ module l2_cache #(
             mem_rd_en <= 1'b0;
             mem_wr_en <= 1'b0;
             mem_addr <= {ADDR_WIDTH{1'b0}};  // FIX: Initialize mem_addr to prevent multi-driver
+            current_is_write <= 1'b0;
             snoop_invalidate <= 1'b0;
             snoop_update <= 1'b0;
             l2_hits <= 32'h0;
@@ -343,26 +346,29 @@ module l2_cache #(
             // FIX v2: Increment LRU age counter for timestamp-based replacement
             lru_age_counter <= lru_age_counter + 1;
             
-            // DEADLOCK FIX: Enhanced write buffer management with atomic operations
-            // Process write buffer when memory is ready and no new writes are pending
-            if (write_buffer_count > 0 && mem_ready && !mem_wr_en && !current_is_write) begin
-                mem_wr_en <= 1'b1;
-                mem_rd_en <= 1'b0;
-                // FIX: Use separate write buffer address to avoid multi-driver conflict
-                mem_addr <= write_buffer_addr[write_buffer_head];
-                mem_wr_data <= write_buffer_data[write_buffer_head];
-                
-                // Remove processed write from buffer atomically
-                write_buffer_valid[write_buffer_head] <= 1'b0;
-                write_buffer_data[write_buffer_head] <= {LINE_SIZE{1'b0}};
-                write_buffer_addr[write_buffer_head] <= {ADDR_WIDTH{1'b0}};
-                write_buffer_head <= write_buffer_head + 1;
-                write_buffer_count <= write_buffer_count - 1;
-                write_buffer_full <= 1'b0;
-                
-                $display("[%0t] [L2-CACHE] Write buffer processed: count=%0d", $time, write_buffer_count - 1);
+            // FIX: Write buffer handshake — properly sequenced to avoid mem_wr_en override
+            // Non-blocking eval order: this block runs BEFORE case(state), so S_IDLE default
+            // would override mem_wr_en. Fix: manage set/clear within this block only.
+            if (state == S_IDLE && !current_is_write) begin
+                if (mem_wr_en && mem_ready) begin
+                    // Previous write completed — advance buffer and clear enable
+                    write_buffer_valid[write_buffer_head] <= 1'b0;
+                    write_buffer_data[write_buffer_head] <= {LINE_SIZE{1'b0}};
+                    write_buffer_addr[write_buffer_head] <= {ADDR_WIDTH{1'b0}};
+                    write_buffer_head <= write_buffer_head + 1;
+                    write_buffer_count <= write_buffer_count - 1;
+                    write_buffer_full <= 1'b0;
+                    mem_wr_en <= 1'b0;
+                    $display("[%0t] [L2-CACHE] Write buffer processed: count=%0d", $time, write_buffer_count - 1);
+                end else if (write_buffer_count > 0 && !mem_wr_en && mem_ready) begin
+                    // Start new write from buffer
+                    mem_wr_en <= 1'b1;
+                    mem_rd_en <= 1'b0;
+                    mem_addr <= write_buffer_addr[write_buffer_head];
+                    mem_wr_data <= write_buffer_data[write_buffer_head];
+                end
             end else if (write_buffer_count == 0) begin
-                mem_wr_en <= 1'b0;  // No pending writes
+                mem_wr_en <= 1'b0;
             end
             
             // DEADLOCK FIX: Enhanced backpressure timeout detection
@@ -396,7 +402,6 @@ module l2_cache #(
                     l1_1_ready <= 1'b1;
                     l1_2_ready <= 1'b1;
                     mem_rd_en <= 1'b0;
-                    mem_wr_en <= 1'b0;
 
                     // DEADLOCK FIX: Apply backpressure when write buffer nearly full
                     if (write_buffer_count >= BACKPRESSURE_THRESHOLD) begin
@@ -471,7 +476,7 @@ module l2_cache #(
                             state <= S_HIT_CHECK;
                         end
                 end
-        end  // <-- nutup S_IDLE
+                end  // end S_IDLE
 
                 S_HIT_CHECK: begin
                     hit_way = find_hit_way(set_index, tag);
@@ -579,25 +584,16 @@ module l2_cache #(
                         mem_rd_en <= 1'b1;
                         state <= S_VICTIM_CHECK;
                     end else if (writeback_timeout_counter >= WRITEBACK_TIMEOUT) begin
-                        // TIMEOUT: Memory not ready, abort writeback and force error recovery
-                        $display("[%0t] [L2-CACHE] S_WRITEBACK TIMEOUT: mem_ready not asserted after %0d cycles", $time, WRITEBACK_TIMEOUT);
+                        // CRITICAL FIX: Jangan invalidate dirty line tanpa writeback.
+                        // Tunggu writeback selesai sebelum izinkan eviction.
+                        $display("[%0t] [L2-CACHE] S_WRITEBACK TIMEOUT: mem_ready not asserted after %0d cycles - retrying writeback", $time, WRITEBACK_TIMEOUT);
                         writeback_timeout_counter <= 8'h0;
-                        // Invalidate victim line to prevent corruption
+                        // Re-drive writeback signals and retry
                         timeout_victim_way = find_victim_way(set_index);
-                        cache_valid[timeout_victim_way][set_index] <= 1'b0;
-                        // Force emergency recovery
-                        for (int i = 0; i < WRITE_BUFFER_DEPTH; i++) begin
-                            write_buffer_valid[i] <= 1'b0;
-                            write_buffer_data[i] <= {LINE_SIZE{1'b0}};
-                            write_buffer_addr[i] <= {ADDR_WIDTH{1'b0}};
-                        end
-                        write_buffer_count <= 4'b0;
-                        write_buffer_head <= 4'b0;
-                        write_buffer_tail <= 4'b0;
-                        write_buffer_full <= 1'b0;
-                        backpressure_active <= 1'b0;
-                        backpressure_timeout <= 16'd0;
-                        state <= S_IDLE;
+                        mem_addr <= {cache_tags[timeout_victim_way][set_index], set_index, {$clog2(LINE_SIZE){1'b0}}};
+                        mem_wr_data <= cache_data[timeout_victim_way][set_index];
+                        mem_wr_en <= 1'b1;
+                        // Keep state in S_WRITEBACK to retry — jangan invalidate
                     end else begin
                         writeback_timeout_counter <= writeback_timeout_counter + 1;
                     end
@@ -668,22 +664,16 @@ module l2_cache #(
                 end
 
                 S_COMPLETE_RD: begin
-                    // Set ready signal for appropriate port
-                    l1_0_ready <= 1'b0;
+                    l1_0_ready <= (current_port == 2'b00) ? 1'b1 : 1'b0;
                     l1_1_ready <= (current_port == 2'b01) ? 1'b1 : 1'b0;
-                    l1_2_ready <= 1'b0;
-                    if (current_port == 2'b00) l1_0_ready <= 1'b1;
-                    else if (current_port == 2'b10) l1_2_ready <= 1'b1;
+                    l1_2_ready <= (current_port == 2'b10) ? 1'b1 : 1'b0;
                     state <= S_IDLE;
                 end
 
                 S_COMPLETE_WR: begin
-                    // Set ready signal for appropriate port
-                    l1_0_ready <= 1'b0;
+                    l1_0_ready <= (current_port == 2'b00) ? 1'b1 : 1'b0;
                     l1_1_ready <= (current_port == 2'b01) ? 1'b1 : 1'b0;
-                    l1_2_ready <= 1'b0;
-                    if (current_port == 2'b00) l1_0_ready <= 1'b1;
-                    else if (current_port == 2'b10) l1_2_ready <= 1'b1;
+                    l1_2_ready <= (current_port == 2'b10) ? 1'b1 : 1'b0;
                     state <= S_IDLE;
                 end
 

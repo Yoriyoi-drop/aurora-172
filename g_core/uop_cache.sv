@@ -28,9 +28,9 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module uop_cache #(
-    parameter DATA_WIDTH        = AURORA_DATA_WIDTH,   // FIX: Use standard parameter
-    parameter ADDR_WIDTH        = AURORA_ADDR_WIDTH,   // FIX: Use standard parameter
-    parameter INST_WIDTH        = AURORA_INST_WIDTH,   // FIX: Use standard parameter
+    parameter DATA_WIDTH        = `AURORA_DATA_WIDTH,   // FIX: Use standard parameter
+    parameter ADDR_WIDTH        = `AURORA_ADDR_WIDTH,   // FIX: Use standard parameter
+    parameter INST_WIDTH        = `AURORA_INST_WIDTH,   // FIX: Use standard parameter
     parameter NUM_ENTRIES       = 512,
     parameter ASSOCIATIVITY     = 8,
     parameter NUM_SETS          = NUM_ENTRIES / ASSOCIATIVITY
@@ -98,16 +98,36 @@ module uop_cache #(
         end
     end
 
-    assign uop_cache_hit    = lookup_hit && fetch_valid;
+    // FIX Issue: Registered lookup outputs to prevent race with fill-to-same-index.
+    // Pipeline stage aligns lookup result with the flip-flop-based cache array reads.
+    reg                         lookup_hit_r;
+    reg [63:0]                  hit_uops_r;
+    reg [7:0]                   hit_uop_count_r;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            lookup_hit_r    <= 1'b0;
+            hit_uops_r      <= '0;
+            hit_uop_count_r <= '0;
+        end else begin
+            lookup_hit_r    <= lookup_hit;
+            hit_uops_r      <= hit_uops;
+            hit_uop_count_r <= hit_uop_count;
+        end
+    end
+
+    assign uop_cache_hit    = lookup_hit_r && fetch_valid;
     assign uop_cache_ready  = 1'b1;
-    assign uop_micro_ops    = hit_uops;
-    assign uop_count        = hit_uop_count;
-    assign uop_valid        = lookup_hit && fetch_valid;
-    assign decode_request   = fetch_valid && !lookup_hit;
+    assign uop_micro_ops    = hit_uops_r;
+    assign uop_count        = hit_uop_count_r;
+    assign uop_valid        = lookup_hit_r && fetch_valid;
+    assign decode_request   = fetch_valid && !lookup_hit;  // Keep combinational to not miss decode trigger
 
     // FIXED: Register fetch_index at miss time so fill uses correct set
     reg [INDEX_WIDTH-1:0] fill_index_reg;
     reg [TAG_WIDTH-1:0] fill_tag_reg;
+    reg                     fill_pending;
+    reg [31:0]              dropped_miss_count;
 
     // Counters
     reg [31:0]              hit_counter;
@@ -160,13 +180,12 @@ module uop_cache #(
             miss_counter <= 32'd0;
             eviction_counter <= 32'd0;
         end else begin
-            // FIX v2: LRU aging EVERY cycle -- increment age of all valid entries.
-            // This ensures that frequently accessed entries stay "young" (updated on hit)
-            // while unused entries grow "old" and become eviction candidates.
-            for (int s = 0; s < NUM_SETS; s++) begin
+            // FIX v3: Only age LRU for the accessed set, not all 512 entries
+            // This saves significant power vs aging every entry each cycle
+            if (fetch_valid) begin
                 for (int w = 0; w < ASSOCIATIVITY; w++) begin
-                    if (cache_valid[s][w] && cache_lru[s][w] < 8'hFF) begin
-                        cache_lru[s][w] <= cache_lru[s][w] + 8'd1;
+                    if (cache_valid[fetch_index][w] && cache_lru[fetch_index][w] < 8'hFF) begin
+                        cache_lru[fetch_index][w] <= cache_lru[fetch_index][w] + 8'd1;
                     end
                 end
             end

@@ -4,6 +4,7 @@
 // AURORA-172 COMPREHENSIVE TEST SUITE - Production-Ready Testing
 //=============================================================================
 
+/* verilator lint_off DECLFILENAME */
 module tb_aurora_172;
 
     // =========================================================================
@@ -97,6 +98,19 @@ module tb_aurora_172;
         sched_completed_prev <= dut.sched_total_completed;
     end
     
+    // Result capture latch (pulse → level)
+    reg [511:0]                     captured_result;
+    reg                             captured_result_valid;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            captured_result <= 512'b0;
+            captured_result_valid <= 1'b0;
+        end else if (game_result_valid) begin
+            captured_result <= game_result;
+            captured_result_valid <= 1'b1;
+        end
+    end
+    
     // Gaming interface
     reg [47:0] game_cmd_addr;
     reg [31:0] game_cmd_data;
@@ -127,10 +141,10 @@ module tb_aurora_172;
         .game_result_valid(game_result_valid),
         
         // AI interface (tie off for now)
-        .ai_cmd_addr(512'h0),
+        .ai_cmd_addr(48'h0),
         .ai_cmd_data(64'h0),
         .ai_cmd_valid(1'b0),
-        .ai_result_ready(1'b1),
+        .ai_cmd_ready(),
         .ai_result(),
         .ai_result_valid(),
         
@@ -139,22 +153,13 @@ module tb_aurora_172;
         .mem_wr_data(mem_wr_data),
         .mem_wr_en(mem_wr_en),
         .mem_rd_en(mem_rd_en),
-        .mem_rd_data(),
+        .mem_rd_data(mem_rd_data),
         .mem_ready(1'b1),
         
-        // Debug outputs (monitor)
-        .sched_total_dispatched(),
-        .sched_total_completed(),
-        .sched_queue_depth(),
-        .sched_g_tasks_completed(),
-        .sched_a_tasks_completed(),
-        
-        // Hybrid Queue stage counters (v4.0)
-        .mq_sched_hq_fq_enqueued_out(),
-        .mq_sched_hq_dq_decoded_out(),
-        .mq_sched_hq_eq_dispatched_out(),
-        .mq_sched_hq_rq_committed_out(),
-        .mq_sched_hq_cq_completed_out()
+        // System interface
+        .sys_interrupt(),
+        .sys_power_mode(),
+        .sys_status()
     );
     
     // =========================================================================
@@ -164,7 +169,7 @@ module tb_aurora_172;
     assign clk = clk_reg;
     
     always #(CLK_PERIOD/2) begin
-        clk_reg = ~clk_reg;
+        clk_reg <= ~clk_reg;
         if ($time < 100) begin  // Only trace first 100ns to reduce spam
             $display("[%0t] [CLOCK_GEN] Clock toggle: clk=%0b", $time, clk);
         end
@@ -205,12 +210,12 @@ module tb_aurora_172;
         
         // Start test sequence
         test_sequence();
-        $display("[%0t] [TRACE] test_sequence() completed", $time);
-        
-        // Wait for completion or timeout
-        #(SIM_TIMEOUT * CLK_PERIOD);
-        $display("[%0t] [TRACE] Simulation timeout reached - FINISH", $time);
-        $finish;
+            $display("[%0t] [TRACE] test_sequence() completed", $time);
+            
+            // All tests done — finish immediately
+            #(CLK_PERIOD * 10);
+            $display("[%0t] [TRACE] All tests complete - $finish", $time);
+            $finish;
     end
     
     // =========================================================================
@@ -219,14 +224,9 @@ module tb_aurora_172;
     task wait_with_timeout;
         input  [31:0] timeout_cycles;
         output        timed_out;
-        reg    [31:0] counter;
         begin
-            counter = 0;
             timed_out = 1'b0;
-            while (counter < timeout_cycles) begin
-                @(posedge clk);
-                counter = counter + 1;
-            end
+            #(timeout_cycles * CLK_PERIOD);
             timed_out = 1'b1;
         end
     endtask
@@ -254,6 +254,11 @@ module tb_aurora_172;
             $display("[%0t] [TRACE] CALLING test_wait_completion()", $time);
             test_wait_completion();
             $display("[%0t] [TRACE] RETURNED from test_wait_completion()", $time);
+            
+            // Test 4: Multicore — inject 4 tasks, all complete on different cores
+            $display("[%0t] [TRACE] CALLING test_multicore()", $time);
+            test_multicore();
+            $display("[%0t] [TRACE] RETURNED from test_multicore()", $time);
             
             $display("[%0t] [TRACE] === TEST SEQUENCE COMPLETED ===", $time);
         end
@@ -305,7 +310,7 @@ module tb_aurora_172;
             $display("[%0t] [TRACE] SETTING: game_cmd_valid=1, addr=0x%h, data=0x%h", 
                      $time, 48'h00000100, 32'hDEADBEEF);
             game_cmd_addr = 48'h00000100;
-            game_cmd_data = 32'hDEADBEEF;
+            game_cmd_data = {8'h01, 24'h000001};  // OP_DRAW (0x01) — pipeline 64 siklus
             game_cmd_valid = 1'b1;
             
             $display("[%0t] [TRACE] TASK_INJECTED: addr=0x%h, data=0x%h", $time, game_cmd_addr, game_cmd_data);
@@ -389,11 +394,65 @@ module tb_aurora_172;
             disable fork;
             
             $display("[%0t] [TRACE] Completion wait finished", $time);
-            $display("[%0t] [TRACE] FINAL_STATE: dispatched=%0d, completed=%0d, result_valid=%0b", 
-                     $time, dut.sched_total_dispatched, dut.sched_total_completed, game_result_valid);
+            $display("[%0t] [TRACE] FINAL_STATE: dispatched=%0d, completed=%0d, result_valid=%0b, result=0x%h", 
+                     $time, dut.sched_total_dispatched, dut.sched_total_completed, 
+                     game_result_valid, game_result);
         end
     endtask
-    
+
+    // =========================================================================
+    // TEST 4: Multicore — inject 4 tasks, all complete
+    // =========================================================================
+    task test_multicore;
+        reg timed_out;
+        integer i;
+        begin
+            $display("[%0t] [TEST] Test 4: Multicore — injecting 4 tasks...", $time);
+            $display("[%0t] [TRACE] Pre-inject: dispatched=%0d, completed=%0d", 
+                     $time, dut.sched_total_dispatched, dut.sched_total_completed);
+
+            if (game_cmd_ready != 1'b1) begin
+                wait (game_cmd_ready);
+            end
+            $display("[%0t] [TRACE] game_cmd_ready=1, starting injection", $time);
+
+            // Pulse game_cmd_valid for each task, one per cycle
+            // FIX: Align valid assertion to falling edge (half-cycle before posedge)
+            // to avoid race with scheduler sampling on posedge clk
+            for (i = 0; i < 4; i = i + 1) begin
+                @(negedge clk);
+                game_cmd_addr = 48'h00000100 + (i * 48'h100);
+                game_cmd_data = {8'h01 + i[7:0], 24'h000001 + i[23:0]};
+                game_cmd_valid = 1'b1;
+                @(posedge clk);
+                @(negedge clk);
+                game_cmd_valid = 1'b0;
+                $display("[%0t] [TRACE] Task %0d injected: addr=0x%h, data=0x%h (opcode=0x%0h)", 
+                         $time, i, game_cmd_addr, game_cmd_data, game_cmd_data[31:24]);
+            end
+
+            // Wait for all 4 to complete
+            $display("[%0t] [TRACE] All 4 tasks injected. Waiting for completion...", $time);
+            fork
+                begin
+                    wait (dut.sched_total_completed >= 4);
+                    $display("[%0t] [TRACE] All 4 tasks completed!", $time);
+                end
+                begin
+                    wait_with_timeout(50000, timed_out);
+                    if (timed_out) $display("[%0t] [TRACE] WARNING: Multicore timeout - only %0d completed", 
+                                            $time, dut.sched_total_completed);
+                end
+            join_any
+            disable fork;
+
+            $display("[%0t] [TRACE] Multicore FINAL: dispatched=%0d, completed=%0d, captured_result_valid=%0b",
+                     $time, dut.sched_total_dispatched, dut.sched_total_completed,
+                     captured_result_valid);
+            $display("[%0t] [TRACE] Captured result[31:0]=0x%h", $time, captured_result[31:0]);
+        end
+    endtask
+
     // =========================================================================
     // GLOBAL MONITORING - System Ready Signals
     // =========================================================================
@@ -415,11 +474,12 @@ module tb_aurora_172;
     end
     
     // =========================================================================
-    // SIMPLE TIME MONITOR - Backup clock check
+    // SIMPLE TIME MONITOR - Backup clock check (reduced frequency)
     // =========================================================================
     initial begin
-        forever #50 begin  // Every 50ns
-            $display("[%0t] [TIME_MONITOR] Time advance check - clk=%0b, rst_n=%0b", $time, clk, rst_n);
+        forever #(SIM_TIMEOUT * CLK_PERIOD / 10) begin  // Every 10% of SIM_TIMEOUT
+            $display("[%0t] [TIME_MONITOR] rst_n=%0b, game_cmd_ready=%0b, queue_depth=%0d", 
+                     $time, rst_n, game_cmd_ready, dut.sched_queue_depth);
         end
     end
     

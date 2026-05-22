@@ -32,10 +32,10 @@
 
 module ring_bus #(
     // Use standardized parameters
-    parameter DATA_WIDTH           = AURORA_DATA_WIDTH,
-    parameter ADDR_WIDTH           = AURORA_ADDR_WIDTH,
+    parameter DATA_WIDTH           = `AURORA_DATA_WIDTH,
+    parameter ADDR_WIDTH           = `AURORA_ADDR_WIDTH,
     parameter NUM_NODES            = 8,
-    parameter BUFFER_DEPTH         = AURORA_BUFFER_DEPTH,      // Use single source of truth
+    parameter BUFFER_DEPTH         = `AURORA_BUFFER_DEPTH,      // Use single source of truth
     parameter packet_width         = 256,
     
     // ADVANCED: Bandwidth Optimization Parameters
@@ -426,25 +426,25 @@ module ring_bus #(
     genvar g_idx;
     generate
         for (g_idx = 0; g_idx < NUM_NODES; g_idx = g_idx + 1) begin : gen_ready
-            wire [$clog2(BUFFER_DEPTH)+1:0] cw_occ, ccw_occ, resp_occ;
+            wire [$clog2(BUFFER_DEPTH)+1:0] gen_cw_occ, gen_ccw_occ, gen_resp_occ;
 
-            assign cw_occ = (`cw_head(g_idx) >= `cw_tail(g_idx)) ?
+            assign gen_cw_occ = (`cw_head(g_idx) >= `cw_tail(g_idx)) ?
                             (`cw_head(g_idx) - `cw_tail(g_idx)) :
                             (BUFFER_DEPTH - `cw_tail(g_idx) + `cw_head(g_idx));
 
-            assign ccw_occ = (`ccw_head(g_idx) >= `ccw_tail(g_idx)) ?
+            assign gen_ccw_occ = (`ccw_head(g_idx) >= `ccw_tail(g_idx)) ?
                              (`ccw_head(g_idx) - `ccw_tail(g_idx)) :
                              (BUFFER_DEPTH - `ccw_tail(g_idx) + `ccw_head(g_idx));
 
-            assign resp_occ = (resp_head[g_idx] >= resp_tail[g_idx]) ?
+            assign gen_resp_occ = (resp_head[g_idx] >= resp_tail[g_idx]) ?
                               (resp_head[g_idx] - resp_tail[g_idx]) :
                               (BUFFER_DEPTH - resp_tail[g_idx] + resp_head[g_idx]);
 
             // Performance-optimized congestion control:
             // FIX #2: Separate direction checks to prevent unnecessary blocking
             // Node can inject if at least one direction has space AND credits
-            assign node_req_ready[g_idx] = ((cw_occ   < (BUFFER_DEPTH - 2)) && (credit_cw_vc0[g_idx] > 0)) ||
-                                          ((ccw_occ  < (BUFFER_DEPTH - 2)) && (credit_ccw_vc0[g_idx] > 0));
+            assign node_req_ready[g_idx] = ((gen_cw_occ < (BUFFER_DEPTH - 2)) && (credit_cw_vc0[g_idx] > 0)) ||
+                                          ((gen_ccw_occ < (BUFFER_DEPTH - 2)) && (credit_ccw_vc0[g_idx] > 0));
             
             // Debug: Monitor node ready status
             always @(posedge clk) begin
@@ -475,10 +475,10 @@ module ring_bus #(
                 ccw_head_vc0[i] <= 0; ccw_tail_vc0[i] <= 0;
                 ccw_head_vc1[i] <= 0; ccw_tail_vc1[i] <= 0;
                 resp_head[i]    <= 0; resp_tail[i]     <= 0;
-                credit_cw_vc0[i]  <= AURORA_CREDIT_INITIAL;
-                credit_cw_vc1[i]  <= AURORA_CREDIT_INITIAL;
-                credit_ccw_vc0[i] <= AURORA_CREDIT_INITIAL;
-                credit_ccw_vc1[i] <= AURORA_CREDIT_INITIAL;
+                credit_cw_vc0[i]  <= `AURORA_CREDIT_INITIAL;
+                credit_cw_vc1[i]  <= `AURORA_CREDIT_INITIAL;
+                credit_ccw_vc0[i] <= `AURORA_CREDIT_INITIAL;
+                credit_ccw_vc1[i] <= `AURORA_CREDIT_INITIAL;
                 packet_count_per_node[i] <= 32'd0;
                 for (int j = 0; j < BUFFER_DEPTH; j++) begin
                     resp_valid[i][j] <= 1'b0;
@@ -569,6 +569,10 @@ module ring_bus #(
 
             // ----------------------------------------------------------------
             // STEP 1: Rotate CW ring (VC0 — Request)
+            // WARNING: Write conflict possible on shared resp_head/resp_tail when
+            // both CW and CCW rings deliver to the same node in the same cycle.
+            // Arbitration is implicit: CW wins on cw_delivered[i] flag ordering.
+            // TODO: Add explicit arbitration if concurrent CW+CCW delivery required.
             // ----------------------------------------------------------------
             for (int i = 0; i < NUM_NODES; i++) begin
                 t_next_node = (i + 1) % NUM_NODES;
@@ -751,7 +755,6 @@ module ring_bus #(
             for (int i = 0; i < NUM_NODES; i++) begin
                 if (node_resp_valid[i] && node_resp_ready[i] && (resp_head[i] != resp_tail[i])) begin
                     // Get the source node for this response
-                    integer t_src_node;
                     t_src_node = resp_src_node[i][resp_tail[i][$clog2(BUFFER_DEPTH)-1:0]];
                     
                     // CRITICAL FIX: Return credit SEKARANG - saat actual consumption
@@ -897,8 +900,6 @@ module ring_bus #(
             end
 
             begin
-                integer pending_percent;
-                integer total_occupancy;
                 total_occupancy = 0;
                 
                 // Calculate actual pending packets from buffer occupancy
@@ -921,14 +922,14 @@ module ring_bus #(
                 // TOXIC BUG DETECTION: Check credit flow invariant
                 // DISABLED SPAM: Timing lag between issued/returned and in_flight causes false positives
                  `CHECK_CREDIT_FLOW_BALANCE("RING_BUS", credit_issued_total[i], credit_returned_total[i], credit_in_flight[i]);
-                `CHECK_RESOURCE_CONSERVATION("RING_BUS", "CREDIT_CW", credit_cw_vc0[i], AURORA_CREDIT_INITIAL);
-                `CHECK_RESOURCE_CONSERVATION("RING_BUS", "CREDIT_CCW", credit_ccw_vc0[i], AURORA_CREDIT_INITIAL);
+                `CHECK_RESOURCE_CONSERVATION("RING_BUS", "CREDIT_CW", credit_cw_vc0[i], `AURORA_CREDIT_INITIAL);
+                `CHECK_RESOURCE_CONSERVATION("RING_BUS", "CREDIT_CCW", credit_ccw_vc0[i], `AURORA_CREDIT_INITIAL);
                 
                 // CRITICAL ASSERTION: Prevent credit inflation
-                if (credit_cw_vc0[i] > AURORA_CREDIT_INITIAL) begin
+                if (credit_cw_vc0[i] > `AURORA_CREDIT_INITIAL) begin
                     // $error("[%0t] [RING_BUS] CRITICAL: Credit inflation detected!", $time);
                 end
-                if (credit_ccw_vc0[i] > AURORA_CREDIT_INITIAL) begin
+                if (credit_ccw_vc0[i] > `AURORA_CREDIT_INITIAL) begin
                     // $error("[%0t] [RING_BUS] CRITICAL: Credit inflation detected!", $time);
                 end
                 
@@ -938,15 +939,15 @@ module ring_bus #(
                     credit_health[i] <= credit_health[i] + 1;
                     
                     // If stuck for >100 cycles with zero credits, we have a leak
-                    if ($time > AURORA_CREDIT_RECOVERY_DELAY && credit_stall_cycles[i] > 100) begin
+                    if ($time > `AURORA_CREDIT_RECOVERY_DELAY && credit_stall_cycles[i] > 100) begin
                         // VALIDATION: Only reset if pending_packets is also low (no actual in-flight packets)
                         if (pending_packets < 10) begin
                             $display("[%0t] [RING-BUS] CREDIT_LEAK DETECTED at node %0d - resetting credits (stall_cycles=%0d, pending=%0d)",
                                      $time, i, credit_stall_cycles[i], pending_packets);
 
                             // Reset all credits to single source of truth
-                            credit_cw_vc0[i] <= AURORA_CREDIT_INITIAL;
-                            credit_ccw_vc0[i] <= AURORA_CREDIT_INITIAL;
+                            credit_cw_vc0[i] <= `AURORA_CREDIT_INITIAL;
+                            credit_ccw_vc0[i] <= `AURORA_CREDIT_INITIAL;
                             credit_health[i] <= 8'd0;
                             credit_leak_count <= credit_leak_count + 1;
                             credit_stall_cycles[i] <= 16'd0;  // Reset stall counter
@@ -1087,7 +1088,6 @@ module ring_bus #(
             // Check if system is making progress
             if (global_progress_counter == last_global_progress) begin
                 // No global progress - check per-node
-                integer stalled_nodes;
                 stalled_nodes = 0;
                 for (int i = 0; i < NUM_NODES; i++) begin
                     if (node_progress[i] == last_node_progress[i]) begin

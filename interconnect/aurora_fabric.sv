@@ -159,13 +159,13 @@ module aurora_fabric #(
             dest_y = dest_addr[7:4] & 4'h7;  // Limit to 8 rows
 
             // XY routing: First move in X direction, then Y
-            if (dest_x > src_x)
+            if (dest_x > src_x && src_port < (NUM_PORTS-1))
                 output_port = src_port + 1;  // Move East
-            else if (dest_x < src_x)
+            else if (dest_x < src_x && src_port > 0)
                 output_port = src_port - 1;  // Move West
-            else if (dest_y > src_y)
+            else if (dest_y > src_y && src_port < (NUM_PORTS - MESH_X))
                 output_port = src_port + MESH_X;  // Move South
-            else if (dest_y < src_y)
+            else if (dest_y < src_y && src_port >= MESH_X)
                 output_port = src_port - MESH_X;  // Move North
             else
                 output_port = src_port;  // Destination reached
@@ -263,8 +263,6 @@ module aurora_fabric #(
     reg [31:0]              total_latency_cycles;
     reg [NUM_PORTS-1:0]     activity_reg;
     reg [QOS_LEVELS-1:0][31:0]  qos_pkt_count;
-    reg [31:0]              deadlock_detection_counter;
-
     // FIX v2 #1: Declare port_out_valid_reg here (before main always block)
     reg [NUM_PORTS-1:0]     port_out_valid_reg;
     
@@ -332,8 +330,6 @@ module aurora_fabric #(
 
             for (init_port = 0; init_port < QOS_LEVELS; init_port = init_port + 1)
                 qos_pkt_count[init_port] <= 32'b0;
-
-            deadlock_detection_counter <= 32'b0;
 
             // FIX v2 #3: Initialize QoS wait counters
             for (int qos = 0; qos < QOS_LEVELS; qos = qos + 1) begin
@@ -668,9 +664,12 @@ module aurora_fabric #(
                     dest_port = xy_route(addr_fifo[arbiter_serving_port][fifo_head[arbiter_serving_port]], src_port);
 
                     // Forward to output port
-                    port_data_out[dest_port] <= input_fifo[arbiter_serving_port][fifo_head[arbiter_serving_port]];
-                    // FIX v2: Use port_out_valid_reg instead of direct port_out_valid assignment
-                    port_out_valid_reg[dest_port] <= 1'b1;
+                    // Hazard detection: skip self-forward (dest == source) to avoid
+                    // read-during-write on the same FIFO head pointer
+                    if (dest_port != arbiter_serving_port) begin
+                        port_data_out[dest_port] <= input_fifo[arbiter_serving_port][fifo_head[arbiter_serving_port]];
+                        port_out_valid_reg[dest_port] <= 1'b1;
+                    end
 
                     // Update head pointer
                     if (fifo_head[arbiter_serving_port] == FIFO_DEPTH - 1)
@@ -684,8 +683,9 @@ module aurora_fabric #(
                     // FIX v2 #3: Increment bandwidth window counter
                     bw_window_packets <= bw_window_packets + 1;
 
-                    // Calculate latency
-                    total_latency_cycles <= total_latency_cycles + 10;  // Estimated 10 cycles latency
+                    // Calculate latency using actual cycle count from timestamp
+                    // Estimate: current_cycle - arrival_cycle gives true latency
+                    total_latency_cycles <= total_latency_cycles + timestamp_fifo[arbiter_serving_port][fifo_head[arbiter_serving_port]];
 
                     // Send credit back to source
                     credit_count[src_port] <= credit_count[src_port] + 1;
@@ -710,7 +710,6 @@ module aurora_fabric #(
                 reg [7:0] stuck_port_mask;
                 deadlock_detected = 1'b0;
                 stuck_port_mask = 8'h0;
-                deadlock_timeout_counter = 32'd0;
 
                 // Check each FIFO for deadlock conditions
                 for (int p = 0; p < NUM_PORTS; p = p + 1) begin
@@ -722,7 +721,7 @@ module aurora_fabric #(
                         // Check for deadlock timeout (reduced from 10000 to 1000 for faster detection)
                         if (timestamp_fifo[p][fifo_head[p]] > 32'd1000) begin
                             deadlock_detected = 1'b1;
-                            stuck_port_mask[p] <= 1'b1;
+                            stuck_port_mask[p] = 1'b1;
                         end
                     end
                 end
@@ -754,7 +753,7 @@ module aurora_fabric #(
                                 $display("[%0t] [AURORA-FABRIC] ** DEADLOCK RECOVERY: Dropped packet from port %0d", $time, p);
                             end
                         end
-                        stuck_port_mask <= 8'h0;
+                        stuck_port_mask = 8'h0;
                         deadlock_timeout_counter <= 32'h0;
                     end
                 end else begin

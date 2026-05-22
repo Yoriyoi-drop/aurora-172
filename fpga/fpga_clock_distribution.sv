@@ -116,11 +116,17 @@ reg [2:0] freq_sel_sync_2 = 0;
 reg dvfs_reconfig_req = 0;
 reg [2:0] dvfs_target_freq = 0;
 reg [1:0] dvfs_state = 0;
+reg mmcm_drp_dwe = 0;
+reg [6:0] mmcm_drp_daddr = 7'b0;
+reg [15:0] mmcm_drp_di = 16'b0;
 
 localparam DVFS_IDLE = 2'b00;
 localparam DVFS_WAIT_PLL = 2'b01;
 localparam DVFS_SWITCH = 2'b10;
 localparam DVFS_ACK = 2'b11;
+
+localparam MMCM_DRP_ADDR_MULT = 7'h08;  // M multiplier register
+localparam MMCM_DRP_ADDR_DIV  = 7'h14;  // D divider register
 
 always @(posedge sys_clk_ibufg or negedge sys_rst_n) begin
     if (!sys_rst_n) begin
@@ -129,6 +135,9 @@ always @(posedge sys_clk_ibufg or negedge sys_rst_n) begin
         dvfs_reconfig_req <= 0;
         dvfs_target_freq <= 0;
         dvfs_state <= DVFS_IDLE;
+        mmcm_drp_dwe <= 1'b0;
+        mmcm_drp_daddr <= 7'b0;
+        mmcm_drp_di <= 16'b0;
     end else begin
         // Synchronize freq_sel across clock domains
         freq_sel_sync_1 <= freq_sel;
@@ -143,33 +152,48 @@ always @(posedge sys_clk_ibufg or negedge sys_rst_n) begin
         // DVFS state machine
         case (dvfs_state)
             DVFS_IDLE: begin
+                mmcm_drp_dwe <= 1'b0;
                 if (dvfs_reconfig_req && mmcm_locked) begin
                     dvfs_state <= DVFS_WAIT_PLL;
                     // Update MMCM parameters
                     {mmcm_mult_int, mmcm_div_int} <= get_dvfs_params(dvfs_target_freq);
+                    // Assert DWE to apply new M divider in DRP register 0x08
+                    mmcm_drp_daddr <= MMCM_DRP_ADDR_MULT;
+                    mmcm_drp_di <= mmcm_mult_int;
+                    mmcm_drp_dwe <= 1'b1;
                 end
             end
             
             DVFS_WAIT_PLL: begin
+                mmcm_drp_dwe <= 1'b0;
                 // Wait for MMCM to re-lock
                 if (mmcm_locked) begin
                     dvfs_state <= DVFS_SWITCH;
+                    // Assert DWE to apply new D divider in DRP register 0x14
+                    mmcm_drp_daddr <= MMCM_DRP_ADDR_DIV;
+                    mmcm_drp_di <= mmcm_div_int;
+                    mmcm_drp_dwe <= 1'b1;
                 end
             end
             
             DVFS_SWITCH: begin
+                mmcm_drp_dwe <= 1'b0;
                 // Performance-optimized: Fast clock switching
                 // Switch clocks to new frequency domain
                 dvfs_state <= DVFS_ACK;
             end
             
             DVFS_ACK: begin
+                mmcm_drp_dwe <= 1'b0;
                 // Immediate acknowledgment for minimal latency
                 dvfs_reconfig_req <= 1'b0;
                 dvfs_state <= DVFS_IDLE;
             end
             
-            default: dvfs_state <= DVFS_IDLE;
+            default: begin
+                mmcm_drp_dwe <= 1'b0;
+                dvfs_state <= DVFS_IDLE;
+            end
         endcase
     end
 end
@@ -227,9 +251,9 @@ MMCME4_ADV #(
     .CLKOUT2B           (),
     .CLKOUT3            (clk_debug_raw),
     .CLKOUT3B           (),
-    .CLKOUT4            (clk_interconnect_raw),
+    .CLKOUT4            (),
     .CLKOUT4B           (),
-    .CLKOUT5            (),
+    .CLKOUT5            (clk_interconnect_raw),
     .CLKOUT5B           (),
     .CLKOUT6            (),
     .CLKFBOUT           (mmcm_clkfbout),
@@ -243,13 +267,13 @@ MMCME4_ADV #(
     .CLKIN1             (sys_clk_ibufg),
     .CLKIN2             (1'b0),
     .CLKFBIN            (mmcm_clkfbout),
-    .DCLK               (1'b0),
-    .DADDR              (7'b0),
-    .DCLKEN             (1'b0),
-    .DI                 (16'b0),
+    .DCLK               (sys_clk_ibufg),
+    .DADDR              (mmcm_drp_daddr),
+    .DCLKEN             (mmcm_drp_dwe),
+    .DI                 (mmcm_drp_di),
     .DO                 (),
     .DRDY               (),
-    .DWE                (1'b0)
+    .DWE                (mmcm_drp_dwe)
 );
 
 //-----------------------------------------------------------------------------
@@ -383,13 +407,13 @@ reg debug_active = 0;
 reg g_core_prev, h_core_prev, ai_core_prev;
 reg mem_prev, interconnect_prev, debug_prev;
 
+// Clock activity detection constants (module level — not inside always block)
+localparam CLK_LOCK_TIMEOUT = 8'hFF;  // 255 cycles timeout
+localparam CLK_ACTIVE_HIGH = 1'b1;
+localparam CLK_ACTIVE_LOW = 1'b0;
+
 // Clock presence detectors (toggle detection)
 always @(posedge sys_clk_ibufg or negedge sys_rst_n) begin
-    
-    // Clock activity detection constants
-    localparam CLK_LOCK_TIMEOUT = 8'hFF;  // 255 cycles timeout
-    localparam CLK_ACTIVE_HIGH = 1'b1;
-    localparam CLK_ACTIVE_LOW = 1'b0;
     
     // Clock activity detection using defined constants
     if (!sys_rst_n) begin
@@ -481,6 +505,23 @@ reg [15:0] mem_freq_cnt = 0;
 localparam FREQ_MEASURE_PERIOD = 16'd100_000;  // 1ms at 100MHz
 reg [16:0] freq_measure_cnt = 0;
 
+// 2-flop synchronizers for CDC (cross-clock-domain safe sampling)
+reg g_core_clk_sync1, g_core_clk_sync2;
+reg h_core_clk_sync1, h_core_clk_sync2;
+reg ai_core_clk_sync1, ai_core_clk_sync2;
+reg mem_clk_sync1, mem_clk_sync2;
+
+always @(posedge sys_clk_ibufg) begin
+    g_core_clk_sync1 <= g_core_clk;
+    g_core_clk_sync2 <= g_core_clk_sync1;
+    h_core_clk_sync1 <= h_core_clk;
+    h_core_clk_sync2 <= h_core_clk_sync1;
+    ai_core_clk_sync1 <= ai_core_clk;
+    ai_core_clk_sync2 <= ai_core_clk_sync1;
+    mem_clk_sync1 <= mem_fabric_clk;
+    mem_clk_sync2 <= mem_clk_sync1;
+end
+
 always @(posedge sys_clk_ibufg or negedge sys_rst_n) begin
     if (!sys_rst_n) begin
         freq_measure_cnt <= 0;
@@ -491,10 +532,10 @@ always @(posedge sys_clk_ibufg or negedge sys_rst_n) begin
     end else begin
         freq_measure_cnt <= freq_measure_cnt + 1;
         
-        if (g_core_clk) g_core_freq_cnt <= g_core_freq_cnt + 1;
-        if (h_core_clk) h_core_freq_cnt <= h_core_freq_cnt + 1;
-        if (ai_core_clk) ai_core_freq_cnt <= ai_core_freq_cnt + 1;
-        if (mem_fabric_clk) mem_freq_cnt <= mem_freq_cnt + 1;
+        if (g_core_clk_sync2) g_core_freq_cnt <= g_core_freq_cnt + 1;
+        if (h_core_clk_sync2) h_core_freq_cnt <= h_core_freq_cnt + 1;
+        if (ai_core_clk_sync2) ai_core_freq_cnt <= ai_core_freq_cnt + 1;
+        if (mem_clk_sync2) mem_freq_cnt <= mem_freq_cnt + 1;
         
         if (freq_measure_cnt == FREQ_MEASURE_PERIOD) begin
             freq_measure_cnt <= 0;
@@ -507,36 +548,39 @@ always @(posedge sys_clk_ibufg or negedge sys_rst_n) begin
 end
 
 //-----------------------------------------------------------------------------
-// Jitter Monitoring (simplified cycle-to-cycle jitter detection)
+// Jitter Monitoring (cycle-to-cycle jitter detection using sys_clk reference)
 //-----------------------------------------------------------------------------
 reg [15:0] jitter_counter = 0;
-reg [15:0] prev_period = 0;
 reg [15:0] curr_period = 0;
 reg jitter_detected = 0;
+reg g_core_clk_sync_d1;
+reg [15:0] g_core_cycle_count = 0;
 
-always @(posedge g_core_clk or negedge sys_rst_n) begin
+always @(posedge sys_clk_ibufg or negedge sys_rst_n) begin
     if (!sys_rst_n) begin
         jitter_counter <= 0;
-        prev_period <= 0;
         curr_period <= 0;
         jitter_detected <= 0;
+        g_core_clk_sync_d1 <= 0;
+        g_core_cycle_count <= 0;
     end else begin
-        // Measure period using reference clock
-        curr_period <= curr_period + 1;
-        
-        // Check for significant deviation (>5% jitter threshold)
-        if (prev_period > 0) begin
-            if ((curr_period > prev_period * 105 / 100) || 
-                (curr_period < prev_period * 95 / 100)) begin
-                jitter_counter <= jitter_counter + 1;
-                jitter_detected <= 1'b1;
-            end else begin
-                jitter_detected <= 1'b0;
+        g_core_clk_sync_d1 <= g_core_clk_sync2;
+
+        if (g_core_clk_sync2 && !g_core_clk_sync_d1) begin
+            if (curr_period > 0) begin
+                if ((g_core_cycle_count > curr_period * 105 / 100) ||
+                    (g_core_cycle_count < curr_period * 95 / 100)) begin
+                    jitter_counter <= jitter_counter + 1;
+                    jitter_detected <= 1'b1;
+                end else begin
+                    jitter_detected <= 1'b0;
+                end
             end
+            curr_period <= g_core_cycle_count;
+            g_core_cycle_count <= 1;
+        end else begin
+            g_core_cycle_count <= g_core_cycle_count + 1;
         end
-        
-        prev_period <= curr_period;
-        curr_period <= 0;
     end
 end
 

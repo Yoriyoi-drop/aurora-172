@@ -84,9 +84,22 @@ module g_core #(
 );
 
     // FIXED: Proper fabric interface handling
-    // Use tri-state buffers instead of hard ties
-    assign fabric_addr = fabric_rd_en ? cmd_addr : {ADDR_WIDTH{1'b0}};
+    // Registered fabric_addr to break potential combinational loops
+    reg [ADDR_WIDTH-1:0]    fabric_addr_reg;
+    assign fabric_addr = fabric_addr_reg;
     assign fabric_wr_data = fabric_wr_en ? result : {DATA_WIDTH{1'b0}};
+
+    // Register fabric_addr from cmd_addr on command capture
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n)
+            fabric_addr_reg <= {ADDR_WIDTH{1'b0}};
+        else if (cmd_valid && cmd_ready && !busy)
+            fabric_addr_reg <= cmd_addr;
+        else if (fabric_rd_en)
+            fabric_addr_reg <= cmd_addr;
+        else
+            fabric_addr_reg <= {ADDR_WIDTH{1'b0}};
+    end
 
     // =========================================================================
     // Internal registers
@@ -223,10 +236,7 @@ module g_core #(
             
             // DEADLOCK FIX: Initialize resource contention state
             mem_wait_counter <= 16'd0;
-            resource_timeout <= 16'd0;
-            retry_count <= 8'd0;
             resource_locked <= 1'b0;
-            arbitration_won <= 1'b0;
             last_access_time <= 32'd0;
             global_cycle_count <= 32'd0;
             cmd_ready       <= 1'b1;
@@ -247,6 +257,7 @@ module g_core #(
             pipeline_stage_detail <= 4'h0;
             cache_miss_occurred <= 1'b0;
             cache_miss_penalty_cycles <= 8'h0;
+            cmd_valid_prev <= 1'b0;
         end else begin
             // Global cycle counter for timeout detection
             // debug_counter <= debug_counter + 1;  // REMOVED
@@ -255,14 +266,14 @@ module g_core #(
             cmd_valid_prev <= cmd_valid;
             
             // SIMPLIFIED: Basic resource management without complex timeout
-            if (resource_locked && (global_cycle_count - last_access_time > 100)) begin
+            // Unsigned wrapping subtraction is correct for power-of-2 overflow
+            if (resource_locked && ((global_cycle_count - last_access_time) > 100)) begin
                 // Simple timeout recovery
                 resource_locked <= 1'b0;
-                arbitration_won <= 1'b0;
                 if (pipeline_state == MEMORY || pipeline_state == WAIT_L1) begin
                     pipeline_state <= ERROR_STATE;
                     error_flag <= 1'b1;
-                    error_code <= `ERR_TIMEOUT;
+                    error_code <= `AURORA_ERR_TIMEOUT;
                     error_valid <= 1'b1;
                 end
             end
@@ -310,7 +321,7 @@ module g_core #(
                                              $time, CORE_ID, cmd_data[31:24], cmd_addr);
                                 end
                                 error_flag <= 1'b1;
-                                error_code <= `ERR_ILLEGAL_OPCODE;
+                                error_code <= `AURORA_ERR_ILLEGAL_OPCODE;
                                 error_valid <= 1'b1;
                                 // FIXED: Generate error result instead of hanging
                                 result <= {DATA_WIDTH{1'b1}};  // All ones = error indicator
@@ -396,7 +407,7 @@ module g_core #(
                                              $time, pipeline_stage_1[23:0], MAX_ADDR[23:0]);
                                 end
                                 error_flag <= 1'b1;
-                                error_code <= `ERR_OOB_ADDRESS;
+                                error_code <= `AURORA_ERR_OOB_ADDRESS;
                                 error_valid <= 1'b1;
                                 result_valid <= 1'b0;
                                 busy <= 1'b0;
@@ -420,7 +431,7 @@ module g_core #(
                                              $time, pipeline_stage_1[23:0], MAX_ADDR[23:0]);
                                 end
                                 error_flag <= 1'b1;
-                                error_code <= `ERR_OOB_ADDRESS;
+                                error_code <= `AURORA_ERR_OOB_ADDRESS;
                                 error_valid <= 1'b1;
                                 result_valid <= 1'b0;
                                 busy <= 1'b0;
@@ -460,6 +471,9 @@ module g_core #(
                         // Stay in EXECUTE state
                     end else begin
                         // Execution counter complete - NOW compute
+                        // FIX: Clear mem_is_write for non-memory ops to prevent stale flag
+                        // from previous STORE operation causing WRITEBACK to skip result update
+                        mem_is_write <= 1'b0;
                         case (pipeline_stage_1[31:24])
                             OP_DRAW,
                             OP_TEXTURE,
@@ -533,7 +547,7 @@ module g_core #(
                             // Timeout after 256 cycles - set proper error
                             $display("[%0t] [G-CORE] ⚠️ L1 CACHE TIMEOUT after %0d cycles", $time, mem_wait_counter);
                             error_flag <= 1'b1;
-                            error_code <= `ERR_CACHE_TIMEOUT;
+                            error_code <= `AURORA_ERR_CACHE_TIMEOUT;
                             error_valid <= 1'b1;
                             pipeline_stage_2 <= {DATA_WIDTH{1'b1}};  // Error pattern instead of DEADBEEF
                             mem_wait_counter <= 16'h0;
@@ -558,7 +572,7 @@ module g_core #(
                         result_valid <= 1'b1;
                     end else begin
                         // Read operation - update result with data from memory
-                        result <= {32'b0, pipeline_stage_2};
+                        result <= {{(DATA_WIDTH-32){1'b0}}, pipeline_stage_2};
                         result_valid <= 1'b1;
                     end
 
@@ -669,10 +683,10 @@ module g_core #(
             // Count errors by type
             if (error_valid) begin
                 case (error_code)
-                    `ERR_ILLEGAL_OPCODE: error_illegal_opcode_count <= error_illegal_opcode_count + 1;
-                    `ERR_OOB_ADDRESS: error_oob_address_count <= error_oob_address_count + 1;
-                    `ERR_ACCESS_VIOLATION: error_access_violation_count <= error_access_violation_count + 1;
-                    `ERR_CACHE_TIMEOUT: error_cache_timeout_count <= error_cache_timeout_count + 1;
+                    `AURORA_ERR_ILLEGAL_OPCODE: error_illegal_opcode_count <= error_illegal_opcode_count + 1;
+                    `AURORA_ERR_OOB_ADDRESS: error_oob_address_count <= error_oob_address_count + 1;
+                    `AURORA_ERR_ACCESS_VIOLATION: error_access_violation_count <= error_access_violation_count + 1;
+                    `AURORA_ERR_CACHE_TIMEOUT: error_cache_timeout_count <= error_cache_timeout_count + 1;
                     default: ; // Ignore unknown error codes
                 endcase
             end

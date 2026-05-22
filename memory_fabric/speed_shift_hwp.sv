@@ -54,7 +54,7 @@
 `include "interfaces/aurora_params.svh"
 
 module speed_shift_hwp #(
-    parameter DATA_WIDTH            = AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
+    parameter DATA_WIDTH            = `AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
     parameter NUM_DOMAINS           = 3,    // OPTIMIZED: 4->3 (G, A, H only)
     parameter NUM_P_STATES          = 8,    // OPTIMIZED: 16->8 (P0-P7)
     parameter RESPONSE_CYCLES       = 4,    // OPTIMIZED: 8->4 (faster response)

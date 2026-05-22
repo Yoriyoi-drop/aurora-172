@@ -17,8 +17,8 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 interface axi_if #(
-    parameter DATA_WIDTH = AURORA_DATA_WIDTH,    // Use standardized parameter
-    parameter ADDR_WIDTH = AURORA_ADDR_WIDTH,
+    parameter DATA_WIDTH = `AURORA_DATA_WIDTH,    // Use standardized parameter
+    parameter ADDR_WIDTH = `AURORA_ADDR_WIDTH,
     parameter ID_WIDTH   = 4,     // OPTIMIZED: 8->4 (simpler routing)
     parameter STRB_WIDTH = DATA_WIDTH/8
 )();

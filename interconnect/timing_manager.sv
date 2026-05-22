@@ -2,7 +2,6 @@
 
 // Import global package for parameters
 `include "interfaces/aurora_params.svh"
-import aurora_global_pkg::*;
 
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
@@ -27,8 +26,8 @@ import aurora_global_pkg::*;
 module timing_manager #(
     parameter NUM_NODES = 4,        // OPTIMIZED: 8->4 (fewer nodes)
     parameter BUFFER_DEPTH = 8,    // OPTIMIZED: 16->8 (smaller buffers)
-    parameter DATA_WIDTH = AURORA_DATA_WIDTH,     // From package
-    parameter ADDR_WIDTH = AURORA_ADDR_WIDTH,     // From package
+    parameter DATA_WIDTH = `AURORA_DATA_WIDTH,     // From package
+    parameter ADDR_WIDTH = `AURORA_ADDR_WIDTH,     // From package
     parameter CLOCK_DOMAINS = 2,   // OPTIMIZED: 3->2 (fewer domains)
     parameter SYNC_STAGES = 2,     // FIXED: was 1 (minimum for CDC is 2 stages)
     parameter DRIFT_THRESHOLD = 50  // OPTIMIZED: 100->50 (earlier detection)
@@ -93,6 +92,16 @@ module timing_manager #(
     reg                     ic_to_mem_valid_sync [0:NUM_NODES-1][0:SYNC_STAGES-1];
     reg [DATA_WIDTH-1:0]    mem_to_ic_sync [0:NUM_NODES-1][0:SYNC_STAGES-1];
     reg                     mem_to_ic_valid_sync [0:NUM_NODES-1][0:SYNC_STAGES-1];
+
+    // Destination-clock pipeline registers for proper multi-bit CDC
+    reg [DATA_WIDTH-1:0]    core_to_ic_data_dst [0:NUM_NODES-1];
+    reg                     core_to_ic_valid_dst [0:NUM_NODES-1];
+    reg [DATA_WIDTH-1:0]    ic_to_core_data_dst [0:NUM_NODES-1];
+    reg                     ic_to_core_valid_dst [0:NUM_NODES-1];
+    reg [DATA_WIDTH-1:0]    ic_to_mem_data_dst [0:NUM_NODES-1];
+    reg                     ic_to_mem_valid_dst [0:NUM_NODES-1];
+    reg [DATA_WIDTH-1:0]    mem_to_ic_data_dst [0:NUM_NODES-1];
+    reg                     mem_to_ic_valid_dst [0:NUM_NODES-1];
     
     // Synchronization state machines
     reg [1:0]               core_to_ic_state [0:NUM_NODES-1];
@@ -111,7 +120,7 @@ module timing_manager #(
     
     // Metastability detection
     reg [31:0]              metastability_count;
-    reg [31:0]              metastability_history [0:255]; // Circular buffer
+    reg [47:0]              metastability_history [0:255]; // Circular buffer
     reg [7:0]               metastability_pointer;
     reg                     metastability_detected;
     
@@ -138,88 +147,44 @@ module timing_manager #(
     reg [31:0]              timing_corrections;
     reg [31:0]              sync_errors;
     
+    // CDC synchronizer pipelines for cross-domain timestamp reads
+    reg [31:0]              core_timestamp_sync [0:NUM_NODES-1][0:SYNC_STAGES-1];
+    reg [31:0]              mem_timestamp_sync [0:NUM_NODES-1][0:SYNC_STAGES-1];
+
+    // Per-domain counters for proper non-blocking assignment
+    reg [31:0]              domain_crossings_core;
+    reg [31:0]              domain_crossings_ic;
+    reg [31:0]              domain_crossings_mem;
+    reg [31:0]              metastability_count_core;
+    reg [31:0]              metastability_count_ic;
+    reg [31:0]              metastability_count_mem;
+    reg [31:0]              sync_errors_ic;
+    
+    // Multi-bit CDC: toggle-based valid/ack handshake synchronizers
+    reg                     core_to_ic_ack_toggle [0:NUM_NODES-1];
+    reg                     core_to_ic_ack_sync [0:NUM_NODES-1][0:SYNC_STAGES-1];
+    reg                     core_to_ic_ack_prev [0:NUM_NODES-1];
+    reg                     ic_to_core_ack_toggle [0:NUM_NODES-1];
+    reg                     ic_to_core_ack_sync [0:NUM_NODES-1][0:SYNC_STAGES-1];
+    reg                     ic_to_core_ack_prev [0:NUM_NODES-1];
+    reg                     ic_to_mem_ack_toggle [0:NUM_NODES-1];
+    reg                     ic_to_mem_ack_sync [0:NUM_NODES-1][0:SYNC_STAGES-1];
+    reg                     ic_to_mem_ack_prev [0:NUM_NODES-1];
+    reg                     mem_to_ic_ack_toggle [0:NUM_NODES-1];
+    reg                     mem_to_ic_ack_sync [0:NUM_NODES-1][0:SYNC_STAGES-1];
+    reg                     mem_to_ic_ack_prev [0:NUM_NODES-1];
+    reg                     core_to_ic_valid_dst_prev [0:NUM_NODES-1];
+    reg                     ic_to_core_valid_dst_prev [0:NUM_NODES-1];
+    reg                     ic_to_mem_valid_dst_prev [0:NUM_NODES-1];
+    reg                     mem_to_ic_valid_dst_prev [0:NUM_NODES-1];
+    
     // Clock domain crossing control
     reg                     enable_crossing;
     reg [7:0]               sync_threshold;
     reg [31:0]              sync_timeout;
     
-    // Initialize timing manager
-    integer init_i, init_j, init_k;
+    // Initialize timing manager (synthesis-safe: all registers init in reset blocks)
     initial begin
-        // Initialize synchronization registers
-        for (init_i = 0; init_i < NUM_NODES; init_i = init_i + 1) begin
-            for (init_j = 0; init_j < SYNC_STAGES; init_j = init_j + 1) begin
-                core_to_ic_sync[init_i][init_j] = {DATA_WIDTH{1'b0}};
-                core_to_ic_valid_sync[init_i][init_j] = 1'b0;
-                ic_to_core_sync[init_i][init_j] = {DATA_WIDTH{1'b0}};
-                ic_to_core_valid_sync[init_i][init_j] = 1'b0;
-                ic_to_mem_sync[init_i][init_j] = {DATA_WIDTH{1'b0}};
-                ic_to_mem_valid_sync[init_i][init_j] = 1'b0;
-                mem_to_ic_sync[init_i][init_j] = {DATA_WIDTH{1'b0}};
-                mem_to_ic_valid_sync[init_i][init_j] = 1'b0;
-            end
-            
-            // Initialize state machines
-            core_to_ic_state[init_i] = SYNC_IDLE;
-            ic_to_core_state[init_i] = SYNC_IDLE;
-            ic_to_mem_state[init_i] = SYNC_IDLE;
-            mem_to_ic_state[init_i] = SYNC_IDLE;
-            
-            // Initialize timing tracking
-            core_timestamp[init_i] = 32'd0;
-            ic_timestamp[init_i] = 32'd0;
-            mem_timestamp[init_i] = 32'd0;
-            last_sync_time[init_i] = 32'd0;
-            timing_drift[init_i] = 32'd0;
-            
-            // Initialize timing metrics
-            setup_time_samples[init_i] = 32'd0;
-            hold_time_samples[init_i] = 32'd0;
-        end
-        
-        // Initialize global timing state
-        max_drift_seen = 32'd0;
-        drift_accumulator = 32'd0;
-        metastability_count = 32'd0;
-        metastability_pointer = 8'd0;
-        metastability_detected = 1'b0;
-        
-        // Initialize clock measurements
-        for (init_i = 0; init_i < CLOCK_DOMAINS; init_i = init_i + 1) begin
-            clock_edge_time[init_i] = 32'd0;
-            period_measurement[init_i] = 32'd0;
-            jitter_accumulator[init_i] = 32'd0;
-            max_jitter_seen[init_i] = 32'd0;
-            
-            for (init_j = 0; init_j < CLOCK_DOMAINS; init_j = init_j + 1) begin
-                skew_between_domains[init_i][init_j] = 32'd0;
-            end
-        end
-        
-        // Initialize health metrics
-        total_setup_time = 32'd0;
-        total_hold_time = 32'd0;
-        max_skew_measurement = 32'd0;
-        total_jitter_measurement = 32'd0;
-        timing_health = 8'd100;
-        timing_healthy = 1'b1;
-        
-        // Initialize counters
-        domain_crossings = 32'd0;
-        resynchronizations = 32'd0;
-        timing_corrections = 32'd0;
-        sync_errors = 32'd0;
-        
-        // Initialize control
-        enable_crossing = 1'b1;
-        sync_threshold = 8'd5;
-        sync_timeout = 32'd1000;
-        
-        // Initialize metastability history
-        for (init_i = 0; init_i < 256; init_i = init_i + 1) begin
-            metastability_history[init_i] = 32'd0;
-        end
-        
         $display("[%0t] [TIMING-MANAGER] Timing Drift Management System Initialized", $time);
     end
     
@@ -230,19 +195,51 @@ module timing_manager #(
             for (integer i = 0; i < NUM_NODES; i = i + 1) begin
                 core_timestamp[i] = 32'd0;
                 core_to_ic_state[i] = SYNC_IDLE;
+                core_to_ic_ack_prev[i] <= 1'b1;
+                core_to_ic_valid_dst_prev[i] <= 1'b0;
+                ic_to_core_ack_toggle[i] <= 1'b0;
                 for (integer j = 0; j < SYNC_STAGES; j = j + 1) begin
                     core_to_ic_sync[i][j] = {DATA_WIDTH{1'b0}};
                     core_to_ic_valid_sync[i][j] = 1'b0;
+                    core_to_ic_ack_sync[i][j] <= 1'b0;
                 end
             end
+            // Reset core-side dst registers for ic-to-core path
+            for (integer i = 0; i < NUM_NODES; i = i + 1) begin
+                ic_to_core_data_dst[i] <= {DATA_WIDTH{1'b0}};
+                ic_to_core_valid_dst[i] <= 1'b0;
+            end
+            domain_crossings_core <= 32'd0;
+            metastability_count_core <= 32'd0;
         end else begin
+            integer dc_inc_core;
+            integer meta_inc_core;
+            dc_inc_core = 0;
+            meta_inc_core = 0;
             // Update core timestamp
             for (integer i = 0; i < NUM_NODES; i = i + 1) begin
                 core_timestamp[i] = core_timestamp[i] + 1;
-                
+
+                // Pipeline: capture ic-to-core sync output on core clock
+                ic_to_core_data_dst[i] <= ic_to_core_sync[i][SYNC_STAGES-1];
+                ic_to_core_valid_dst[i] <= ic_to_core_valid_sync[i][SYNC_STAGES-1];
+
+                // Toggle ic_to_core ack when new valid data captured
+                ic_to_core_valid_dst_prev[i] <= ic_to_core_valid_dst[i];
+                if (ic_to_core_valid_dst[i] && !ic_to_core_valid_dst_prev[i])
+                    ic_to_core_ack_toggle[i] <= ~ic_to_core_ack_toggle[i];
+
+                // Shift ack synchronizer for core_to_ic path
+                for (integer s = SYNC_STAGES-1; s > 0; s = s - 1) begin
+                    core_to_ic_ack_sync[i][s] <= core_to_ic_ack_sync[i][s-1];
+                end
+                core_to_ic_ack_sync[i][0] <= core_to_ic_ack_toggle[i];
+
                 // Process clock domain crossing to interconnect
-                process_core_to_ic_crossing(i);
+                process_core_to_ic_crossing(i, dc_inc_core, meta_inc_core);
             end
+            domain_crossings_core <= domain_crossings_core + dc_inc_core;
+            metastability_count_core <= metastability_count_core + meta_inc_core;
         end
     end
     
@@ -254,33 +251,132 @@ module timing_manager #(
                 ic_timestamp[i] = 32'd0;
                 ic_to_core_state[i] = SYNC_IDLE;
                 ic_to_mem_state[i] = SYNC_IDLE;
+                ic_to_core_ack_prev[i] <= 1'b1;
+                ic_to_mem_ack_prev[i] <= 1'b1;
+                ic_to_core_valid_dst_prev[i] <= 1'b0;
+                ic_to_mem_valid_dst_prev[i] <= 1'b0;
                 for (integer j = 0; j < SYNC_STAGES; j = j + 1) begin
                     ic_to_core_sync[i][j] = {DATA_WIDTH{1'b0}};
                     ic_to_core_valid_sync[i][j] = 1'b0;
                     ic_to_mem_sync[i][j] = {DATA_WIDTH{1'b0}};
                     ic_to_mem_valid_sync[i][j] = 1'b0;
+                    ic_to_core_ack_sync[i][j] <= 1'b0;
+                    ic_to_mem_ack_sync[i][j] <= 1'b0;
+                end
+                last_sync_time[i] <= 32'd0;
+                timing_drift[i] <= 32'd0;
+            end
+            max_drift_seen <= 32'd0;
+            drift_accumulator <= 32'd0;
+            metastability_count_ic <= 32'd0;
+            metastability_pointer <= 8'd0;
+            metastability_detected <= 1'b0;
+            for (integer i = 0; i < NUM_NODES; i = i + 1) begin
+                core_to_ic_data_dst[i] <= {DATA_WIDTH{1'b0}};
+                core_to_ic_valid_dst[i] <= 1'b0;
+                mem_to_ic_data_dst[i] <= {DATA_WIDTH{1'b0}};
+                mem_to_ic_valid_dst[i] <= 1'b0;
+                core_to_ic_ack_toggle[i] <= 1'b0;
+                mem_to_ic_ack_toggle[i] <= 1'b0;
+            end
+            domain_crossings_ic <= 32'd0;
+            resynchronizations <= 32'd0;
+            timing_corrections <= 32'd0;
+            sync_errors_ic <= 32'd0;
+            enable_crossing <= 1'b1;
+            sync_threshold <= 8'd5;
+            sync_timeout <= 32'd1000;
+            total_setup_time <= 32'd0;
+            total_hold_time <= 32'd0;
+            max_skew_measurement <= 32'd0;
+            total_jitter_measurement <= 32'd0;
+            timing_health <= 8'd100;
+            timing_healthy <= 1'b1;
+            domain_crossings <= 32'd0;
+            sync_errors <= 32'd0;
+            for (integer i = 0; i < NUM_NODES; i = i + 1) begin
+                setup_time_samples[i] <= 32'd0;
+                hold_time_samples[i] <= 32'd0;
+            end
+            for (integer i = 0; i < CLOCK_DOMAINS; i = i + 1) begin
+                clock_edge_time[i] <= 32'd0;
+                period_measurement[i] <= 32'd0;
+                jitter_accumulator[i] <= 32'd0;
+                max_jitter_seen[i] <= 32'd0;
+                for (integer j = 0; j < CLOCK_DOMAINS; j = j + 1) begin
+                    skew_between_domains[i][j] <= 32'd0;
+                end
+            end
+            for (integer i = 0; i < 256; i = i + 1) begin
+                metastability_history[i] <= 48'd0;
+            end
+            for (integer i = 0; i < NUM_NODES; i = i + 1) begin
+                for (integer s = 0; s < SYNC_STAGES; s = s + 1) begin
+                    core_timestamp_sync[i][s] <= 32'd0;
+                    mem_timestamp_sync[i][s] <= 32'd0;
                 end
             end
         end else begin
+            integer dc_inc_ic;
+            integer meta_inc_ic;
+            integer sync_err_inc;
+            dc_inc_ic = 0;
+            meta_inc_ic = 0;
+            sync_err_inc = 0;
             // Update interconnect timestamp
             for (integer i = 0; i < NUM_NODES; i = i + 1) begin
                 ic_timestamp[i] = ic_timestamp[i] + 1;
-                
+
+                // CDC synchronizer: 2-flop pipeline for cross-domain timestamp reads
+                for (integer s = SYNC_STAGES-1; s > 0; s = s - 1) begin
+                    core_timestamp_sync[i][s] <= core_timestamp_sync[i][s-1];
+                    mem_timestamp_sync[i][s] <= mem_timestamp_sync[i][s-1];
+                end
+                core_timestamp_sync[i][0] <= core_timestamp[i];
+                mem_timestamp_sync[i][0] <= mem_timestamp[i];
+
+                // Pipeline: capture core-to-ic and mem-to-ic sync outputs on interconnect clock
+                core_to_ic_data_dst[i] <= core_to_ic_sync[i][SYNC_STAGES-1];
+                core_to_ic_valid_dst[i] <= core_to_ic_valid_sync[i][SYNC_STAGES-1];
+                mem_to_ic_data_dst[i] <= mem_to_ic_sync[i][SYNC_STAGES-1];
+                mem_to_ic_valid_dst[i] <= mem_to_ic_valid_sync[i][SYNC_STAGES-1];
+
+                // Toggle core_to_ic ack when new valid data captured
+                core_to_ic_valid_dst_prev[i] <= core_to_ic_valid_dst[i];
+                if (core_to_ic_valid_dst[i] && !core_to_ic_valid_dst_prev[i])
+                    core_to_ic_ack_toggle[i] <= ~core_to_ic_ack_toggle[i];
+
+                // Toggle mem_to_ic ack when new valid data captured
+                mem_to_ic_valid_dst_prev[i] <= mem_to_ic_valid_dst[i];
+                if (mem_to_ic_valid_dst[i] && !mem_to_ic_valid_dst_prev[i])
+                    mem_to_ic_ack_toggle[i] <= ~mem_to_ic_ack_toggle[i];
+
+                // Shift ack synchronizers for ic-to-core and ic-to-mem paths
+                for (integer s = SYNC_STAGES-1; s > 0; s = s - 1) begin
+                    ic_to_core_ack_sync[i][s] <= ic_to_core_ack_sync[i][s-1];
+                    ic_to_mem_ack_sync[i][s] <= ic_to_mem_ack_sync[i][s-1];
+                end
+                ic_to_core_ack_sync[i][0] <= ic_to_core_ack_toggle[i];
+                ic_to_mem_ack_sync[i][0] <= ic_to_mem_ack_toggle[i];
+
                 // Process clock domain crossing from core
                 process_ic_from_core_crossing(i);
                 
                 // Process clock domain crossing to core
-                process_ic_to_core_crossing(i);
+                process_ic_to_core_crossing(i, dc_inc_ic, meta_inc_ic);
                 
                 // Process clock domain crossing to memory
-                process_ic_to_mem_crossing(i);
+                process_ic_to_mem_crossing(i, dc_inc_ic, meta_inc_ic);
                 
                 // Process clock domain crossing from memory
                 process_ic_from_mem_crossing(i);
                 
                 // Check timing drift
-                check_timing_drift(i);
+                check_timing_drift(i, sync_err_inc);
             end
+            domain_crossings_ic <= domain_crossings_ic + dc_inc_ic;
+            metastability_count_ic <= metastability_count_ic + meta_inc_ic;
+            sync_errors_ic <= sync_errors_ic + sync_err_inc;
         end
     end
     
@@ -291,25 +387,57 @@ module timing_manager #(
             for (integer i = 0; i < NUM_NODES; i = i + 1) begin
                 mem_timestamp[i] = 32'd0;
                 mem_to_ic_state[i] = SYNC_IDLE;
+                mem_to_ic_ack_prev[i] <= 1'b1;
+                ic_to_mem_valid_dst_prev[i] <= 1'b0;
                 for (integer j = 0; j < SYNC_STAGES; j = j + 1) begin
                     mem_to_ic_sync[i][j] = {DATA_WIDTH{1'b0}};
                     mem_to_ic_valid_sync[i][j] = 1'b0;
+                    mem_to_ic_ack_sync[i][j] <= 1'b0;
                 end
             end
+            for (integer i = 0; i < NUM_NODES; i = i + 1) begin
+                ic_to_mem_data_dst[i] <= {DATA_WIDTH{1'b0}};
+                ic_to_mem_valid_dst[i] <= 1'b0;
+            end
+            domain_crossings_mem <= 32'd0;
+            metastability_count_mem <= 32'd0;
         end else begin
+            integer dc_inc_mem;
+            integer meta_inc_mem;
+            dc_inc_mem = 0;
+            meta_inc_mem = 0;
             // Update memory timestamp
             for (integer i = 0; i < NUM_NODES; i = i + 1) begin
                 mem_timestamp[i] = mem_timestamp[i] + 1;
-                
+
+                // Pipeline: capture ic-to-mem sync output on memory clock
+                ic_to_mem_data_dst[i] <= ic_to_mem_sync[i][SYNC_STAGES-1];
+                ic_to_mem_valid_dst[i] <= ic_to_mem_valid_sync[i][SYNC_STAGES-1];
+
+                // Toggle ic_to_mem ack when new valid data captured
+                ic_to_mem_valid_dst_prev[i] <= ic_to_mem_valid_dst[i];
+                if (ic_to_mem_valid_dst[i] && !ic_to_mem_valid_dst_prev[i])
+                    ic_to_mem_ack_toggle[i] <= ~ic_to_mem_ack_toggle[i];
+
+                // Shift ack synchronizer for mem_to_ic path
+                for (integer s = SYNC_STAGES-1; s > 0; s = s - 1) begin
+                    mem_to_ic_ack_sync[i][s] <= mem_to_ic_ack_sync[i][s-1];
+                end
+                mem_to_ic_ack_sync[i][0] <= mem_to_ic_ack_toggle[i];
+
                 // Process clock domain crossing from interconnect
-                process_mem_from_ic_crossing(i);
+                process_mem_from_ic_crossing(i, dc_inc_mem, meta_inc_mem);
             end
+            domain_crossings_mem <= domain_crossings_mem + dc_inc_mem;
+            metastability_count_mem <= metastability_count_mem + meta_inc_mem;
         end
     end
     
     // Task: Process core to interconnect crossing
     task process_core_to_ic_crossing;
         input integer node;
+        inout integer dc_inc;
+        inout integer meta_inc;
         begin
             case (core_to_ic_state[node])
                 SYNC_IDLE: begin
@@ -317,7 +445,7 @@ module timing_manager #(
                         core_to_ic_state[node] = SYNC_CAPTURE;
                         core_to_ic_sync[node][0] = core_to_ic_data[node];
                         core_to_ic_valid_sync[node][0] = core_to_ic_valid[node];
-                        domain_crossings = domain_crossings + 1;
+                        dc_inc = dc_inc + 1;
                     end
                 end
                 
@@ -329,19 +457,13 @@ module timing_manager #(
                 end
                 
                 SYNC_TRANSFER: begin
-                    // Check for metastability
-                    if (detect_metastability(core_to_ic_sync[node][1], core_to_ic_sync[node][0])) begin
-                        metastability_count = metastability_count + 1;
-                        metastability_detected = 1'b1;
-                        log_metastability(node, 0, core_to_ic_sync[node][1], core_to_ic_sync[node][0]);
-                        core_to_ic_state[node] = SYNC_IDLE; // Reset on error
-                    end else begin
-                        core_to_ic_state[node] = SYNC_COMPLETE;
-                    end
+                    // Metastability cannot be detected in RTL by comparing pipeline stages.
+                    // Real metastability detection requires analog circuitry.
+                    // Skip to complete state — data is qualified by synchronized valid.
+                    core_to_ic_state[node] = SYNC_COMPLETE;
                 end
                 
                 SYNC_COMPLETE: begin
-                    // Transfer complete, ready for next
                     core_to_ic_state[node] = SYNC_IDLE;
                 end
             endcase
@@ -364,6 +486,8 @@ module timing_manager #(
     // Task: Process interconnect to core crossing
     task process_ic_to_core_crossing;
         input integer node;
+        inout integer dc_inc;
+        inout integer meta_inc;
         begin
             case (ic_to_core_state[node])
                 SYNC_IDLE: begin
@@ -371,7 +495,7 @@ module timing_manager #(
                         ic_to_core_state[node] = SYNC_CAPTURE;
                         ic_to_core_sync[node][0] = ic_to_core_data[node];
                         ic_to_core_valid_sync[node][0] = ic_to_core_valid[node];
-                        domain_crossings = domain_crossings + 1;
+                        dc_inc = dc_inc + 1;
                     end
                 end
                 
@@ -382,14 +506,7 @@ module timing_manager #(
                 end
                 
                 SYNC_TRANSFER: begin
-                    if (detect_metastability(ic_to_core_sync[node][1], ic_to_core_sync[node][0])) begin
-                        metastability_count = metastability_count + 1;
-                        metastability_detected = 1'b1;
-                        log_metastability(node, 1, ic_to_core_sync[node][1], ic_to_core_sync[node][0]);
-                        ic_to_core_state[node] = SYNC_IDLE;
-                    end else begin
-                        ic_to_core_state[node] = SYNC_COMPLETE;
-                    end
+                    ic_to_core_state[node] = SYNC_COMPLETE;
                 end
                 
                 SYNC_COMPLETE: begin
@@ -402,6 +519,8 @@ module timing_manager #(
     // Task: Process interconnect to memory crossing
     task process_ic_to_mem_crossing;
         input integer node;
+        inout integer dc_inc;
+        inout integer meta_inc;
         begin
             case (ic_to_mem_state[node])
                 SYNC_IDLE: begin
@@ -409,7 +528,7 @@ module timing_manager #(
                         ic_to_mem_state[node] = SYNC_CAPTURE;
                         ic_to_mem_sync[node][0] = ic_to_mem_data[node];
                         ic_to_mem_valid_sync[node][0] = ic_to_mem_valid[node];
-                        domain_crossings = domain_crossings + 1;
+                        dc_inc = dc_inc + 1;
                     end
                 end
                 
@@ -420,14 +539,7 @@ module timing_manager #(
                 end
                 
                 SYNC_TRANSFER: begin
-                    if (detect_metastability(ic_to_mem_sync[node][1], ic_to_mem_sync[node][0])) begin
-                        metastability_count = metastability_count + 1;
-                        metastability_detected = 1'b1;
-                        log_metastability(node, 2, ic_to_mem_sync[node][1], ic_to_mem_sync[node][0]);
-                        ic_to_mem_state[node] = SYNC_IDLE;
-                    end else begin
-                        ic_to_mem_state[node] = SYNC_COMPLETE;
-                    end
+                    ic_to_mem_state[node] = SYNC_COMPLETE;
                 end
                 
                 SYNC_COMPLETE: begin
@@ -452,6 +564,8 @@ module timing_manager #(
     // Task: Process memory from interconnect crossing
     task process_mem_from_ic_crossing;
         input integer node;
+        inout integer dc_inc;
+        inout integer meta_inc;
         begin
             case (mem_to_ic_state[node])
                 SYNC_IDLE: begin
@@ -459,7 +573,7 @@ module timing_manager #(
                         mem_to_ic_state[node] = SYNC_CAPTURE;
                         mem_to_ic_sync[node][0] = mem_to_ic_data[node];
                         mem_to_ic_valid_sync[node][0] = mem_to_ic_valid[node];
-                        domain_crossings = domain_crossings + 1;
+                        dc_inc = dc_inc + 1;
                     end
                 end
                 
@@ -470,14 +584,7 @@ module timing_manager #(
                 end
                 
                 SYNC_TRANSFER: begin
-                    if (detect_metastability(mem_to_ic_sync[node][1], mem_to_ic_sync[node][0])) begin
-                        metastability_count = metastability_count + 1;
-                        metastability_detected = 1'b1;
-                        log_metastability(node, 3, mem_to_ic_sync[node][1], mem_to_ic_sync[node][0]);
-                        mem_to_ic_state[node] = SYNC_IDLE;
-                    end else begin
-                        mem_to_ic_state[node] = SYNC_COMPLETE;
-                    end
+                    mem_to_ic_state[node] = SYNC_COMPLETE;
                 end
                 
                 SYNC_COMPLETE: begin
@@ -490,12 +597,13 @@ module timing_manager #(
     // Task: Check timing drift
     task check_timing_drift;
         input integer node;
+        inout integer sync_err_inc;
         reg [31:0] core_time, ic_time, mem_time;
         reg [31:0] max_diff, min_diff;
         begin
-            core_time = core_timestamp[node];
+            core_time = core_timestamp_sync[node][SYNC_STAGES-1];
             ic_time = ic_timestamp[node];
-            mem_time = mem_timestamp[node];
+            mem_time = mem_timestamp_sync[node][SYNC_STAGES-1];
             
             // Calculate drift between domains
             timing_drift[node] = calculate_drift(core_time, ic_time);
@@ -512,7 +620,7 @@ module timing_manager #(
             if (timing_drift[node] > DRIFT_THRESHOLD) begin
                 // Trigger resynchronization
                 perform_resynchronization(node);
-                sync_errors = sync_errors + 1;
+                sync_err_inc = sync_err_inc + 1;
             end
         end
     endtask
@@ -532,8 +640,9 @@ module timing_manager #(
         end
     endfunction
     
-    // Function: Detect metastability
-    function automatic bit detect_metastability;
+    // Function: Detect data change between consecutive sync stages
+    // NOTE: This detects bit differences, NOT true metastability.
+    function automatic bit detect_data_change;
         input [DATA_WIDTH-1:0] data1;
         input [DATA_WIDTH-1:0] data2;
         reg [DATA_WIDTH-1:0] xor_result;
@@ -549,8 +658,8 @@ module timing_manager #(
                 end
             end
             
-            // Consider metastable if too many bits differ
-            detect_metastability = (bit_count > (DATA_WIDTH / 4));
+            // Consider changed if too many bits differ
+            detect_data_change = (bit_count > (DATA_WIDTH / 4));
         end
     endfunction
     
@@ -636,8 +745,8 @@ module timing_manager #(
             avg_jitter = (total_jitter_measurement > 0) ? (total_jitter_measurement / CLOCK_DOMAINS) : 32'd0;
             
             // Calculate error rate
-            if (domain_crossings > 0) begin
-                error_rate = (sync_errors * 100) / domain_crossings;
+            if (total_domain_crossings > 0) begin
+                error_rate = (total_sync_errors * 100) / total_domain_crossings;
             end else begin
                 error_rate = 32'd0;
             end
@@ -657,10 +766,17 @@ module timing_manager #(
         end
     endtask
     
+    wire [31:0] total_domain_crossings;
+    wire [31:0] total_metastability_events;
+    wire [31:0] total_sync_errors;
+    assign total_domain_crossings = domain_crossings_core + domain_crossings_ic + domain_crossings_mem;
+    assign total_metastability_events = metastability_count_core + metastability_count_ic + metastability_count_mem;
+    assign total_sync_errors = sync_errors_ic;
+    
     // Output assignments
     assign timing_drift_detected = max_drift_seen;
-    assign metastability_events = metastability_count;
-    assign synchronization_errors = sync_errors;
+    assign metastability_events = total_metastability_events;
+    assign synchronization_errors = total_sync_errors;
     assign timing_health_score = timing_health;
     assign timing_system_healthy = timing_healthy;
     
@@ -670,7 +786,7 @@ module timing_manager #(
     assign clock_jitter_measured = (total_jitter_measurement > 0) ? 
                                  (total_jitter_measurement / CLOCK_DOMAINS) : 32'd0;
     
-    assign domain_crossing_count = domain_crossings;
+    assign domain_crossing_count = total_domain_crossings;
     assign resynchronization_count = resynchronizations;
     assign timing_correction_count = timing_corrections;
     
@@ -696,12 +812,12 @@ module timing_manager #(
     
     // Debug output
     always @(posedge clk) begin
-        if (domain_crossings % 10000 == 0 && domain_crossings > 0) begin
+        if (total_domain_crossings % 10000 == 0 && total_domain_crossings > 0) begin
             $display("[%0t] [TIMING-MANAGER] ===== TIMING HEALTH REPORT =====", $time);
-            $display("[%0t] [TIMING-MANAGER] Domain Crossings: %0d", $time, domain_crossings);
+            $display("[%0t] [TIMING-MANAGER] Domain Crossings: %0d", $time, total_domain_crossings);
             $display("[%0t] [TIMING-MANAGER] Max Drift: %0d cycles", $time, max_drift_seen);
-            $display("[%0t] [TIMING-MANAGER] Metastability Events: %0d", $time, metastability_count);
-            $display("[%0t] [TIMING-MANAGER] Synchronization Errors: %0d", $time, sync_errors);
+            $display("[%0t] [TIMING-MANAGER] Metastability Events: %0d", $time, total_metastability_events);
+            $display("[%0t] [TIMING-MANAGER] Synchronization Errors: %0d", $time, total_sync_errors);
             $display("[%0t] [TIMING-MANAGER] Timing Health: %0d/100 (%s)", $time, timing_health, 
                      timing_healthy ? "HEALTHY" : "UNHEALTHY");
             $display("[%0t] [TIMING-MANAGER] Clock Jitter: %0d ps", $time, clock_jitter_measured);

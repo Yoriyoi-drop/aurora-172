@@ -41,8 +41,8 @@
 
 module global_scheduler_mq #(
     // Use standardized parameters from aurora_params.svh
-    parameter DATA_WIDTH       = AURORA_DATA_WIDTH,
-    parameter ADDR_WIDTH       = AURORA_ADDR_WIDTH,
+    parameter DATA_WIDTH       = `AURORA_DATA_WIDTH,
+    parameter ADDR_WIDTH       = `AURORA_ADDR_WIDTH,
     parameter G_QUEUE_DEPTH    = 16,
     parameter A_QUEUE_DEPTH    = 8,
     parameter N_QUEUE_DEPTH    = 4,
@@ -442,6 +442,7 @@ module global_scheduler_mq #(
     // ── Counters ──
     reg [63:0]              counter_dispatched;
     reg [63:0]              counter_completed;
+    reg [63:0]              counter_completed_prev;
     reg [63:0]              stall_waiting_for_resource;
     reg [63:0]              stall_queue_contention;
     reg [31:0]              counter_conflicts;
@@ -1021,13 +1022,14 @@ module global_scheduler_mq #(
             
             // CRITICAL FIX: Ensure dispatch logic always runs
             // Force basic dispatch to prevent completed > dispatched
-            if (g_q_count > 0 && !g_core_busy && !g_active_task_valid) begin
+            if (g_q_count > 0 && !g_core_busy && !g_active_task_valid && !g_core_inflight) begin
                 // Dispatch G-Core task immediately - AMBIL DATA DARI QUEUE HEAD
                 g_active_task_valid <= 1'b1;
                 g_active_task_addr <= g_q_addr[g_head];
                 g_active_task_data <= g_q_data[g_head];
                 g_active_has_write <= (g_q_opcode[g_head] == 8'h11);  // OP_STORE = write operation
                 counter_dispatched <= counter_dispatched + 1;
+                g_core_inflight <= 1'b1;  // Track task as inflight for completion matching
                 
                 // Remove from queue
                 g_q_valid[g_head] <= 1'b0;
@@ -1040,7 +1042,7 @@ module global_scheduler_mq #(
                 a_active_task_valid <= 1'b1;
                 a_active_task_addr <= a_q_addr[a_head];
                 a_active_task_data <= a_q_data[a_head];
-                a_active_has_write <= (a_q_opcode[a_head] == A_OP_STORE_WT);  // Store weights = write operation
+                a_active_has_write <= (a_q_opcode[a_head] == 8'h31);  // OP_STORE_WT = write operation
                 counter_dispatched <= counter_dispatched + 1;
                 
                 // Remove from queue
@@ -1216,6 +1218,7 @@ module global_scheduler_mq #(
             g_core_complete_prev <= g_core_complete;
             a_core_complete_prev <= a_core_complete;
             npu_complete_prev  <= npu_complete;
+            counter_completed_prev <= counter_completed;
 
             // CRITICAL FIX: Force dispatch stuck G-Core tasks after 500 cycles
             if (g_active_task_valid && g_core_inflight && (g_inflight_timer > 500)) begin
@@ -1285,25 +1288,10 @@ module global_scheduler_mq #(
                     fq_count <= fq_count + 1;
                 end
                 
-                // Enqueue to FQ on rising edge of any task valid
-                if ((g_task_valid && !g_task_valid_prev) || (a_task_valid && !a_task_valid_prev)) begin
-                    // Find empty FQ slot (use fsm_li_fq)
-                    fsm_found_slot = 1'b0;
-                    for (fsm_li_fq = 0; fsm_li_fq < FQ_DEPTH && !fsm_found_slot; fsm_li_fq = fsm_li_fq + 1) begin
-                        if (!fq_tag_valid[fsm_li_fq]) begin
-                            // Use blocking assignments for immediate update within same cycle
-                            fq_tag_id[fsm_li_fq] <= task_id_counter;
-                            fq_tag_opcode[fsm_li_fq] <= g_task_valid ? g_task_data[31:24] : a_task_data[63:56];
-                            fq_tag_addr[fsm_li_fq] <= g_task_valid ? g_task_addr : a_task_addr;
-                            fq_tag_data[fsm_li_fq] <= g_task_valid ? {32'b0, g_task_data} : a_task_data;
-                            fq_tag_valid[fsm_li_fq] <= 1'b1;
-                            task_id_counter <= task_id_counter + 1;
-                            hq_fq_enqueued <= hq_fq_enqueued + 1;
-                            fsm_found_slot = 1'b1;
-                            // DEBUG: Removed FQ Enqueue output
-                        end
-                    end
-                end
+                // REMOVED: FQ source 3 (direct enqueue from g_task_valid)
+                // This was causing double-dispatch: tasks entered FQ directly from input
+                // WHILE ALSO entering G-Queue, creating duplicate entries in the pipeline.
+                // Tasks now ONLY enter FQ via source 1 (G-Queue→FQ) or source 2 (A-Queue→FQ).
 
                 // Dequeue from FQ → move to DQ when DQ has space
                 begin
@@ -1324,6 +1312,7 @@ module global_scheduler_mq #(
                             fq_tag_valid[fsm_li_fq_dq] <= 1'b0;
                             dq_tail <= (dq_tail == DQ_DEPTH-1) ? 0 : dq_tail + 1;
                             dq_count <= dq_count + 1;
+                            fq_count <= fq_count - 1;
 
                             fsm_found_slot = 1'b1;
                         end
@@ -1796,10 +1785,9 @@ module global_scheduler_mq #(
             
             // FIXED: G-Core enqueue logic - Single path to// Accept G-Core tasks if credits available
             if (g_task_valid && !g_task_valid_prev && g_credits > 0) begin
-                // CRITICAL FIX: Increment dispatch counter immediately when task is accepted
-                counter_dispatched <= counter_dispatched + 1;
+                // Counter incremented only at actual dispatch (line ~1030), not here
                 $display("[%0t] [SCHED-G] G-Task ACCEPTED! g_task_valid=%b, credits=%0d, counter_dispatched=%0d", 
-                         $time, g_task_valid, g_credits, counter_dispatched + 1);
+                         $time, g_task_valid, g_credits, counter_dispatched);
                 if (g_q_count < G_QUEUE_THRESHOLD) begin
                     // Normal enqueue path
                     g_q_addr[g_tail] <= g_task_addr;
@@ -1824,22 +1812,6 @@ module global_scheduler_mq #(
                     $display("[%0t] [SCHEDULER_G] G-Task RING BALANCED: credits=%0d, q_count=%0d", $time, g_credits, g_q_count);
                     `endif
                 end
-            end else if (g_task_valid && !g_task_valid_prev) begin
-                // ADMISSION CONTROL: Reject - no space available
-                admission_rejections <= admission_rejections + 1;
-                if (g_q_count >= G_QUEUE_THRESHOLD) begin
-                    `ifdef DEBUG_SCHEDULER
-                    $display("[%0t] [SCHEDULER_G] G-Task REJECTED: queue full (q_count=%0d >= threshold=%0d)", $time, g_q_count, G_QUEUE_THRESHOLD);
-                    `endif
-                end else if (ring_bus_congested || ring_bus_g_packets >= 32'd100) begin
-                    `ifdef DEBUG_SCHEDULER
-                    $display("[%0t] [SCHEDULER_G] G-Task REJECTED: ring congested (packets=%0d)", $time, ring_bus_g_packets);
-                    `endif
-                end else if (g_credits == 0) begin
-                    `ifdef DEBUG_SCHEDULER
-                    $display("[%0t] [SCHEDULER_G] G-Task REJECTED: no credits", $time);
-                    `endif
-                end
             end else if (g_task_valid && !g_task_valid_prev && g_credits == 0) begin
                 // RING BUS LOAD BALANCING: Try ring bus if no credits
                 if (!ring_bus_congested && ring_bus_g_packets < 32'd80) begin
@@ -1853,12 +1825,13 @@ module global_scheduler_mq #(
                     g_q_count <= g_q_count + 1;
                     g_credits <= g_credits - 1;
                     bp_actual_accepts <= bp_actual_accepts + 1;
-                    // DEBUG("[%0t] [SCHED-RB] 🔄 G-Task ROUTED via Ring Bus (no_credits, ring_packets=%0d)", $time, ring_bus_g_packets);
                 end else begin
                     // REJECT: No credits and ring bus congested
                     bp_queue_full_rejections <= bp_queue_full_rejections + 1;
-                    // DEBUG("[%0t] [SCHED-CR] ⚠ G-Task REJECTED: NO_CREDITS & RING_CONGESTED (queue_depth=%0d, ring_packets=%0d)", $time, g_q_count, ring_bus_g_packets);
                 end
+            end else if (g_task_valid && !g_task_valid_prev) begin
+                // ADMISSION CONTROL: Reject - no space available
+                admission_rejections <= admission_rejections + 1;
             end
 
             // Clear fresh flag after 1 cycle (task now eligible for dispatch)
@@ -1872,8 +1845,7 @@ module global_scheduler_mq #(
 
             // HARD BACKPRESSURE: Stop injection if system is overwhelmed
             if (a_task_valid && !a_task_valid_prev && a_credits > 0 && a_q_count < A_QUEUE_THRESHOLD) begin
-                // CRITICAL FIX: Increment dispatch counter immediately when task is accepted
-                counter_dispatched <= counter_dispatched + 1;
+                // Counter incremented only at actual dispatch (line ~1045), not here
                 // Additional safety: Check ring bus congestion before accepting
                 if (!ring_bus_congested || (ring_bus_a_packets < 32'd30)) begin
                     a_q_addr[a_tail]  <= a_task_addr;
@@ -1881,7 +1853,7 @@ module global_scheduler_mq #(
                     a_q_valid[a_tail] <= 1'b1; a_q_disp[a_tail] <= 1'b0;
                     a_q_aging[a_tail] <= 8'b0; a_q_wait[a_tail] <= 8'b0;
                     a_q_fresh[a_tail] <= 1'b1;  // FIX: Mark as fresh
-                    a_tail <= (a_tail == $clog2(A_QUEUE_DEPTH)'(A_QUEUE_DEPTH-1)) ? $clog2(A_QUEUE_DEPTH)'(0) : a_tail + $clog2(A_QUEUE_DEPTH)'(1);
+                    a_tail <= (a_tail == $unsigned(A_QUEUE_DEPTH-1)) ? 0 : a_tail + 1;
                     a_q_count <= a_q_count + 1;
                     a_credits <= a_credits - 1;
                     bp_actual_accepts <= bp_actual_accepts + 1;
@@ -1901,7 +1873,7 @@ module global_scheduler_mq #(
                     a_q_valid[a_tail] <= 1'b1; a_q_disp[a_tail] <= 1'b0;
                     a_q_aging[a_tail] <= 8'b0; a_q_wait[a_tail] <= 8'b0;
                     a_q_fresh[a_tail] <= 1'b1;
-                    a_tail <= (a_tail == $clog2(A_QUEUE_DEPTH)'(A_QUEUE_DEPTH-1)) ? $clog2(A_QUEUE_DEPTH)'(0) : a_tail + $clog2(A_QUEUE_DEPTH)'(1);
+                    a_tail <= (a_tail == $unsigned(A_QUEUE_DEPTH-1)) ? 0 : a_tail + 1;
                     a_q_count <= a_q_count + 1;
                     a_credits <= a_credits - 1;
                     bp_actual_accepts <= bp_actual_accepts + 1;
@@ -1920,7 +1892,7 @@ module global_scheduler_mq #(
                     a_q_valid[a_tail] <= 1'b1; a_q_disp[a_tail] <= 1'b0;
                     a_q_aging[a_tail] <= 8'b0; a_q_wait[a_tail] <= 8'b0;
                     a_q_fresh[a_tail] <= 1'b1;
-                    a_tail <= (a_tail == $clog2(A_QUEUE_DEPTH)'(A_QUEUE_DEPTH-1)) ? $clog2(A_QUEUE_DEPTH)'(0) : a_tail + $clog2(A_QUEUE_DEPTH)'(1);
+                    a_tail <= (a_tail == $unsigned(A_QUEUE_DEPTH-1)) ? 0 : a_tail + 1;
                     a_q_count <= a_q_count + 1;
                     a_credits <= a_credits - 1;
                     bp_actual_accepts <= bp_actual_accepts + 1;
@@ -1947,7 +1919,7 @@ module global_scheduler_mq #(
                 n_q_valid[n_tail] <= 1'b1; n_q_disp[n_tail] <= 1'b0;
                 n_q_aging[n_tail] <= 8'b0; n_q_wait[n_tail] <= 8'b0;
                 n_q_fresh[n_tail] <= 1'b1;  // FIX: Mark as fresh
-                n_tail <= (n_tail == $clog2(N_QUEUE_DEPTH)'(N_QUEUE_DEPTH-1)) ? $clog2(N_QUEUE_DEPTH)'(0) : n_tail + $clog2(N_QUEUE_DEPTH)'(1);
+                n_tail <= (n_tail == $unsigned(N_QUEUE_DEPTH-1)) ? 0 : n_tail + 1;
                 n_q_count <= n_q_count + 1;
                 n_credits <= n_credits - 1;
                 bp_actual_accepts <= bp_actual_accepts + 1;
@@ -1964,11 +1936,11 @@ module global_scheduler_mq #(
                 end
             end
 
-            // Credit refill on completion - FIXED: Restore A-Core credit return
-            // Credits are returned in individual completion paths (lines 1654, 1682, 1703)
-            // if (g_core_complete && g_credits < G_QUEUE_DEPTH) g_credits <= g_credits + 1;
+            // Credit refill on completion - FIXED: Restore all credit returns
+            // Safety net: ensure credits are returned even if handler path misses
+            if (g_core_complete && !g_core_complete_prev && g_credits < G_QUEUE_DEPTH) g_credits <= g_credits + 1;
             if (a_core_complete && !a_core_complete_prev && a_credits < A_QUEUE_DEPTH) a_credits <= a_credits + 1;
-            // if (npu_complete && n_credits < N_QUEUE_DEPTH)    n_credits <= n_credits + 1;
+            if (npu_complete && !npu_complete_prev && n_credits < N_QUEUE_DEPTH) n_credits <= n_credits + 1;
 
             // ── AGING ──
             begin
@@ -2022,7 +1994,7 @@ module global_scheduler_mq #(
             g_reset_timer <= 1'b0; a_reset_timer <= 1'b0; n_reset_timer <= 1'b0;
 
             // ── Completion (CONCURRENT: each domain独立) ──
-            if (g_core_complete && !g_core_complete_prev && g_active_task_valid) begin
+            if (g_core_complete && !g_core_complete_prev && g_core_inflight) begin
                 counter_completed <= counter_completed + 1;
                 hq_cq_completed <= hq_cq_completed + 1;  // Increment CQ counter
                 
@@ -2030,8 +2002,8 @@ module global_scheduler_mq #(
                 g_core_inflight <= 1'b0;
                 g_reset_timer <= 1'b1;  // Set reset flag instead of direct assignment
                 
-                // CRITICAL FIX: Decrement queue count when task completes with saturating logic
-                if (g_q_count > 0) g_q_count <= g_q_count - 1;
+                // NOTE: g_q_count is already decremented at dispatch (line 1035) or G→FQ move (line 1256)
+                // Do NOT decrement again here — would cause queue tracking corruption
                 g_credits <= g_credits + 1;  // FIX: Return credit on completion
                 
                 pending_result <= g_core_result; pending_result_valid <= 1'b1;
@@ -2059,8 +2031,8 @@ module global_scheduler_mq #(
                     pending_result_valid <= 1'b1;
                     pending_result_type  <= TASK_AI;
                     
-                    // CRITICAL FIX: Decrement queue count when A-Core task completes with saturating logic
-                    if (a_q_count > 0) a_q_count <= a_q_count - 1;
+                    // NOTE: a_q_count is already decremented at dispatch (line 1049) or A→FQ move (line 1275)
+                    // Do NOT decrement again here — would cause queue tracking corruption
                     
                     // DEBUG("[%0t] [MQ-SCHEDULER] ✅ A-Core result consumed: pending_result_valid=1", $time);
                 end
@@ -2075,6 +2047,9 @@ module global_scheduler_mq #(
             if (npu_complete && !npu_complete_prev && n_active_task_valid) begin
                 counter_completed <= counter_completed + 1;
                 hq_cq_completed <= hq_cq_completed + 1;  // Increment CQ counter
+                
+                // CRITICAL FIX: Return credit when NPU task completes
+                n_credits <= n_credits + 1;
                 
                 // CRITICAL FIX: Clear inflight when task completes
                 n_core_inflight <= 1'b0;
@@ -2091,7 +2066,29 @@ module global_scheduler_mq #(
                 n_active_write_addr <= {ADDR_WIDTH{1'b0}};
                 n_active_has_write <= 1'b0;
             end
-            if (!active_task_valid) pending_result_valid <= 1'b0;
+            // DIAGNOSTIC: Pipeline state after first 2 G-core completions
+            if (counter_completed == 2 && counter_completed_prev < 2) begin
+                fsm_li = 0; for (fsm_li = 0; fsm_li < FQ_DEPTH; fsm_li = fsm_li + 1) begin
+                    if (fq_tag_valid[fsm_li]) $display("[DIAG] FQ[%0d] valid addr=0x%h", fsm_li, fq_tag_addr[fsm_li]);
+                end
+                fsm_li = 0; for (fsm_li = 0; fsm_li < DQ_DEPTH; fsm_li = fsm_li + 1) begin
+                    if (dq_valid[fsm_li]) $display("[DIAG] DQ[%0d] valid decoded=%b dep=0x%04h addr=0x%h", fsm_li, dq_decoded[fsm_li], dq_dep_mask[fsm_li], dq_addr[fsm_li]);
+                end
+                fsm_li = 0; for (fsm_li = 0; fsm_li < EQ_ALU_DEPTH; fsm_li = fsm_li + 1) begin
+                    if (eq_alu_valid[fsm_li]) $display("[DIAG] EQ_ALU[%0d] valid ready=%b addr=0x%h", fsm_li, eq_alu_ready[fsm_li], eq_alu_addr[fsm_li]);
+                end
+                fsm_li = 0; for (fsm_li = 0; fsm_li < EQ_MEM_DEPTH; fsm_li = fsm_li + 1) begin
+                    if (eq_mem_valid[fsm_li]) $display("[DIAG] EQ_MEM[%0d] valid ready=%b addr=0x%h", fsm_li, eq_mem_ready[fsm_li], eq_mem_addr[fsm_li]);
+                end
+                $display("[DIAG] fq_count=%0d dq_count=%0d eq_alu_count=%0d eq_mem_count=%0d", fq_count, dq_count, eq_alu_count, eq_mem_count);
+                $display("[DIAG] g_core_busy=%b g_active_task_valid=%b g_core_inflight=%b counter_completed=%0d", g_core_busy, g_active_task_valid, g_core_inflight, counter_completed);
+            end
+
+            // FIX: Clear pending_result_valid on rising edge of new task
+            // Old code used `active_task_valid` which was NEVER set by the v4.0 pipeline,
+            // causing pending_result_valid to always be cleared in the same cycle
+            // it was asserted (race condition). Now we clear on next task arrival instead.
+            if (g_task_valid && !g_task_valid_prev) pending_result_valid <= 1'b0;
 
             // ── Stall tracking + WATCHDOG RECOVERY (PER-DOMAIN) ──
             // P1: Each domain has independent watchdog with different thresholds
@@ -2260,16 +2257,19 @@ module global_scheduler_mq #(
     task clear_npu_waiting_tasks;
         input [ADDR_WIDTH-1:0] target_addr;
         integer i_cl;
+        reg [7:0] credit_ret;
         begin
+            credit_ret = 0;
             for (i_cl = 0; i_cl < N_QUEUE_DEPTH; i_cl = i_cl + 1) begin
                 if (n_q_valid[i_cl] && n_q_data[i_cl][ADDR_WIDTH-1:0] == target_addr) begin
                     // DEBUG("[%0t] [MQ-SCHEDULER]    → Clearing NPU queue entry %0d (addr 0x%h)", $time, i_cl, target_addr);
                     n_q_valid[i_cl] <= 1'b0;
                     n_q_disp[i_cl] <= 1'b0;
-                    // Saturating logic already present for NPU queue
-                    if (n_credits < N_QUEUE_DEPTH) n_credits <= n_credits + 1;
+                    credit_ret = credit_ret + 1;
                 end
             end
+            if (credit_ret > 0 && n_credits + credit_ret <= N_QUEUE_DEPTH)
+                n_credits <= n_credits + credit_ret;
         end
     endtask
 

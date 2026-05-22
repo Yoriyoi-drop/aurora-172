@@ -23,7 +23,7 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module cache_profiler #(
-    parameter ADDR_WIDTH    = AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
+    parameter ADDR_WIDTH    = `AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
     parameter NUM_CORES     = 16,        // OPTIMIZED: 32->16 (smaller profiler)
     parameter HISTOGRAM_BINS = 8         // OPTIMIZED: 16->8 (simpler histogram)
 )(
@@ -213,6 +213,11 @@ module cache_profiler #(
             end
             if (mesi_writebacks > 0) begin
                 mesi_modified_count <= mesi_modified_count + mesi_writebacks;
+            end
+            // Track exclusive lines: inferred as read misses that get exclusive state
+            // (approximated as L1 misses - L1 writebacks - shared grants)
+            if (total_l1_misses >= total_writebacks + mesi_shared_count) begin
+                mesi_exclusive_count <= total_l1_misses - total_writebacks - mesi_shared_count;
             end
 
             // Print trigger

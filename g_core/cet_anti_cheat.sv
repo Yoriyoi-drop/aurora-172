@@ -45,8 +45,8 @@
 
 module cet_anti_cheat #(
     // Use standardized parameters
-    parameter DATA_WIDTH            = AURORA_DATA_WIDTH,
-    parameter ADDR_WIDTH            = AURORA_ADDR_WIDTH,
+    parameter DATA_WIDTH            = `AURORA_DATA_WIDTH,
+    parameter ADDR_WIDTH            = `AURORA_ADDR_WIDTH,
     parameter SHADOW_STACK_DEPTH    = 128,   // OPTIMIZED: 256->128 (smaller shadow stack)
     parameter MAX_GAME_STATES       = 8      // OPTIMIZED: 16->8 (fewer game states)
 )(
@@ -61,6 +61,7 @@ module cet_anti_cheat #(
     input  wire                         instr_is_call,
     input  wire                         instr_is_ret,
     input  wire                         instr_is_endbranch,
+    input  wire [ADDR_WIDTH-1:0]        instr_ret_addr,
 
     // Game state integrity
     input  wire [7:0]                   game_state_id,
@@ -81,7 +82,7 @@ module cet_anti_cheat #(
 
     // Status signals
     output reg                          shadow_stack_active,
-    output reg [7:0]                    shadow_stack_depth_cnt,
+    output reg [$clog2(SHADOW_STACK_DEPTH+1):0] shadow_stack_depth_cnt,
     output reg                          game_state_integrity_ok,
 
     // Debug / performance counters
@@ -98,7 +99,7 @@ module cet_anti_cheat #(
     // Shadow Stack
     // ─────────────────────────────────────────────────────────────
     reg [ADDR_WIDTH-1:0]    shadow_stack [0:SHADOW_STACK_DEPTH-1];
-    reg [7:0]               shadow_sp;  // Stack pointer
+    reg [$clog2(SHADOW_STACK_DEPTH+1):0] shadow_sp;
 
     // ─────────────────────────────────────────────────────────────
     // Game State Registry
@@ -180,7 +181,7 @@ module cet_anti_cheat #(
                     if (cet_shadow_enable) begin
                         if (instr_is_call) begin
                             // CALL: Push return address to shadow stack
-                            if (shadow_sp < 8'(SHADOW_STACK_DEPTH - 1)) begin
+                            if (shadow_sp < SHADOW_STACK_DEPTH) begin
                                 shadow_stack[shadow_sp] <= 48'(instr_pc + 48'd4);  // Next instruction
                                 shadow_sp <= shadow_sp + 8'd1;
                                 shadow_stack_active <= 1'b1;
@@ -190,7 +191,7 @@ module cet_anti_cheat #(
                         end
 
                         // Check ENDBRANCH on indirect branches
-                        if (instr_is_branch && !instr_is_endbranch) begin
+                        if (instr_is_branch && !instr_is_endbranch && !instr_is_call) begin
                             // JOP detected: branch without ENDBRANCH marker
                             violation_detected <= 1'b1;
                             violation_latched <= 1'b1;  // FIXED: Latch the violation
@@ -212,7 +213,7 @@ module cet_anti_cheat #(
                         // FIXED: Read expected return address BEFORE decrementing SP
                         // shadow_sp points to next available slot, so top entry is at shadow_sp-1
                         // With non-blocking assignment, shadow_sp on RHS is the OLD value
-                        if (instr_pc != shadow_stack[shadow_sp - 8'd1]) begin
+                        if (instr_ret_addr != shadow_stack[shadow_sp - 8'd1]) begin
                             // ROP detected: return address mismatch
                             violation_detected <= 1'b1;
                             violation_latched <= 1'b1;  // FIXED: Latch the violation
@@ -240,13 +241,13 @@ module cet_anti_cheat #(
 
                     // Register game state hash
                     if (game_state_valid && game_state_id < MAX_GAME_STATES) begin
-                        registered_hashes[game_state_id_4b & 4'h7] <= game_state_hash;
-                        registered_valid[game_state_id_4b & 4'h7] <= 1'b1;
+                        registered_hashes[game_state_id[3:0]] <= game_state_hash;
+                        registered_valid[game_state_id[3:0]] <= 1'b1;
                     end
 
                     // Verify current game state
-                    if (game_state_valid && registered_valid[game_state_id_4b & 4'h7]) begin
-                        if (game_state_hash != registered_hashes[game_state_id_4b & 4'h7]) begin
+                    if (game_state_valid && registered_valid[game_state_id[3:0]]) begin
+                        if (game_state_hash != registered_hashes[game_state_id[3:0]]) begin
                             // State tampering detected!
                             violation_detected <= 1'b1;
                             violation_latched <= 1'b1;  // FIXED: Latch the violation

@@ -21,8 +21,8 @@
 
 module memory_fabric #(
     // Use standardized parameters from aurora_params.svh
-    parameter DATA_WIDTH        = AURORA_DATA_WIDTH,
-    parameter ADDR_WIDTH        = AURORA_ADDR_WIDTH,
+    parameter DATA_WIDTH        = `AURORA_DATA_WIDTH,
+    parameter ADDR_WIDTH        = `AURORA_ADDR_WIDTH,
     parameter NUM_PORTS          = 4,    // OPTIMIZED: 8->4 (fewer ports)
     parameter ARBITER_TYPE       = "ROUND_ROBIN",
     parameter QOS_ENABLE         = 1,    // ENABLED: Quality of Service for system reliability
@@ -33,7 +33,7 @@ module memory_fabric #(
     parameter L2_NUM_SETS       = 128,   // OPTIMIZED: 256->128
     parameter L2_ASSOCIATIVITY  = 4,    // OPTIMIZED: 8->4
     parameter L2_INDEX_BITS     = 7,    // OPTIMIZED: 8->7
-    parameter L2_LINE_SIZE      = 64,
+    parameter L2_LINE_SIZE      = 64,   // NOTE: 64 bytes = 512 bit, tetapi CACHE_LINE_WIDTH=256 bit = 32 byte — inconsistency offset decode
 
     // L3 Cache - smaller
     parameter L3_SIZE           = 128 * 1024 * 1024,  // OPTIMIZED: 256->128MB
@@ -117,17 +117,21 @@ module memory_fabric #(
     reg [31:0]                  fallback_count;
     reg [31:0]                  timeout_count;
     
-    // LPDDR5X Fast Tier Memory Array (64GB)
-    localparam LPDDR_SIZE = 64 * 1024 * 1024 * 1024 / CACHE_LINE_WIDTH;
-    reg [CACHE_LINE_WIDTH-1:0] lpddr_memory [0:LPDDR_SIZE-1];
+    // LPDDR5X Fast Tier Memory Array (modeled — 1024 entries for simulation only)
+    // synthesis translate_off
+    localparam LPDDR_SIZE = 1024;
+    // synthesis translate_on
+    reg [CACHE_LINE_WIDTH-1:0] lpddr_memory [0:1023];
     reg [7:0] lpddr_latency_counter;
     reg [ADDR_WIDTH-1:0] lpddr_pending_addr;
     reg lpddr_pending_rd_en, lpddr_pending_wr_en;
     reg [CACHE_LINE_WIDTH-1:0] lpddr_pending_wr_data;
     
-    // DDR5 Capacity Tier Memory Array (256GB)
-    localparam DDR_SIZE = 256 * 1024 * 1024 * 1024 / CACHE_LINE_WIDTH;
-    reg [CACHE_LINE_WIDTH-1:0] ddr_memory [0:DDR_SIZE-1];
+    // DDR5 Capacity Tier Memory Array (modeled — 1024 entries for simulation only)
+    // synthesis translate_off
+    localparam DDR_SIZE = 1024;
+    // synthesis translate_on
+    reg [CACHE_LINE_WIDTH-1:0] ddr_memory [0:1023];
     reg [7:0] ddr_latency_counter;
     reg [ADDR_WIDTH-1:0] ddr_pending_addr;
     reg ddr_pending_rd_en, ddr_pending_wr_en;
@@ -163,7 +167,7 @@ module memory_fabric #(
     reg [7:0]                   latency_counter;
 
     // Variable declarations (SystemVerilog style)
-    int i, j, k, l, m, n, o, p, q, r, s, t, u, v, w, x, y, z;       
+    int i, j, k;
     logic l2_hit;
     reg [3:0]                   l2_way;
     reg [L2_INDEX_BITS-1:0]     req_set_idx;
@@ -254,11 +258,12 @@ module memory_fabric #(
         input [L2_INDEX_BITS-1:0] idx;
         integer w;
         begin
-            // Pseudo-LRU: use stored LRU bits
+            // Pseudo-LRU: return first way not recently used (LRU bit = 0)
             l2_find_victim = 0;
             for (w = 0; w < L2_ASSOCIATIVITY; w = w + 1) begin
-                if (l2_lru[idx][w]) begin
+                if (!l2_lru[idx][w]) begin
                     l2_find_victim = w;
+                    w = L2_ASSOCIATIVITY;  // Break
                 end
             end
         end
@@ -287,10 +292,10 @@ module memory_fabric #(
             total_write_bytes <= 32'h0;
 
             // Initialize L2 - OPTIMIZED: Single loop for faster initialization
-            for (int i = 0; i < L2_NUM_SETS * L2_ASSOCIATIVITY; i++) begin
-                l2_lru[i>>2] = {L2_ASSOCIATIVITY{1'b0}};
-                l2_valid[i>>2][i&3] = 1'b0;
-                l2_dirty[i>>2][i&3] = 1'b0;
+            for (j = 0; j < L2_NUM_SETS * L2_ASSOCIATIVITY; j++) begin
+                l2_lru[j/L2_ASSOCIATIVITY] = {L2_ASSOCIATIVITY{1'b0}};
+                l2_valid[j/L2_ASSOCIATIVITY][j%L2_ASSOCIATIVITY] = 1'b0;
+                l2_dirty[j/L2_ASSOCIATIVITY][j%L2_ASSOCIATIVITY] = 1'b0;
             end
             
             // CRITICAL: Initialize tiered memory management
@@ -306,13 +311,15 @@ module memory_fabric #(
                 page_in_lpddr[p] = 1'b0;  // Start in DDR tier
             end
             
-            // Initialize LPDDR5X and DDR5 memory arrays
-            for (int i = 0; i < LPDDR_SIZE; i++) begin
+            // Initialize LPDDR5X and DDR5 memory arrays (SIM only)
+`ifdef SIMULATION
+            for (int i = 0; i < 1024; i++) begin
                 lpddr_memory[i] = {CACHE_LINE_WIDTH{1'b0}};
             end
-            for (int i = 0; i < DDR_SIZE; i++) begin
+            for (int i = 0; i < 1024; i++) begin
                 ddr_memory[i] = {CACHE_LINE_WIDTH{1'b0}};
             end
+`endif
             
             // Initialize tiered memory control
             lpddr_pending_rd_en <= 1'b0;
@@ -377,7 +384,7 @@ module memory_fabric #(
                         l2_hit <= 1'b0;
                         l2_misses <= l2_misses + 1;
                         l2_requests <= l2_requests + 1;
-                        state <= S_TIER_SELECT;  // NEW: Choose memory tier first
+                        state <= S_L2_MISS;  // CRITICAL FIX: Use L2_MISS entry for writeback check
                     end
                 end
 
@@ -387,11 +394,11 @@ module memory_fabric #(
                     end else begin
                         if (req_is_write) begin
                             // Write hit - update data & mark dirty
-                            l2_data[req_set_idx][l2_way] <= {{(CACHE_LINE_WIDTH-DATA_WIDTH){1'b0}}, req_wr_data};
+                            l2_data[req_set_idx][l2_way] <= req_wr_data[CACHE_LINE_WIDTH-1:0];
                             l2_dirty[req_set_idx][l2_way] <= 1'b1;
                         end else begin
                             // Read hit
-                            fabric_rd_data <= l2_data[req_set_idx][l2_way][DATA_WIDTH-1:0];
+                            fabric_rd_data <= {{(DATA_WIDTH-CACHE_LINE_WIDTH){1'b0}}, l2_data[req_set_idx][l2_way]};
                         end
                         
                         // Update LRU
@@ -423,11 +430,11 @@ module memory_fabric #(
                 S_LPDDR_ACCESS: begin
                     // Fast tier access with lower latency
                     if (!lpddr_pending_rd_en && !lpddr_pending_wr_en) begin
-                        // Start new LPDDR access
-                        lpddr_pending_addr <= mem_addr;
-                        lpddr_pending_rd_en <= mem_rd_en;
-                        lpddr_pending_wr_en <= mem_wr_en;
-                        lpddr_pending_wr_data <= mem_wr_data;
+                        // Start new LPDDR access using captured request info
+                        lpddr_pending_addr <= req_addr;
+                        lpddr_pending_rd_en <= !req_is_write;
+                        lpddr_pending_wr_en <= req_is_write;
+                        lpddr_pending_wr_data <= req_wr_data[CACHE_LINE_WIDTH-1:0];
                         lpddr_latency_counter <= 8'd0;
                         latency_counter <= 8'd0;
                     end else begin
@@ -438,11 +445,12 @@ module memory_fabric #(
                         end else begin
                             // LPDDR access complete
                             if (lpddr_pending_rd_en) begin
-                                fabric_rd_data <= lpddr_memory[lpddr_pending_addr];
+                                fabric_rd_data <= {{(DATA_WIDTH-CACHE_LINE_WIDTH){1'b0}}, lpddr_memory[lpddr_pending_addr[$clog2(1024)-1:0]]};
                             end
                             lpddr_pending_rd_en <= 1'b0;
                             lpddr_pending_wr_en <= 1'b0;
-                            outstanding_requests <= outstanding_requests - 1;
+                            if (outstanding_requests > 0)
+                                outstanding_requests <= outstanding_requests - 1;
                             state <= S_L2_ALLOCATE;
                         end
                     end
@@ -451,11 +459,11 @@ module memory_fabric #(
                 S_DDR_ACCESS: begin
                     // Capacity tier access with standard latency
                     if (!ddr_pending_rd_en && !ddr_pending_wr_en) begin
-                        // Start new DDR access
-                        ddr_pending_addr <= mem_addr;
-                        ddr_pending_rd_en <= mem_rd_en;
-                        ddr_pending_wr_en <= mem_wr_en;
-                        ddr_pending_wr_data <= mem_wr_data;
+                        // Start new DDR access using captured request info
+                        ddr_pending_addr <= req_addr;
+                        ddr_pending_rd_en <= !req_is_write;
+                        ddr_pending_wr_en <= req_is_write;
+                        ddr_pending_wr_data <= req_wr_data[CACHE_LINE_WIDTH-1:0];
                         ddr_latency_counter <= 8'd0;
                         latency_counter <= 8'd0;
                     end else begin
@@ -466,11 +474,12 @@ module memory_fabric #(
                         end else begin
                             // DDR access complete
                             if (ddr_pending_rd_en) begin
-                                fabric_rd_data <= ddr_memory[ddr_pending_addr];
+                                fabric_rd_data <= {{(DATA_WIDTH-CACHE_LINE_WIDTH){1'b0}}, ddr_memory[ddr_pending_addr[$clog2(1024)-1:0]]};
                             end
                             ddr_pending_rd_en <= 1'b0;
                             ddr_pending_wr_en <= 1'b0;
-                            outstanding_requests <= outstanding_requests - 1;
+                            if (outstanding_requests > 0)
+                                outstanding_requests <= outstanding_requests - 1;
                             state <= S_L2_ALLOCATE;
                         end
                     end
@@ -479,7 +488,7 @@ module memory_fabric #(
                 S_L2_ALLOCATE: begin
                     integer alloc_way;
                     alloc_way = l2_find_victim(req_set_idx);
-                    l2_data[req_set_idx][alloc_way] <= fabric_rd_data;
+                    l2_data[req_set_idx][alloc_way] <= fabric_rd_data[CACHE_LINE_WIDTH-1:0];
                     l2_valid[req_set_idx][alloc_way] <= 1'b1;
                     l2_dirty[req_set_idx][alloc_way] <= 1'b0;
                     l2_tags[req_set_idx][alloc_way] <= req_tag;
@@ -500,23 +509,17 @@ module memory_fabric #(
                         l2_evictions <= l2_evictions + 1;
                         state <= S_WRITEBACK;
                     end else begin
-                        // No writeback needed, fetch from memory
-                        mem_addr <= {req_tag, req_set_idx, {$clog2(L2_LINE_SIZE){1'b0}}};
-                        mem_rd_en <= 1'b1;
-                        mem_requests <= mem_requests + 1;
-                        state <= S_MEM_ACCESS;
+                        // No writeback needed, go to tier select for memory fetch
+                        state <= S_TIER_SELECT;
                     end
                 end
 
                 S_WRITEBACK: begin
                     mem_wr_en <= 1'b0;
                     if (mem_ready || latency_counter > 8'h20) begin
-                        // Writeback complete, now fetch
-                        mem_addr <= {req_tag, req_set_idx, {$clog2(L2_LINE_SIZE){1'b0}}};
-                        mem_rd_en <= 1'b1;
-                        mem_requests <= mem_requests + 1;
+                        // Writeback complete, now go to tier select for fetch
                         latency_counter <= 8'h0;
-                        state <= S_MEM_ACCESS;
+                        state <= S_TIER_SELECT;
                     end else begin
                         latency_counter <= latency_counter + 1;
                     end

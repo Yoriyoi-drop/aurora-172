@@ -27,8 +27,8 @@ module cache_coherency #(
     // Use standardized parameters
     parameter NUM_CORES       = 32,     // REDUCED: 128->32 for realistic scalability
     parameter CACHE_LINE_BITS = 8,      // 256 bytes per line, aligned with L1/L2
-    parameter ADDR_WIDTH      = AURORA_ADDR_WIDTH,
-    parameter DATA_WIDTH      = AURORA_DATA_WIDTH
+    parameter ADDR_WIDTH      = `AURORA_ADDR_WIDTH,
+    parameter DATA_WIDTH      = `AURORA_DATA_WIDTH
 )(
     input  wire                         clk,
     input  wire                         rst_n,
@@ -50,7 +50,8 @@ module cache_coherency #(
     output reg [DATA_WIDTH-1:0]         mem_wr_data,
     output reg                          mem_wr_req,
     input  wire [DATA_WIDTH-1:0]        mem_rd_data,
-    input  wire                         mem_rd_ready
+    input  wire                         mem_rd_ready,
+    input  wire                         mem_wr_ready
 );
 
     // =========================================================================
@@ -61,11 +62,12 @@ module cache_coherency #(
     // - Round-robin arbitration to prevent starvation
     // - Timeout mechanisms for deadlock prevention
     // =========================================================================
+    // FIX: Match encoding with l1_cache.sv and l2_cache.sv (M=01, E=10, S=11, I=00)
     typedef enum logic [1:0] {
-        MODIFIED    = 2'b00,
-        EXCLUSIVE   = 2'b01,
-        SHARED      = 2'b10,
-        INVALID     = 2'b11
+        MODIFIED    = 2'b01,
+        EXCLUSIVE   = 2'b10,
+        SHARED      = 2'b11,
+        INVALID     = 2'b00
     } mesi_state_t;
 
     // =========================================================================
@@ -157,7 +159,7 @@ module cache_coherency #(
                             coherence_timeout[core_idx] <= 16'd0;
                             deadlock_recovery_count <= deadlock_recovery_count + 1;
                         end
-                    end else if (per_core_mem_wr_req[core_idx] && !mem_rd_ready) begin
+                    end else if (per_core_mem_wr_req[core_idx] && !mem_wr_ready) begin
                         coherence_timeout[core_idx] <= coherence_timeout[core_idx] + 1;
                         if (coherence_timeout[core_idx] >= COHERENCE_WRITE_TIMEOUT) begin
                             $display("[%0t] [COHERENCE-DEADLOCK] WRITE timeout for core %0d - forcing recovery", $time, core_idx);
@@ -244,8 +246,9 @@ module cache_coherency #(
                             end
                         end
 
-                        // DEADLOCK FIX: Check for writeback completion before updating state
-                        if (!needs_wb || (needs_wb && !per_core_mem_wr_req[core_idx])) begin
+                        // CRITICAL FIX: Gunakan needs_wb (blocking = langsung update)
+                        // bukan per_core_mem_wr_req (NBA = stale). Hindari write ack sebelum writeback.
+                        if (!needs_wb) begin
                             // Update our cache line to MODIFIED
                             cache_line[core_idx] <= core_wr_data[core_idx];
                             cache_tag[core_idx] <= core_addr[core_idx][ADDR_WIDTH-1:CACHE_LINE_BITS];
@@ -262,6 +265,11 @@ module cache_coherency #(
                             // Wait for writeback to complete before acknowledging write
                             core_wr_ack[core_idx] <= 1'b0;
                         end
+                    end
+
+                    // ---- Clear write request on write acknowledgment ----
+                    if (mem_wr_ready && per_core_mem_wr_req[core_idx]) begin
+                        per_core_mem_wr_req[core_idx] <= 1'b0;
                     end
 
                     // ---- Handle memory response ----
@@ -368,26 +376,34 @@ module cache_coherency #(
                 coherence_misses <= 32'b0;
                 invalidations <= 32'b0;
             end
-            total_reads <= total_reads + $countones(core_rd_req);
-            total_writes <= total_writes + $countones(core_wr_req);
+            // Guard: only increment counters when valid access is active
+            if (|core_rd_req || |core_wr_req) begin
+                total_reads <= total_reads + $countones(core_rd_req);
+                total_writes <= total_writes + $countones(core_wr_req);
+            end
 
             // FIX v2: Count misses using registered state (combinational-safe)
-            for (int i = 0; i < NUM_CORES; i++) begin
-                if (core_rd_req[i] && cache_state[i] == INVALID) begin
-                    coherence_misses <= coherence_misses + 1;
+            // Guard: only count coherence events when a read request is active
+            if (|core_rd_req) begin
+                for (int i = 0; i < NUM_CORES; i++) begin
+                    if (core_rd_req[i] && cache_state[i] == INVALID) begin
+                        coherence_misses <= coherence_misses + 1;
+                    end
                 end
             end
 
             // FIX v2: Count invalidations via sharers bitmap (O(n) not O(n^2))
             // CRITICAL: Simplified bit manipulation for clarity and safety
-            for (int i = 0; i < NUM_CORES; i++) begin
-                if (core_wr_req[i]) begin
-                    // Count cores with higher index that are sharers
-                    reg [NUM_CORES-1:0] higher_cores_sharers;
-                    reg [NUM_CORES-1:0] mask;
-                    higher_cores_sharers = sharers[i] & ({NUM_CORES{1'b1}} << (i+1));
-                    mask = ({NUM_CORES{1'b1}} >> (NUM_CORES-i-1)) << (NUM_CORES-i-1);
-                    invalidations <= invalidations + $countones(higher_cores_sharers & mask);
+            if (|core_wr_req) begin
+                for (int i = 0; i < NUM_CORES; i++) begin
+                    if (core_wr_req[i]) begin
+                        // Count cores with higher index that are sharers
+                        reg [NUM_CORES-1:0] higher_cores_sharers;
+                        reg [NUM_CORES-1:0] mask;
+                        higher_cores_sharers = sharers[i] & ({NUM_CORES{1'b1}} << (i+1));
+                        mask = ({NUM_CORES{1'b1}} >> (NUM_CORES-i-1)) << (NUM_CORES-i-1);
+                        invalidations <= invalidations + $countones(higher_cores_sharers & mask);
+                    end
                 end
             end
         end

@@ -27,12 +27,12 @@
 
 module exception_handler #(
     // Use standardized parameters from aurora_params.svh
-    parameter NUM_G_CORES       = AURORA_NUM_G_CORES,       // FIXED: Use standard parameter
-    parameter NUM_A_CORES       = AURORA_NUM_A_CORES,       // FIXED: Use standard parameter
-    parameter NUM_H_CORES       = AURORA_NUM_H_CORES,       // FIXED: Use standard parameter
-    parameter NUM_NPU_CLUSTERS  = AURORA_NUM_NPU_CLUSTERS,  // FIXED: Use standard parameter
-    parameter DATA_WIDTH        = AURORA_DATA_WIDTH,        // FIXED: Use standard parameter
-    parameter ADDR_WIDTH        = AURORA_ADDR_WIDTH          // FIXED: Use standard parameter
+    parameter NUM_G_CORES       = `AURORA_NUM_G_CORES,       // FIXED: Use standard parameter
+    parameter NUM_A_CORES       = `AURORA_NUM_A_CORES,       // FIXED: Use standard parameter
+    parameter NUM_H_CORES       = `AURORA_NUM_H_CORES,       // FIXED: Use standard parameter
+    parameter NUM_NPU_CLUSTERS  = `AURORA_NUM_NPU_CLUSTERS,  // FIXED: Use standard parameter
+    parameter DATA_WIDTH        = `AURORA_DATA_WIDTH,        // FIXED: Use standard parameter
+    parameter ADDR_WIDTH        = `AURORA_ADDR_WIDTH          // FIXED: Use standard parameter
 )(
     input  wire                         clk,
     input  wire                         rst_n,
@@ -107,6 +107,11 @@ module exception_handler #(
     localparam EXC_ERROR_CODE_NONE = 8'h00;
     localparam EXC_CORE_ID_ZERO = 16'd0;
     localparam EXC_RECOVERY_ACTION_NONE = 8'd0;
+    localparam ERROR_RATE_THRESHOLD = 32'd1000;
+    localparam CORE_TYPE_G = 8'h01;
+    localparam CORE_TYPE_A = 8'h02;
+    localparam CORE_TYPE_H = 8'h03;
+    localparam CORE_TYPE_NPU = 8'h04;
     
     reg [31:0]                       error_history [0:EXC_ERROR_HISTORY_SIZE-1];
     reg [6:0]                        error_history_head;     // 7 bits for 128 entries
@@ -456,10 +461,13 @@ module exception_handler #(
                 recovery_request <= 1'b0;
             end
             
-            // DEADLOCK FIX: Use explicit assignments instead of for-loop in always block
-            // Process G-Core exceptions with rate limiting (all cores)
+            // FIX Issue A: Prioritize errors by core type severity: G-core > A-core > H-core > NPU
+            // Each loop only fires if no higher-priority error was already latched.
+            current_error_valid <= 1'b0;
+
+            // 1. G-Core exceptions (highest priority)
             for (int g = 0; g < NUM_G_CORES && error_rate_count < ERROR_RATE_THRESHOLD; g = g + 1) begin
-                if (g_core_error_valid[g] && (error_rate_count < ERROR_RATE_THRESHOLD)) begin
+                if (g_core_error_valid[g] && (error_rate_count < ERROR_RATE_THRESHOLD) && !current_error_valid) begin
                     total_error_count <= total_error_count + 1;
                     g_core_error_count <= g_core_error_count + 1;
                     
@@ -467,20 +475,17 @@ module exception_handler #(
                     error_history[error_history_tail] <= {g_core_error_code[g], EXC_ERROR_CODE_NONE, 8'd0};
                     error_history_tail <= (error_history_tail + 1) % EXC_ERROR_HISTORY_SIZE;
                     
-                    // Determine if this is highest priority error
-                    if (!current_error_valid || g_core_error_code[g][3:0] > current_error_code[3:0]) begin
-                        current_error_code <= g_core_error_code[g];
-                        current_error_source <= {CORE_TYPE_G, g[7:0]};  // G-Core type + ID
-                        current_error_valid <= 1'b1;
-                    end
+                    current_error_code <= g_core_error_code[g];
+                    current_error_source <= {CORE_TYPE_G, g[7:0]};  // G-Core type + ID
+                    current_error_valid <= 1'b1;
                     
                     $display("[%0t] [EXCEPTION] G-Core#%0d: Error 0x%02h", $time, g, g_core_error_code[g]);
                 end
             end
             
-            // Process A-Core exceptions with rate limiting - OPTIMIZED: Early exit
+            // 2. A-Core exceptions (only if no G-core error captured)
             for (int a = 0; a < NUM_A_CORES && error_rate_count < ERROR_RATE_THRESHOLD; a = a + 1) begin
-                if (a_core_error_valid[a] && (error_rate_count < ERROR_RATE_THRESHOLD)) begin
+                if (a_core_error_valid[a] && (error_rate_count < ERROR_RATE_THRESHOLD) && !current_error_valid) begin
                     total_error_count <= total_error_count + 1;
                     a_core_error_count <= a_core_error_count + 1;
                     
@@ -488,20 +493,17 @@ module exception_handler #(
                     error_history[error_history_tail] <= {a_core_error_code[a], EXC_ERROR_CODE_NONE, a[7:0]};
                     error_history_tail <= (error_history_tail + 1) % EXC_ERROR_HISTORY_SIZE;
                     
-                    // Determine if this is highest priority error
-                    if (!current_error_valid || get_error_priority(a_core_error_code[a]) > get_error_priority(current_error_code)) begin
-                        current_error_code <= a_core_error_code[a];
-                        current_error_source <= {CORE_TYPE_A, a[7:0]};  // A-Core type + ID
-                        current_error_valid <= 1'b1;
-                    end
+                    current_error_code <= a_core_error_code[a];
+                    current_error_source <= {CORE_TYPE_A, a[7:0]};  // A-Core type + ID
+                    current_error_valid <= 1'b1;
                     
                     $display("[%0t] [EXCEPTION] A-Core#%0d: Error 0x%02h", $time, a, a_core_error_code[a]);
                 end
             end
             
-            // Process H-Core exceptions with rate limiting - OPTIMIZED: Early exit
+            // 3. H-Core exceptions (only if no G/A-core error captured)
             for (int h = 0; h < NUM_H_CORES && error_rate_count < ERROR_RATE_THRESHOLD; h = h + 1) begin
-                if (h_core_error_valid[h] && (error_rate_count < ERROR_RATE_THRESHOLD)) begin
+                if (h_core_error_valid[h] && (error_rate_count < ERROR_RATE_THRESHOLD) && !current_error_valid) begin
                     total_error_count <= total_error_count + 1;
                     h_core_error_count <= h_core_error_count + 1;
                     
@@ -509,20 +511,17 @@ module exception_handler #(
                     error_history[error_history_tail] <= {h_core_error_code[h], CORE_TYPE_H, h[7:0]};
                     error_history_tail <= (error_history_tail + 1) % EXC_ERROR_HISTORY_SIZE;
                     
-                    // Determine if this is highest priority error
-                    if (!current_error_valid || get_error_priority(h_core_error_code[h]) > get_error_priority(current_error_code)) begin
-                        current_error_code <= h_core_error_code[h];
-                        current_error_source <= {CORE_TYPE_H, h[7:0]};  // H-Core type + ID
-                        current_error_valid <= 1'b1;
-                    end
+                    current_error_code <= h_core_error_code[h];
+                    current_error_source <= {CORE_TYPE_H, h[7:0]};  // H-Core type + ID
+                    current_error_valid <= 1'b1;
                     
                     $display("[%0t] [EXCEPTION] H-Core#%0d: Error 0x%02h", $time, h, h_core_error_code[h]);
                 end
             end
             
-            // Process NPU exceptions with rate limiting - OPTIMIZED: Early exit
+            // 4. NPU exceptions (only if no higher-priority error captured)
             for (int n = 0; n < NUM_NPU_CLUSTERS && error_rate_count < ERROR_RATE_THRESHOLD; n = n + 1) begin
-                if (npu_error_valid[n] && (error_rate_count < ERROR_RATE_THRESHOLD)) begin
+                if (npu_error_valid[n] && (error_rate_count < ERROR_RATE_THRESHOLD) && !current_error_valid) begin
                     total_error_count <= total_error_count + 1;
                     npu_error_count <= npu_error_count + 1;
                     
@@ -530,12 +529,9 @@ module exception_handler #(
                     error_history[error_history_tail] <= {npu_error_code[n], CORE_TYPE_NPU, n[7:0]};
                     error_history_tail <= (error_history_tail + 1) % EXC_ERROR_HISTORY_SIZE;
                     
-                    // Determine if this is highest priority error
-                    if (!current_error_valid || get_error_priority(npu_error_code[n]) > get_error_priority(current_error_code)) begin
-                        current_error_code <= npu_error_code[n];
-                        current_error_source <= {CORE_TYPE_NPU, n[7:0]};  // NPU type + ID
-                        current_error_valid <= 1'b1;
-                    end
+                    current_error_code <= npu_error_code[n];
+                    current_error_source <= {CORE_TYPE_NPU, n[7:0]};  // NPU type + ID
+                    current_error_valid <= 1'b1;
                     
                     $display("[%0t] [EXCEPTION] NPU#%0d: Error 0x%02h", $time, n, npu_error_code[n]);
                 end
@@ -553,7 +549,8 @@ module exception_handler #(
                 if (recovery_enable) begin
                     recovery_core_id <= current_error_source;
                     recovery_request <= 1'b1;
-                    recovery_action <= current_error_code;
+                    // FIX Issue B: Map error code to proper recovery action
+                    recovery_action <= error_code_to_action(current_error_code);
                 end
             end
         end
@@ -590,6 +587,34 @@ module exception_handler #(
     endfunction
     
     // =========================================================================
+    // Error code to recovery action mapping (Issue B)
+    // =========================================================================
+    function automatic [7:0] error_code_to_action;
+        input [7:0] error_code;
+        begin
+            case (error_code)
+                ERR_NONE:                error_code_to_action = ACTION_NONE;
+                ERR_ILLEGAL_OPCODE:      error_code_to_action = ACTION_RESET;
+                ERR_MEMORY_FAULT:        error_code_to_action = ACTION_CACHE_FLUSH;
+                ERR_BUS_ERROR:           error_code_to_action = ACTION_ISOLATE;
+                ERR_TIMEOUT:             error_code_to_action = ACTION_RESET;
+                ERR_OVERFLOW:            error_code_to_action = ACTION_RESET;
+                ERR_UNDERFLOW:           error_code_to_action = ACTION_RESET;
+                ERR_DIVIDE_BY_ZERO:      error_code_to_action = ACTION_RESET;
+                ERR_PRIVILEGE_VIOLATION: error_code_to_action = ACTION_RESET;
+                ERR_PAGE_FAULT:          error_code_to_action = ACTION_CACHE_FLUSH;
+                ERR_ALIGNMENT_FAULT:     error_code_to_action = ACTION_RESET;
+                ERR_DEBUG_TRAP:          error_code_to_action = ACTION_NONE;
+                ERR_SYSTEM_CALL:         error_code_to_action = ACTION_NONE;
+                ERR_HARDWARE_FAULT:      error_code_to_action = ACTION_ISOLATE;
+                ERR_POWER_FAULT:         error_code_to_action = ACTION_POWER_CYCLE;
+                ERR_THERMAL_FAULT:       error_code_to_action = ACTION_CLOCK_GATING;
+                default:                 error_code_to_action = ACTION_RESET;
+            endcase
+        end
+    endfunction
+
+    // =========================================================================
     // Debug and monitoring
     // =========================================================================
 
@@ -601,14 +626,14 @@ module exception_handler #(
             error_rate_threshold_exceeded <= 1'b0;
         end else begin
             // Simple error rate counting
-            if (total_error_count > 32'd1000) begin
+            if (current_error_valid && total_error_count > 32'd1000) begin
                 error_rate_count <= error_rate_count + 1;
 
                 if (error_rate_count >= 32'd500) begin
                     error_rate_threshold_exceeded <= 1'b1;
                     $display("[%0t] [EXCEPTION] ** HIGH ERROR RATE: %0d errors in last 1000 cycles", $time, error_rate_count);
                 end
-            end else begin
+            end else if (!current_error_valid) begin
                 error_rate_count <= 32'd0;
                 error_rate_threshold_exceeded <= 1'b0;
             end

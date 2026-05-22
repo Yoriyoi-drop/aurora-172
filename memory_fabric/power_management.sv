@@ -28,9 +28,9 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module power_management #(
-    parameter NUM_G_CORES       = AURORA_NUM_G_CORES,       // FIXED: Use standard parameter
-    parameter NUM_H_CORES       = AURORA_NUM_H_CORES,       // FIXED: Use standard parameter
-    parameter NUM_A_CORES       = AURORA_NUM_A_CORES,       // FIXED: Use standard parameter
+    parameter NUM_G_CORES       = `AURORA_NUM_G_CORES,       // FIXED: Use standard parameter
+    parameter NUM_H_CORES       = `AURORA_NUM_H_CORES,       // FIXED: Use standard parameter
+    parameter NUM_A_CORES       = `AURORA_NUM_A_CORES,       // FIXED: Use standard parameter
     parameter NUM_NPU_CLUSTERS  = 4,    // OPTIMIZED: 8->4 (reduced clusters)
     parameter TEMP_SENSORS      = 8,     // OPTIMIZED: 16->8 (fewer sensors)
     parameter DVFS_LEVELS       = 4,    // OPTIMIZED: 8->4 (simpler DVFS)
@@ -120,6 +120,11 @@ module power_management #(
     localparam POWER_HISTORY_SIZE   = 32;  // 32-cycle power history
     localparam ADAPTIVE_THRESHOLD   = 8;   // Adaptive threshold multiplier
     
+    // Intermediate DVFS variables (blocking assignment in always_ff)
+    reg [2:0]                   a_core_freq_next;
+    reg [2:0]                   npu_freq_next;
+    reg [2:0]                   g_core_freq_next;
+
     // ADVANCED: Adaptive power management
     reg [31:0]                  power_history [0:POWER_HISTORY_SIZE-1];
     reg [4:0]                   power_history_ptr;
@@ -353,23 +358,6 @@ module power_management #(
                 end
             end
             
-            // Predict thermal emergency
-            max_temp <= 16'd0;
-            for (int i = 0; i < TEMP_SENSORS; i++) begin
-                if (temp_sensor[i] > max_temp) begin
-                    max_temp <= temp_sensor[i];
-                end
-            end
-            
-            // Thermal emergency prediction
-            if (max_temp > (TEMP_SAFE_THRESHOLD_C - 10)) begin
-                thermal_emergency <= 1'b1;
-                thermal_emergency_count <= thermal_emergency_count + 1;
-            end else if (max_temp < (TEMP_SAFE_THRESHOLD_C - 20)) begin
-                thermal_emergency <= 1'b0;
-                thermal_emergency_count <= 8'd0;
-            end
-            
             // DEADLOCK FIX: Throttle timeout detection and recovery
             if (thermal_throttle && !auto_recovery_active) begin
                 throttle_timeout <= throttle_timeout + 1;
@@ -411,12 +399,25 @@ module power_management #(
                 recovery_cooldown <= 16'd0;
             end
 
-            // Calculate max temperature
-            max_temp <= 16'b0;
-            for (int i = 0; i < TEMP_SENSORS; i++) begin
-                if (temp_sensor[i] > max_temp) begin
-                    max_temp <= temp_sensor[i];
+            // Calculate max temperature (single computation)
+            begin
+                reg [15:0] computed_max;
+                computed_max = 16'd0;
+                for (int i = 0; i < TEMP_SENSORS; i++) begin
+                    if (temp_sensor[i] > computed_max) begin
+                        computed_max = temp_sensor[i];
+                    end
                 end
+                max_temp <= computed_max;
+            end
+            
+            // Thermal emergency prediction
+            if (max_temp > (TEMP_SAFE_THRESHOLD_C - 10)) begin
+                thermal_emergency <= 1'b1;
+                thermal_emergency_count <= thermal_emergency_count + 1;
+            end else if (max_temp < (TEMP_SAFE_THRESHOLD_C - 20)) begin
+                thermal_emergency <= 1'b0;
+                thermal_emergency_count <= 8'd0;
             end
 
             // ─────────────────────────────────────────────────
@@ -452,8 +453,8 @@ module power_management #(
                         pm_active_mode <= pm_target_mode;
                         pm_drain_cycles <= 16'b0;
                         // Force clear any stuck pipeline indicators
-                        power_mode_busy <= 1'b0;  // Briefly release to unblock
-                        power_mode_busy <= 1'b1;  // Re-assert for transition
+                        // FIX: Single assignment — two NBA to same reg is racy
+                        power_mode_busy <= 1'b1;  // Stay busy for transition
                     end else begin
                         pm_drain_cycles <= pm_drain_cycles + 1;
                         // DEADLOCK FIX: Progress check every 100 cycles
@@ -495,7 +496,10 @@ module power_management #(
             endcase
 
             // Thermal throttling (highest priority - override mode if needed)
-            if (max_temp > TEMP_CRITICAL_C) begin  // >95°C
+            if (auto_recovery_active) begin
+                // Keep safe recovery settings - do not let mode logic override
+                // (freq/voltage already set to 50% in throttle recovery above)
+            end else if (max_temp > TEMP_CRITICAL_C) begin  // >95°C
                 thermal_throttle <= 1'b1;
                 // Aggressively reduce frequency
                 g_core_freq_scale <= 3'd3;
@@ -526,11 +530,13 @@ module power_management #(
                             h_core_freq_scale <= 3'd4;
                             h_core_voltage_mv <= get_voltage_for_freq(3'd4);
 
-                            a_core_freq_scale <= (a_core_activity_cnt > 0) ? 3'd5 : 3'd2;
-                            a_core_voltage_mv <= get_voltage_for_freq(a_core_freq_scale);
+                            a_core_freq_next = (a_core_activity_cnt > 0) ? 3'd5 : 3'd2;
+                            a_core_freq_scale <= a_core_freq_next;
+                            a_core_voltage_mv <= get_voltage_for_freq(a_core_freq_next);
 
-                            npu_freq_scale <= (npu_activity_cnt > 0) ? 3'd4 : 3'd1;
-                            npu_voltage_mv <= get_voltage_for_freq(npu_freq_scale);
+                            npu_freq_next = (npu_activity_cnt > 0) ? 3'd4 : 3'd1;
+                            npu_freq_scale <= npu_freq_next;
+                            npu_voltage_mv <= get_voltage_for_freq(npu_freq_next);
 
                             // Power gate idle cores
                             for (int i = 0; i < NUM_G_CORES; i++) begin
@@ -547,8 +553,9 @@ module power_management #(
                             npu_voltage_mv <= get_voltage_for_freq(3'd7);
 
                             // Reduce gaming cores
-                            g_core_freq_scale <= (g_core_activity_cnt > 0) ? 3'd4 : 3'd2;
-                            g_core_voltage_mv <= get_voltage_for_freq(g_core_freq_scale);
+                            g_core_freq_next = (g_core_activity_cnt > 0) ? 3'd4 : 3'd2;
+                            g_core_freq_scale <= g_core_freq_next;
+                            g_core_voltage_mv <= get_voltage_for_freq(g_core_freq_next);
 
                             h_core_freq_scale <= 3'd4;
                             h_core_voltage_mv <= get_voltage_for_freq(3'd4);
@@ -638,29 +645,49 @@ module power_management #(
             // G-Core power (16 cores, high performance)
             begin
                 reg [63:0] g_voltage_sq;
-                g_voltage_sq = (g_core_voltage_mv * g_core_voltage_mv) / 1_000_000;  // V² in V
-                g_core_power_mw <= (g_core_activity_cnt * g_voltage_sq * (g_core_freq_scale + 1)) / 100;
+                `ifdef AURORA_SIMULATION
+                    g_voltage_sq = (g_core_voltage_mv * g_core_voltage_mv) / 1_000_000;
+                    g_core_power_mw <= (g_core_activity_cnt * g_voltage_sq * (g_core_freq_scale + 1)) / 100;
+                `else
+                    g_voltage_sq = (g_core_voltage_mv * g_core_voltage_mv) * 1 >> 20;
+                    g_core_power_mw <= (g_core_activity_cnt * g_voltage_sq * (g_core_freq_scale + 1)) * 10 >> 10;
+                `endif
             end
             
             // H-Core power (32 cores, medium performance)
             begin
                 reg [63:0] h_voltage_sq;
-                h_voltage_sq = (h_core_voltage_mv * h_core_voltage_mv) / 1_000_000;
-                h_core_power_mw <= (h_core_activity_cnt * h_voltage_sq * (h_core_freq_scale + 1)) / 120;
+                `ifdef AURORA_SIMULATION
+                    h_voltage_sq = (h_core_voltage_mv * h_core_voltage_mv) / 1_000_000;
+                    h_core_power_mw <= (h_core_activity_cnt * h_voltage_sq * (h_core_freq_scale + 1)) / 120;
+                `else
+                    h_voltage_sq = (h_core_voltage_mv * h_core_voltage_mv) * 1 >> 20;
+                    h_core_power_mw <= (h_core_activity_cnt * h_voltage_sq * (h_core_freq_scale + 1)) * 1365 >> 20;
+                `endif
             end
             
             // A-Core power (64 cores, AI/ML - higher power)
             begin
                 reg [63:0] a_voltage_sq;
-                a_voltage_sq = (a_core_voltage_mv * a_core_voltage_mv) / 1_000_000;
-                a_core_power_mw <= (a_core_activity_cnt * a_voltage_sq * (a_core_freq_scale + 1)) / 80;
+                `ifdef AURORA_SIMULATION
+                    a_voltage_sq = (a_core_voltage_mv * a_core_voltage_mv) / 1_000_000;
+                    a_core_power_mw <= (a_core_activity_cnt * a_voltage_sq * (a_core_freq_scale + 1)) / 80;
+                `else
+                    a_voltage_sq = (a_core_voltage_mv * a_core_voltage_mv) * 1 >> 20;
+                    a_core_power_mw <= (a_core_activity_cnt * a_voltage_sq * (a_core_freq_scale + 1)) * 51 >> 12;
+                `endif
             end
             
             // NPU power (8 clusters, inference - optimized)
             begin
                 reg [63:0] n_voltage_sq;
-                n_voltage_sq = (npu_voltage_mv * npu_voltage_mv) / 1_000_000;
-                npu_power_mw <= (npu_activity_cnt * n_voltage_sq * (npu_freq_scale + 1)) / 110;
+                `ifdef AURORA_SIMULATION
+                    n_voltage_sq = (npu_voltage_mv * npu_voltage_mv) / 1_000_000;
+                    npu_power_mw <= (npu_activity_cnt * n_voltage_sq * (npu_freq_scale + 1)) / 110;
+                `else
+                    n_voltage_sq = (npu_voltage_mv * npu_voltage_mv) * 1 >> 20;
+                    npu_power_mw <= (npu_activity_cnt * n_voltage_sq * (npu_freq_scale + 1)) * 149 >> 14;
+                `endif
             end
 
             total_power_mw <= g_core_power_mw + h_core_power_mw +

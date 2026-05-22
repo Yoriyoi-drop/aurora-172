@@ -28,8 +28,8 @@
 
 module fpga_io_wrapper #(
     // Use standardized parameters
-    parameter DATA_WIDTH = AURORA_DATA_WIDTH,
-    parameter ADDR_WIDTH = AURORA_ADDR_WIDTH
+    parameter DATA_WIDTH = `AURORA_DATA_WIDTH,
+    parameter ADDR_WIDTH = `AURORA_ADDR_WIDTH
 ) (
     // =========================================================================
     // External clock and reset
@@ -49,6 +49,8 @@ module fpga_io_wrapper #(
     output wire                         ddr4_cas_n,
     output wire                         ddr4_we_n,
     output wire                         ddr4_reset_n,
+    output wire                         ddr4_cke,
+    output wire                         ddr4_act_n,
     inout  wire [31:0]                  ddr4_dq,      // OPTIMIZED: 72->32 bits
     inout wire [3:0]                    ddr4_dqs_p,    // OPTIMIZED: 9->4 bits
     inout wire [3:0]                    ddr4_dqs_n,    // OPTIMIZED: 9->4 bits
@@ -126,7 +128,7 @@ wire [31:0] sys_status;
 wire [171:0] mem_addr;
 wire         mem_rd_en;
 wire         mem_wr_en;
-wire [171:0] mem_rd_data;
+logic [171:0] mem_rd_data;
 wire [171:0] mem_wr_data;
 reg          mem_ready;  // FIX: Changed from wire to reg (driven from always block)
 
@@ -210,6 +212,9 @@ assign sys_rst_sync = sys_rst_sync_ff[2];
 localparam DDR4_MAX_ERRORS = 8'd10;
 localparam DDR4_ERROR_RECOVERY_CYCLES = 16'd100;
 
+reg [31:0] ddr4_error_count;
+reg ddr4_error_flag;
+
 always @(posedge g_core_clk or negedge sys_rst_sync) begin
     if (!sys_rst_sync) begin
         ddr4_error_count <= 8'b0;
@@ -242,7 +247,7 @@ fpga_clock_distribution clock_dist (
     .debug_clk          (debug_clk),
     .clk_locked         (clk_locked),
     .clk_status         (clk_status),
-    .freq_sel           (4'b000),  // Default to max performance
+    .freq_sel           (3'b000),  // Default to max performance
     .freq_update_req    (1'b0),
     .freq_update_ack    (freq_update_ack)
 );
@@ -302,7 +307,7 @@ aurora_172_top #(
 reg [3:0]  ddr4_state;
 reg [3:0]  ddr4_state_prev;
 reg [15:0] ddr4_latency_counter;
-reg [71:0] ddr4_dq_int;
+wire [71:0] ddr4_dq_int = ddr4_dq_oe ? mem_rd_data[71:0] : {72{1'bz}};
 reg        ddr4_dq_oe;
 
 localparam DDR4_IDLE     = 4'b0000;
@@ -310,6 +315,7 @@ localparam DDR4_ACTIVATE = 4'b0001;
 localparam DDR4_READ     = 4'b0010;
 localparam DDR4_WRITE    = 4'b0011;
 localparam DDR4_PRECHARGE= 4'b0100;
+localparam DDR4_REFRESH = 4'b0101;
 // DDR4 timing parameters using defined constants
 localparam DDR4_READ_LATENCY = DDR4_READ_LATENCY_CYCLES;
 localparam DDR4_WRITE_LATENCY = DDR4_WRITE_LATENCY_CYCLES;
@@ -332,9 +338,9 @@ always @(posedge g_core_clk or negedge ddr4_reset_sync[2]) begin
     if (!ddr4_reset_sync[2]) begin
         ddr4_state <= DDR4_IDLE;
         ddr4_latency_counter <= 0;
-        ddr4_dq_int <= 0;
         ddr4_dq_oe <= 0;
         ddr4_timeout_counter <= 16'd0;
+        mem_ready <= 1'b0;
     end else begin
         ddr4_state_prev <= ddr4_state;
         // CRITICAL: Add timeout protection to prevent DDR4 state machine hang
@@ -354,7 +360,10 @@ always @(posedge g_core_clk or negedge ddr4_reset_sync[2]) begin
         
         case (ddr4_state)
             DDR4_IDLE: begin
-                if (mem_rd_en || mem_wr_en) begin
+                if (refresh_timeout) begin
+                    ddr4_state <= DDR4_REFRESH;
+                    ddr4_latency_counter <= 16'd8;
+                end else if (mem_rd_en || mem_wr_en) begin
                     // Add one cycle setup time for proper DDR4 timing
                     if (ddr4_latency_counter == 0) begin
                         ddr4_state <= DDR4_ACTIVATE;
@@ -376,8 +385,6 @@ always @(posedge g_core_clk or negedge ddr4_reset_sync[2]) begin
             
             DDR4_READ: begin
                 if (ddr4_latency_counter == 0) begin
-                    // Fill read data from memory array (simplified hash-based)
-                    ddr4_dq_int <= {mem_addr[71:0], 72'hDEADBEEF_CAFE1234} ^ {144{1'b1}};
                     ddr4_dq_oe <= 1'b1;
                     ddr4_state <= DDR4_PRECHARGE;
                     ddr4_latency_counter <= 16'd2;
@@ -388,6 +395,8 @@ always @(posedge g_core_clk or negedge ddr4_reset_sync[2]) begin
             
             DDR4_WRITE: begin
                 if (ddr4_latency_counter == 0) begin
+                    // Drive write data onto ddr4_dq when mem_wr_en && mem_wr_valid
+                    ddr4_dq_oe <= 1'b1;
                     mem_ready <= 1'b1;
                     ddr4_state <= DDR4_PRECHARGE;
                     ddr4_latency_counter <= 16'd2;
@@ -421,20 +430,17 @@ end
 
 // Auto-refresh every 7.8us (simplified counter at 500MHz)
 reg [20:0] refresh_counter;
+wire refresh_timeout;
+
 always @(posedge g_core_clk or negedge sys_rst_sync) begin
     if (!sys_rst_sync) begin
         refresh_counter <= 0;
     end else begin
         refresh_counter <= refresh_counter + 1;
-        if (refresh_counter == 21'h3FFFFF) begin  // ~7.8us at 500MHz
-            refresh_counter <= 0;
-            if (ddr4_state == DDR4_IDLE) begin
-                ddr4_state <= DDR4_REFRESH;
-                ddr4_latency_counter <= 16'd8;
-            end
-        end
     end
 end
+
+assign refresh_timeout = (refresh_counter == 21'h3FFFFF);
 
 // DDR4 control signals - CRITICAL: Explicit logic for safety
 reg [16:0] ddr4_addr_reg;
@@ -465,8 +471,8 @@ always @(*) begin
         ddr4_cke_reg = 2'b11;
         ddr4_cs_n_reg = 1'b0;
         ddr4_act_n_reg = (ddr4_state == DDR4_ACTIVATE) ? 1'b0 : 1'b1;
-        ddr4_ras_n_reg = (ddr4_state == DDR4_ACTIVATE || ddr4_state == DDR4_PRECHARGE) ? 1'b0 : 1'b1;
-        ddr4_cas_n_reg = (ddr4_state == DDR4_READ || ddr4_state == DDR4_WRITE) ? 1'b0 : 1'b1;
+        ddr4_ras_n_reg = (ddr4_state == DDR4_ACTIVATE || ddr4_state == DDR4_PRECHARGE || ddr4_state == DDR4_REFRESH) ? 1'b0 : 1'b1;
+        ddr4_cas_n_reg = (ddr4_state == DDR4_READ || ddr4_state == DDR4_WRITE || ddr4_state == DDR4_REFRESH) ? 1'b0 : 1'b1;
         ddr4_we_n_reg = (ddr4_state == DDR4_PRECHARGE || ddr4_state == DDR4_WRITE) ? 1'b0 : 1'b1;
     end
 end
@@ -481,8 +487,10 @@ assign ddr4_we_n = ddr4_we_n_reg;
 assign ddr4_reset_n = sys_rst_n;
 assign ddr4_act_n = ddr4_act_n_reg;
 
-// Tri-state DQ buffer
-assign ddr4_dq = ddr4_dq_oe ? ddr4_dq_int[31:0] : {32{1'bz}};
+// Tri-state DQ buffer — read: output data, write: output mem_wr_data, else: high-Z
+wire [31:0] ddr4_dq_write_data;
+assign ddr4_dq_write_data = (ddr4_state == DDR4_WRITE) ? mem_wr_data[31:0] : {32{1'bz}};
+assign ddr4_dq = ddr4_dq_oe ? ((ddr4_state == DDR4_READ) ? ddr4_dq_int[31:0] : ddr4_dq_write_data) : {32{1'bz}};
 
 // Read data to memory fabric
 always @(posedge g_core_clk or negedge sys_rst_sync) begin
@@ -646,6 +654,13 @@ localparam UART_IDLE  = 4'b0000;
 localparam UART_START = 4'b0001;
 localparam UART_DATA  = 4'b0010;
 localparam UART_STOP  = 4'b0011;
+localparam UART_FIFO_DEPTH = 12;
+localparam UART_FIFO_SIZE = 16;
+localparam UART_SYNC_BYTE = 8'h55;
+localparam UART_TX_LINE_IDLE = 1'b1;
+localparam UART_TX_LINE_ACTIVE = 1'b0;
+localparam UART_BIT_COUNT_RESET = 4'd0;
+localparam UART_BAUD_COUNTER_RESET = 16'd0;
 
 // UART TX State Machine
 always @(posedge debug_clk or negedge sys_rst_sync) begin
@@ -659,15 +674,6 @@ always @(posedge debug_clk or negedge sys_rst_sync) begin
         uart_tx_fifo_head <= 0;
         uart_tx_fifo_tail <= 0;
     end else begin
-        // UART constants
-        localparam UART_FIFO_DEPTH = 12;
-        localparam UART_FIFO_SIZE = 16;
-        localparam UART_SYNC_BYTE = 8'h55;  // Sync byte
-        localparam UART_TX_LINE_IDLE = 1'b1;
-        localparam UART_TX_LINE_ACTIVE = 1'b0;
-        localparam UART_BIT_COUNT_RESET = 4'd0;
-        localparam UART_BAUD_COUNTER_RESET = 16'd0;
-        
         // Enqueue status messages using defined constants
         if (uart_tx_fifo_count < UART_FIFO_DEPTH) begin
             // Simple heartbeat message

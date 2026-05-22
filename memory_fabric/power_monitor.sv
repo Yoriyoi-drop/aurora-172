@@ -36,7 +36,7 @@
 `include "interfaces/aurora_params.svh"
 
 module power_monitor #(
-    parameter DATA_WIDTH            = AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
+    parameter DATA_WIDTH            = `AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
     parameter NUM_DOMAINS           = 5,    // FIXED: was 3, but we track G, A, H, NPU, Memory
     parameter ENERGY_UNIT_uJ        = 1,    // 1µJ per count
     parameter POWER_AVG_WINDOW      = 256   // OPTIMIZED: 1000->256 (faster averaging)
@@ -159,8 +159,8 @@ module power_monitor #(
 
     assign pl1_exceeded = total_pl1_exceed;
     assign pl2_exceeded = total_pl2_exceed;
-    assign domain_pl1_exceeded = {2'b0, npu_pl1_exceed, h_pl1_exceed, a_pl1_exceed, g_pl1_exceed};
-    assign domain_pl2_exceeded = {2'b0, 1'b0, 1'b0, a_pl2_exceed, g_pl2_exceed};
+    assign domain_pl1_exceeded = {1'b0, npu_pl1_exceed, h_pl1_exceed, a_pl1_exceed, g_pl1_exceed};
+    assign domain_pl2_exceeded = {1'b0, 1'b0, 1'b0, a_pl2_exceed, g_pl2_exceed};
 
     // ─────────────────────────────────────────────────────────────
     // Main Logic: Energy counting + limit enforcement

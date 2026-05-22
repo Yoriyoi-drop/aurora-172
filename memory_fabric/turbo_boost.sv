@@ -34,7 +34,7 @@
 `include "interfaces/aurora_params.svh"
 
 module turbo_boost #(
-    parameter DATA_WIDTH            = AURORA_DATA_WIDTH,   // Standard data width
+    parameter DATA_WIDTH            = `AURORA_DATA_WIDTH,   // Standard data width
     parameter CLK_FREQ_MHZ          = 4000,  // 4GHz base clock frequency
 
     // G-Core turbo parameters

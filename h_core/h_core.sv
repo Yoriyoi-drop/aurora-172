@@ -76,6 +76,7 @@ module h_core #(
 
     reg [5:0]               rob_head;
     reg [5:0]               rob_tail;
+    reg [5:0]               rob_used;
 
     reg [DATA_WIDTH-1:0]    alu_result;
     reg [DATA_WIDTH-1:0]    load_data;
@@ -99,6 +100,23 @@ module h_core #(
     localparam RETIRE       = 3'b110;
     localparam ERROR_STATE  = 3'b111;
 
+    // Forwarding signals
+    wire [4:0] fwd_rs1_addr = saved_cmd_data[11:7];
+    wire [4:0] fwd_rs2_addr = saved_cmd_data[16:12];
+    wire [4:0] fwd_wb_addr  = rob_data[rob_head][21:17];
+    wire       fwd_wb_valid = (pipeline_state == WRITEBACK);
+
+    reg [DATA_WIDTH-1:0] fwd_rs1_val;
+    reg [DATA_WIDTH-1:0] fwd_rs2_val;
+    always @(*) begin
+        fwd_rs1_val = register_file[fwd_rs1_addr];
+        if (fwd_wb_valid && fwd_wb_addr == fwd_rs1_addr)
+            fwd_rs1_val = alu_result;
+        fwd_rs2_val = register_file[fwd_rs2_addr];
+        if (fwd_wb_valid && fwd_wb_addr == fwd_rs2_addr)
+            fwd_rs2_val = alu_result;
+    end
+
     // ALU operations
     localparam OP_NOP       = 8'h00;
     localparam OP_ADD       = 8'h01;
@@ -113,7 +131,7 @@ module h_core #(
     localparam OP_BRANCH    = 8'h0A;
 
     // Error codes - using standardized definitions from aurora_error_codes.svh
-    // No local error codes needed - use `ERR_ILLEGAL_OPCODE from include file
+    // No local error codes needed - use `AURORA_ERR_ILLEGAL_OPCODE from include file
 
     // =========================================================================
     // Main pipeline
@@ -176,6 +194,7 @@ module h_core #(
                 IDLE: begin
                     cmd_ready <= 1'b1;
                     busy <= 1'b0;
+                    result_valid <= 1'b0;
                     if (cmd_valid && !busy) begin
                         saved_opcode <= cmd_data[7:0];
                         // Validate opcode
@@ -239,7 +258,7 @@ module h_core #(
                             end
                             default: begin
                                 error_flag <= 1'b1;
-                                error_code <= `ERR_ILLEGAL_OPCODE;
+                                error_code <= `AURORA_ERR_ILLEGAL_OPCODE;
                                 error_valid <= 1'b1;
                                 busy <= 1'b0;
                                 pipeline_state <= ERROR_STATE;
@@ -256,10 +275,6 @@ module h_core #(
                 end
 
                 DECODE: begin
-                    // CRITICAL FIX: Enhanced ROB overflow protection
-                    // Use proper circular buffer arithmetic to handle wrap-around
-                    // FIXED: replaced localparam with local var (localparam illegal in procedural block)
-                    reg [5:0] rob_used;
                     rob_used = (rob_tail >= rob_head) ? 
                                (rob_tail - rob_head) : 
                                (rob_tail + ROB_SIZE - rob_head);
@@ -293,14 +308,14 @@ module h_core #(
                         // FIX v2: Decode register operands from instruction
                         // Instruction format: [7:0]=opcode, [11:7]=rs1, [16:12]=rs2, [21:17]=rd
                         case (saved_opcode)
-                            OP_ADD: alu_result <= register_file[saved_cmd_data[11:7]] + register_file[saved_cmd_data[16:12]];
-                            OP_SUB: alu_result <= register_file[saved_cmd_data[11:7]] - register_file[saved_cmd_data[16:12]];
-                            OP_AND: alu_result <= register_file[saved_cmd_data[11:7]] & register_file[saved_cmd_data[16:12]];
-                            OP_OR:  alu_result <= register_file[saved_cmd_data[11:7]] | register_file[saved_cmd_data[16:12]];
-                            OP_XOR: alu_result <= register_file[saved_cmd_data[11:7]] ^ register_file[saved_cmd_data[16:12]];
-                            OP_MUL: alu_result <= register_file[saved_cmd_data[11:7]] * register_file[saved_cmd_data[16:12]];
-                            OP_DIV: alu_result <= (register_file[saved_cmd_data[16:12]] != 0) ?
-                                                    register_file[saved_cmd_data[11:7]] / register_file[saved_cmd_data[16:12]] : 64'hDEADBEEF;
+                            OP_ADD: alu_result <= fwd_rs1_val + fwd_rs2_val;
+                            OP_SUB: alu_result <= fwd_rs1_val - fwd_rs2_val;
+                            OP_AND: alu_result <= fwd_rs1_val & fwd_rs2_val;
+                            OP_OR:  alu_result <= fwd_rs1_val | fwd_rs2_val;
+                            OP_XOR: alu_result <= fwd_rs1_val ^ fwd_rs2_val;
+                            OP_MUL: alu_result <= fwd_rs1_val * fwd_rs2_val;
+                            OP_DIV: alu_result <= (fwd_rs2_val != 0) ?
+                                                     fwd_rs1_val / fwd_rs2_val : {DATA_WIDTH{1'b1}};
                             OP_LOAD: begin
                                 fabric_addr <= saved_cmd_addr;
                                 fabric_rd_en <= 1'b1;
@@ -308,7 +323,7 @@ module h_core #(
                             end
                             OP_STORE: begin
                                 // FIX v2: Use decoded rs1 for store data
-                                fabric_wr_data <= register_file[saved_cmd_data[11:7]];
+                                fabric_wr_data <= fwd_rs1_val;
                                 fabric_addr <= saved_cmd_addr;
                                 fabric_wr_en <= 1'b1;
                                 pipeline_state <= WRITEBACK;
@@ -318,7 +333,7 @@ module h_core #(
                                 alu_result <= saved_cmd_addr;
                                 pipeline_state <= WRITEBACK;
                             end
-                            default: alu_result <= register_file[saved_cmd_data[11:7]];
+                            default: alu_result <= fwd_rs1_val;
                         endcase
                         if (saved_opcode != OP_LOAD && saved_opcode != OP_STORE)
                             pipeline_state <= WRITEBACK;
@@ -326,7 +341,7 @@ module h_core #(
                 end
 
                 MEMORY: begin
-                    fabric_rd_en <= 1'b0;
+                    if (fabric_ready) fabric_rd_en <= 1'b0;
                     // CRITICAL FIX #1: Add 256-cycle timeout to prevent permanent stall
                     // Pattern copied from G-Core WAIT_L1 timeout mechanism
                     if (fabric_ready) begin

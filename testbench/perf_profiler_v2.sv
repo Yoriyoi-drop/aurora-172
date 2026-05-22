@@ -3,7 +3,6 @@
 // Import global package for parameters
 // Import global package for parameters
 `include "interfaces/aurora_params.svh"
-import aurora_global_pkg::*;
 
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
@@ -25,16 +24,16 @@ import aurora_global_pkg::*;
 module perf_profiler_v2 #(
     parameter CLK_PERIOD = 10,  // 100MHz simulation clock
     parameter SAMPLE_WINDOW = 1024,  // OPTIMIZED: 256->1024 (more representative sampling)
-    parameter NUM_CORES = AURORA_NUM_G_CORES + AURORA_NUM_H_CORES + AURORA_NUM_A_CORES + AURORA_NUM_NPU_CLUSTERS  // FIXED: Include NPU clusters
+    parameter NUM_CORES = `AURORA_NUM_G_CORES + `AURORA_NUM_H_CORES + `AURORA_NUM_A_CORES + `AURORA_NUM_NPU_CLUSTERS  // FIXED: Include NPU clusters
 )(
     input  wire                         clk,
     input  wire                         rst_n,
     
     // Core status inputs (FIXED: Include NPU cluster status)
-    input  wire [AURORA_NUM_G_CORES-1:0]     g_core_busy,
-    input  wire [AURORA_NUM_A_CORES-1:0]     a_core_busy,
-    input  wire [AURORA_NUM_H_CORES-1:0]     h_core_busy,
-    input  wire [AURORA_NUM_NPU_CLUSTERS-1:0] npu_busy,
+    input  wire [`AURORA_NUM_G_CORES-1:0]     g_core_busy,
+    input  wire [`AURORA_NUM_A_CORES-1:0]     a_core_busy,
+    input  wire [`AURORA_NUM_H_CORES-1:0]     h_core_busy,
+    input  wire [`AURORA_NUM_NPU_CLUSTERS-1:0] npu_busy,
     
     // Memory interface monitoring
     input  wire                         mem_rd_en,

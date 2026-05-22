@@ -19,9 +19,9 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module vcache #(
-    parameter DATA_WIDTH        = AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
-    parameter ADDR_WIDTH        = AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
-    parameter VCACHE_CAPACITY_MB = 16,    // OPTIMIZED: 64->16 (much smaller capacity)
+    parameter DATA_WIDTH        = `AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
+    parameter ADDR_WIDTH        = `AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
+    parameter VCACHE_CAPACITY_MB = (NUM_SETS * ASSOCIATIVITY * CACHE_LINE_SIZE) / (1024 * 1024),  // CRITICAL FIX: Compute from geometry (actual ≪ 1 MB)
     parameter VCACHE_LATENCY    = 3,     // OPTIMIZED: 4->3 (faster access)
     parameter BASE_L3_LATENCY   = 3,
     parameter CACHE_LINE_SIZE   = 16,    // OPTIMIZED: 32->16 (smaller lines)
@@ -132,7 +132,7 @@ module vcache #(
         lookup_data = {DATA_WIDTH{1'b0}};
         lookup_latency = BASE_L3_LATENCY;
 
-        // FIXED: Unrolled loop for ASSOCIATIVITY=4 to avoid @* sensitivity
+        // FIXED: Unrolled loop for ASSOCIATIVITY=4 with priority encoder (else-if)
         // Way 0
         if (valid_array[access_index][0] &&
             tag_array[access_index][0] == access_tag) begin
@@ -141,21 +141,21 @@ module vcache #(
             lookup_latency = vcache_flag[access_index][0] ? VCACHE_LATENCY : BASE_L3_LATENCY;
         end
         // Way 1
-        if (valid_array[access_index][1] &&
+        else if (valid_array[access_index][1] &&
             tag_array[access_index][1] == access_tag) begin
             lookup_hit = 1'b1;
             lookup_data = data_array[access_index][1];
             lookup_latency = vcache_flag[access_index][1] ? VCACHE_LATENCY : BASE_L3_LATENCY;
         end
         // Way 2
-        if (valid_array[access_index][2] &&
+        else if (valid_array[access_index][2] &&
             tag_array[access_index][2] == access_tag) begin
             lookup_hit = 1'b1;
             lookup_data = data_array[access_index][2];
             lookup_latency = vcache_flag[access_index][2] ? VCACHE_LATENCY : BASE_L3_LATENCY;
         end
         // Way 3
-        if (valid_array[access_index][3] &&
+        else if (valid_array[access_index][3] &&
             tag_array[access_index][3] == access_tag) begin
             lookup_hit = 1'b1;
             lookup_data = data_array[access_index][3];
@@ -243,11 +243,11 @@ module vcache #(
         if (!rst_n) begin
             // OPTIMIZED: Single loop for faster initialization
             for (int i = 0; i < NUM_SETS * ASSOCIATIVITY; i++) begin
-                valid_array[i>>2][i&3] <= 1'b0;
-                tag_array[i>>2][i&3] <= {TAG_BITS{1'b0}};
-                data_array[i>>2][i&3] <= {DATA_WIDTH{1'b0}};
-                vcache_flag[i>>2][i&3] <= 1'b0;
-                lru_timestamp[i>>2][i&3] <= LRU_INIT_TIMESTAMP;
+                valid_array[i/ASSOCIATIVITY][i%ASSOCIATIVITY] <= 1'b0;
+                tag_array[i/ASSOCIATIVITY][i%ASSOCIATIVITY] <= {TAG_BITS{1'b0}};
+                data_array[i/ASSOCIATIVITY][i%ASSOCIATIVITY] <= {DATA_WIDTH{1'b0}};
+                vcache_flag[i/ASSOCIATIVITY][i%ASSOCIATIVITY] <= 1'b0;
+                lru_timestamp[i/ASSOCIATIVITY][i%ASSOCIATIVITY] <= LRU_INIT_TIMESTAMP;
             end
 
             hit_count <= 0;

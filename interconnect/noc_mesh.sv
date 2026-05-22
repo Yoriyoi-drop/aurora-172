@@ -28,8 +28,8 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module noc_mesh #(
-    parameter DATA_WIDTH    = AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
-    parameter ADDR_WIDTH    = AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
+    parameter DATA_WIDTH    = `AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
+    parameter ADDR_WIDTH    = `AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
     parameter MESH_X        = 2,    // Mesh width (routers in X)
     parameter MESH_Y        = 2,    // Mesh height (routers in Y)
     parameter VC_COUNT      = 2,    // OPTIMIZED: 4→2 (simpler QoS)
@@ -343,42 +343,45 @@ module noc_mesh #(
     // =========================================================================
     genvar m;
     generate
-        // Total packets routed
-        assign total_packets_routed = router_packets[0] +
-            (MESH_X*MESH_Y > 1 ? router_packets[1] : 0) +
-            (MESH_X*MESH_Y > 2 ? router_packets[2] : 0) +
-            (MESH_X*MESH_Y > 3 ? router_packets[3] : 0);
-
-        // Total contention cycles
-        assign total_contention_cycles = router_contention[0] +
-            (MESH_X*MESH_Y > 1 ? router_contention[1] : 0) +
-            (MESH_X*MESH_Y > 2 ? router_contention[2] : 0) +
-            (MESH_X*MESH_Y > 3 ? router_contention[3] : 0);
-
-        // FIX v2: Total dropped packets includes router drops + injection drops
-        assign total_dropped_packets = (router_dropped[0] + injection_dropped[0]) +
-            (MESH_X*MESH_Y > 1 ? (router_dropped[1] + injection_dropped[1]) : 0) +
-            (MESH_X*MESH_Y > 2 ? (router_dropped[2] + injection_dropped[2]) : 0) +
-            (MESH_X*MESH_Y > 3 ? (router_dropped[3] + injection_dropped[3]) : 0);
-
-        // Max congestion level
-        assign max_congestion_level =
-            (router_congestion[0] > router_congestion[1] ? router_congestion[0] :
-             (MESH_X*MESH_Y > 1 ? router_congestion[1] : 0)) >
-            (router_congestion[2] > router_congestion[3] ? router_congestion[2] :
-             (MESH_X*MESH_Y > 3 ? router_congestion[3] : 0)) ?
-            (router_congestion[0] > router_congestion[1] ? router_congestion[0] :
-             (MESH_X*MESH_Y > 1 ? router_congestion[1] : 0)) :
-            (router_congestion[2] > router_congestion[3] ? router_congestion[2] :
-             (MESH_X*MESH_Y > 3 ? router_congestion[3] : 0));
-
-        // Average latency (simplified - sum of all router congestion / router count)
-        assign avg_latency_cycles =
-            (router_congestion[0] +
-             (MESH_X*MESH_Y > 1 ? router_congestion[1] : 0) +
-             (MESH_X*MESH_Y > 2 ? router_congestion[2] : 0) +
-             (MESH_X*MESH_Y > 3 ? router_congestion[3] : 0)) /
-            (MESH_X * MESH_Y);
+        if (MESH_X * MESH_Y >= 4) begin : gen_m4
+            assign total_packets_routed = router_packets[0] + router_packets[1] + router_packets[2] + router_packets[3]
+                + injection_dropped[0] + injection_dropped[1] + injection_dropped[2] + injection_dropped[3];
+            assign total_contention_cycles = router_contention[0] + router_contention[1] + router_contention[2] + router_contention[3];
+            assign total_dropped_packets = router_dropped[0] + router_dropped[1] + router_dropped[2] + router_dropped[3]
+                + injection_dropped[0] + injection_dropped[1] + injection_dropped[2] + injection_dropped[3];
+            assign max_congestion_level = (router_congestion[0] > router_congestion[1])
+                ? (router_congestion[0] > router_congestion[2] ? (router_congestion[0] > router_congestion[3] ? router_congestion[0] : router_congestion[3]) : (router_congestion[2] > router_congestion[3] ? router_congestion[2] : router_congestion[3]))
+                : (router_congestion[1] > router_congestion[2] ? (router_congestion[1] > router_congestion[3] ? router_congestion[1] : router_congestion[3]) : (router_congestion[2] > router_congestion[3] ? router_congestion[2] : router_congestion[3]));
+            assign avg_latency_cycles = (router_contention[0] + router_contention[1] + router_contention[2] + router_contention[3]) / 32'd4;
+        end else if (MESH_X * MESH_Y == 3) begin : gen_m3
+            assign total_packets_routed = router_packets[0] + router_packets[1] + router_packets[2]
+                + injection_dropped[0] + injection_dropped[1] + injection_dropped[2];
+            assign total_contention_cycles = router_contention[0] + router_contention[1] + router_contention[2];
+            assign total_dropped_packets = router_dropped[0] + router_dropped[1] + router_dropped[2]
+                + injection_dropped[0] + injection_dropped[1] + injection_dropped[2];
+            assign max_congestion_level = (router_congestion[0] > router_congestion[1])
+                ? (router_congestion[0] > router_congestion[2] ? router_congestion[0] : router_congestion[2])
+                : (router_congestion[1] > router_congestion[2] ? router_congestion[1] : router_congestion[2]);
+            assign avg_latency_cycles = (router_contention[0] + router_contention[1] + router_contention[2]) / 32'd3;
+        end else if (MESH_X * MESH_Y == 2) begin : gen_m2
+            assign total_packets_routed = router_packets[0] + router_packets[1] + injection_dropped[0] + injection_dropped[1];
+            assign total_contention_cycles = router_contention[0] + router_contention[1];
+            assign total_dropped_packets = router_dropped[0] + router_dropped[1] + injection_dropped[0] + injection_dropped[1];
+            assign max_congestion_level = (router_congestion[0] > router_congestion[1]) ? router_congestion[0] : router_congestion[1];
+            assign avg_latency_cycles = (router_contention[0] + router_contention[1]) / 32'd2;
+        end else if (MESH_X * MESH_Y == 1) begin : gen_m1
+            assign total_packets_routed = router_packets[0] + injection_dropped[0];
+            assign total_contention_cycles = router_contention[0];
+            assign total_dropped_packets = router_dropped[0] + injection_dropped[0];
+            assign max_congestion_level = router_congestion[0];
+            assign avg_latency_cycles = router_contention[0][7:0];
+        end else begin : gen_no_metrics
+            assign total_packets_routed = 32'd0;
+            assign total_contention_cycles = 32'd0;
+            assign total_dropped_packets = 32'd0;
+            assign max_congestion_level = 8'd0;
+            assign avg_latency_cycles = 8'd0;
+        end
     endgenerate
 
     // =========================================================================
@@ -401,8 +404,8 @@ module noc_mesh #(
         end else begin
             for (i = 0; i < MESH_X*MESH_Y; i = i + 1) begin
                 // Track active transfers
-                if (n_valid_out[i]) link_utilization_ns[i] <= link_utilization_ns[i] + 1;
-                if (s_valid_out[i]) link_utilization_ns[i] <= link_utilization_ns[i] + 1;
+                if (n_valid_out[i] || s_valid_out[i])
+                    link_utilization_ns[i] <= link_utilization_ns[i] + (n_valid_out[i] + s_valid_out[i]);
                 if (e_valid_out[i]) link_utilization_ew[i] <= link_utilization_ew[i] + 1;
                 if (w_valid_out[i]) link_utilization_ew[i] <= link_utilization_ew[i] + 1;
             end

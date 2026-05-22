@@ -97,6 +97,7 @@ module rt_engine #(
     reg [7:0]         current_node;
     reg [7:0]         traversal_depth;
     reg               traversal_complete;
+    reg               bvh_overflow;
 
     // =========================================================================
     // Triangle vertices for intersection
@@ -136,6 +137,8 @@ module rt_engine #(
 
     reg                     traverse_found;
     reg [31:0]              traverse_hit_t;
+    reg [31:0]              traverse_hit_dist;
+    reg                     traverse_hit_found;
 
     localparam OP_NOP       = 8'h60;
     localparam OP_TRACE     = 8'h61;
@@ -152,10 +155,10 @@ module rt_engine #(
         input signed [31:0] max_x, max_y, max_z;
         input signed [31:0] orig_x, orig_y, orig_z;
         input signed [31:0] dir_x, dir_y, dir_z;
-        input [31:0]        t_min, t_max;
+        input signed [31:0] t_min, t_max;
 
         reg signed [31:0] t1, t2;
-        reg [31:0]        tmin, tmax;
+        reg signed [31:0] tmin, tmax;
 
         begin
             tmin = t_min;
@@ -272,9 +275,9 @@ module rt_engine #(
                                  (det < -32'd1000000) ? -32'd1000000 : det;
                     
                     if (det_clamped > 0)
-                        inv_det_num = (32768 * 32768) / det_clamped;  // 2^30 / det for scale
+                        inv_det_num = 32'd1073741824 / det_clamped;  // 2^30 / det for scale
                     else
-                        inv_det_num = -((32768 * 32768) / (-det_clamped));
+                        inv_det_num = -(32'd1073741824 / (-det_clamped));
 
                     u = (u_num * inv_det_num) >>> 30;
                 end else begin
@@ -331,6 +334,8 @@ module rt_engine #(
     task automatic bvh_traverse;
         output reg found;
         output reg [31:0] hit_t;
+        output reg [31:0] hit_dist_out;
+        output reg hit_found_out;
 
         integer node_idx;
         reg intersects;
@@ -347,15 +352,15 @@ module rt_engine #(
             // Loop also exits early when stack is empty (stack_ptr < 0).
             // FIX v3: Use proper stack pointer management to avoid underflow
             for (i = 0; i < BVH_DEPTH * 2 && stack_ptr >= 0; i = i + 1) begin
-                // Check for empty stack before popping
-                if (stack_ptr < 0) begin
-                    stack_ptr = -1;
+                // Pop node from stack (guarded: stack_ptr >= 0 guaranteed by loop condition)
+                if (stack_ptr >= 0) begin
+                    node_idx = bvh_stack[stack_ptr];
+                    stack_ptr = stack_ptr - 1;
+                end else begin
+                    node_idx = 0;
+                    stack_ptr = 0;
                     i = BVH_DEPTH * 2;  // Force loop exit
                 end
-                
-                // Pop node from stack
-                node_idx = bvh_stack[stack_ptr];
-                stack_ptr = stack_ptr - 1;
 
                 // Check ray-box intersection
                 intersects = ray_box_intersect(
@@ -385,18 +390,26 @@ module rt_engine #(
                         if (tri_hit && tri_t < hit_t) begin
                             found = 1'b1;
                             hit_t = tri_t;
-                            hit_distance <= tri_t;
-                            hit_found <= 1'b1;
+                            hit_dist_out = tri_t;
+                            hit_found_out = 1'b1;
                         end
                     end else begin
                         // Internal node: push children (far first for near-first traversal)
                         if (bvh_right[node_idx] < BVH_DEPTH && bvh_valid[bvh_right[node_idx]]) begin
-                            stack_ptr = stack_ptr + 1;
-                            bvh_stack[stack_ptr] = bvh_right[node_idx];
+                            if (stack_ptr < BVH_DEPTH - 1) begin
+                                stack_ptr = stack_ptr + 1;
+                                bvh_stack[stack_ptr] = bvh_right[node_idx];
+                            end else begin
+                                bvh_overflow = 1'b1;
+                            end
                         end
                         if (bvh_left[node_idx] < BVH_DEPTH && bvh_valid[bvh_left[node_idx]]) begin
-                            stack_ptr = stack_ptr + 1;
-                            bvh_stack[stack_ptr] = bvh_left[node_idx];
+                            if (stack_ptr < BVH_DEPTH - 1) begin
+                                stack_ptr = stack_ptr + 1;
+                                bvh_stack[stack_ptr] = bvh_left[node_idx];
+                            end else begin
+                                bvh_overflow = 1'b1;
+                            end
                         end
                     end
                 end
@@ -530,12 +543,12 @@ module rt_engine #(
                             // Each node: min_xyz (3x32), max_xyz (3x32), left/right (2x16), flags
                             bvh_min_x[bvh_load_idx] <= fabric_rd_data[31:0];
                             bvh_min_y[bvh_load_idx] <= fabric_rd_data[63:32];
-                            bvh_min_z[bvh_load_idx] <= 32'shFFFFF000;  // Default if not provided
-                            bvh_max_x[bvh_load_idx] <= 32'h00001000;   // Default if not provided
-                            bvh_max_y[bvh_load_idx] <= 32'h00001000;
-                            bvh_max_z[bvh_load_idx] <= 32'h00001000;
-                            bvh_left[bvh_load_idx]  <= 16'(bvh_load_idx * 2 + 1);
-                            bvh_right[bvh_load_idx] <= 16'(bvh_load_idx * 2 + 2);
+                            bvh_min_z[bvh_load_idx] <= fabric_rd_data[95:64];
+                            bvh_max_x[bvh_load_idx] <= fabric_rd_data[127:96];
+                            bvh_max_y[bvh_load_idx] <= fabric_rd_data[159:128];
+                            bvh_max_z[bvh_load_idx] <= fabric_rd_data[191:160];
+                            bvh_left[bvh_load_idx]  <= fabric_rd_data[207:192];
+                            bvh_right[bvh_load_idx] <= fabric_rd_data[223:208];
                             bvh_valid[bvh_load_idx] <= 1'b1;
                             exec_counter <= 16'h0;  // Reset counter on successful transfer
 
@@ -553,84 +566,6 @@ module rt_engine #(
                                 fabric_addr <= fabric_addr + 16;  // Next node
                                 fabric_rd_en <= 1'b1;
                             end else begin
-                            // FIX v2: After loading from memory, also set up a deeper
-                            // BVH hierarchy with more nodes for realistic traversal.
-                            // Set up internal nodes (non-leaf) up to depth 4 (15 nodes).
-                            // Root (0) -> children (1,2), then grandchildren (3-6), etc.
-                            bvh_valid[0] <= 1'b1;
-                            bvh_is_leaf[0] <= 1'b0;
-                            bvh_min_x[0] <= 32'shFFFFF000;
-                            bvh_min_y[0] <= 32'shFFFFF000;
-                            bvh_min_z[0] <= 32'shFFFFF000;
-                            bvh_max_x[0] <= 32'h00001000;
-                            bvh_max_y[0] <= 32'h00001000;
-                            bvh_max_z[0] <= 32'h00001000;
-                            bvh_left[0] <= 16'd1;
-                            bvh_right[0] <= 16'd2;
-
-                            // Node 1: left child of root
-                            bvh_valid[1] <= 1'b1;
-                            bvh_is_leaf[1] <= 1'b0;
-                            bvh_min_x[1] <= 32'shFFFFF000;
-                            bvh_min_y[1] <= 32'shFFFFF000;
-                            bvh_min_z[1] <= 32'shFFFFF000;
-                            bvh_max_x[1] <= 32'h00000800;
-                            bvh_max_y[1] <= 32'h00000800;
-                            bvh_max_z[1] <= 32'h00000800;
-                            bvh_left[1] <= 16'd3;
-                            bvh_right[1] <= 16'd4;
-
-                            // Node 2: right child of root
-                            bvh_valid[2] <= 1'b1;
-                            bvh_is_leaf[2] <= 1'b0;
-                            bvh_min_x[2] <= 32'sh00000000;
-                            bvh_min_y[2] <= 32'sh00000000;
-                            bvh_min_z[2] <= 32'sh00000000;
-                            bvh_max_x[2] <= 32'h00001000;
-                            bvh_max_y[2] <= 32'h00001000;
-                            bvh_max_z[2] <= 32'h00001000;
-                            bvh_left[2] <= 16'd5;
-                            bvh_right[2] <= 16'd6;
-
-                            // Nodes 3-6: grandchildren (leaves)
-                            bvh_valid[3] <= 1'b1; bvh_is_leaf[3] <= 1'b1;
-                            bvh_min_x[3] <= 32'shFFFFF000; bvh_min_y[3] <= 32'shFFFFF000; bvh_min_z[3] <= 32'shFFFFF000;
-                            bvh_max_x[3] <= 32'h00000400; bvh_max_y[3] <= 32'h00000400; bvh_max_z[3] <= 32'h00000400;
-
-                            bvh_valid[4] <= 1'b1; bvh_is_leaf[4] <= 1'b1;
-                            bvh_min_x[4] <= 32'shFFFFF400; bvh_min_y[4] <= 32'shFFFFF400; bvh_min_z[4] <= 32'shFFFFF400;
-                            bvh_max_x[4] <= 32'h00000800; bvh_max_y[4] <= 32'h00000800; bvh_max_z[4] <= 32'h00000800;
-
-                            bvh_valid[5] <= 1'b1; bvh_is_leaf[5] <= 1'b1;
-                            bvh_min_x[5] <= 32'sh00000000; bvh_min_y[5] <= 32'sh00000000; bvh_min_z[5] <= 32'sh00000000;
-                            bvh_max_x[5] <= 32'h00000800; bvh_max_y[5] <= 32'h00000800; bvh_max_z[5] <= 32'h00000800;
-
-                            bvh_valid[6] <= 1'b1; bvh_is_leaf[6] <= 1'b1;
-                            bvh_min_x[6] <= 32'sh00000800; bvh_min_y[6] <= 32'sh00000800; bvh_min_z[6] <= 32'sh00000800;
-                            bvh_max_x[6] <= 32'h00001000; bvh_max_y[6] <= 32'h00001000; bvh_max_z[6] <= 32'h00001000;
-
-                            // Additional nodes 7-14 for deeper hierarchy - FIXED: Use individual assignments
-                            bvh_valid[7] <= 1'b1; bvh_valid[8] <= 1'b1; bvh_valid[9] <= 1'b1; bvh_valid[10] <= 1'b1;
-                            bvh_valid[11] <= 1'b1; bvh_valid[12] <= 1'b1; bvh_valid[13] <= 1'b1; bvh_valid[14] <= 1'b1;
-                            bvh_is_leaf[7] <= 1'b1; bvh_is_leaf[8] <= 1'b1; bvh_is_leaf[9] <= 1'b1; bvh_is_leaf[10] <= 1'b1;
-                            bvh_is_leaf[11] <= 1'b1; bvh_is_leaf[12] <= 1'b1; bvh_is_leaf[13] <= 1'b1; bvh_is_leaf[14] <= 1'b1;
-                            bvh_min_x[7] <= 32'sh00000000; bvh_min_y[7] <= 32'sh00000000; bvh_min_z[7] <= 32'sh00000000;
-                            bvh_min_x[8] <= 32'sh00000000; bvh_min_y[8] <= 32'sh00000000; bvh_min_z[8] <= 32'sh00000000;
-                            bvh_min_x[9] <= 32'sh00000000; bvh_min_y[9] <= 32'sh00000000; bvh_min_z[9] <= 32'sh00000000;
-                            bvh_min_x[10] <= 32'sh00000000; bvh_min_y[10] <= 32'sh00000000; bvh_min_z[10] <= 32'sh00000000;
-                            bvh_min_x[11] <= 32'sh00000000; bvh_min_y[11] <= 32'sh00000000; bvh_min_z[11] <= 32'sh00000000;
-                            bvh_min_x[12] <= 32'sh00000000; bvh_min_y[12] <= 32'sh00000000; bvh_min_z[12] <= 32'sh00000000;
-                            bvh_min_x[13] <= 32'sh00000000; bvh_min_y[13] <= 32'sh00000000; bvh_min_z[13] <= 32'sh00000000;
-                            bvh_min_x[14] <= 32'sh00000000; bvh_min_y[14] <= 32'sh00000000; bvh_min_z[14] <= 32'sh00000000;
-                            bvh_max_x[7] <= 32'h00001000; bvh_max_y[7] <= 32'h00001000; bvh_max_z[7] <= 32'h00001000;
-                            bvh_max_x[8] <= 32'h00001000; bvh_max_y[8] <= 32'h00001000; bvh_max_z[8] <= 32'h00001000;
-                            bvh_max_x[9] <= 32'h00001000; bvh_max_y[9] <= 32'h00001000; bvh_max_z[9] <= 32'h00001000;
-                            bvh_max_x[10] <= 32'h00001000; bvh_max_y[10] <= 32'h00001000; bvh_max_z[10] <= 32'h00001000;
-                            bvh_max_x[11] <= 32'h00001000; bvh_max_y[11] <= 32'h00001000; bvh_max_z[11] <= 32'h00001000;
-                            bvh_max_x[12] <= 32'h00001000; bvh_max_y[12] <= 32'h00001000; bvh_max_z[12] <= 32'h00001000;
-                            bvh_max_x[13] <= 32'h00001000; bvh_max_y[13] <= 32'h00001000; bvh_max_z[13] <= 32'h00001000;
-                            bvh_max_x[14] <= 32'h00001000; bvh_max_y[14] <= 32'h00001000; bvh_max_z[14] <= 32'h00001000;
-
                             fabric_rd_en <= 1'b0;
                             state <= BVH_TRAVERSE;
                             intersection_dist <= 32'd100;
@@ -640,7 +575,7 @@ module rt_engine #(
             end
 
             BVH_TRAVERSE: begin
-                    bvh_traverse(traverse_found, traverse_hit_t);
+                    bvh_traverse(traverse_found, traverse_hit_t, traverse_hit_dist, traverse_hit_found);
 
                     if (traverse_found) begin
                         hit_distance <= traverse_hit_t;

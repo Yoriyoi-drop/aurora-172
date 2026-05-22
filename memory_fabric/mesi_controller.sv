@@ -55,7 +55,7 @@
 
 module mesi_controller #(
     // Use standardized parameters from aurora_params.svh
-    parameter ADDR_WIDTH    = AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
+    parameter ADDR_WIDTH    = `AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
     parameter NUM_CACHES    = 2,          // G-Core, A-Core only
     parameter LINE_SIZE     = 64   // FIXED: Use standard value (64 bytes)
 )(
@@ -101,6 +101,12 @@ module mesi_controller #(
     output reg                          resp_is_exclusive,
     output reg                          resp_need_writeback,
     output reg [511:0]                   resp_data_from_cache,   // NEW: Data from cache (O/F state) - 512-bit cache line
+    // TODO: L1 cache data inputs for data forwarding (MOESIX-GA: O/F/G/A states supply data)
+    // L1 cache (l1_cache.sv) does not have snoop data/forward ports yet.
+    // Commented out until L1 is updated. Hardwired to 0 internally.
+    // input  wire [511:0]                  snoop_0_data,           // L1 0 data for forwarding
+    // input  wire [511:0]                  snoop_1_data,           // L1 1 data for forwarding
+    // input  wire [511:0]                  snoop_2_data,           // L1 2 data for forwarding
     output reg                          resp_ready,
 
     // Performance counters
@@ -126,13 +132,27 @@ module mesi_controller #(
     localparam MOESI_GAMING    = 3'b110;  // AURORA: Gaming priority
     localparam MOESI_AI        = 3'b111;  // AURORA: AI bulk transfer
 
+    // FIX: 2-bit MESI to 3-bit MOESI translation function
+    function automatic [2:0] mesii2moesi;
+        input [1:0] s;
+        begin
+            case (s)
+                2'b00: mesii2moesi = MOESI_INVALID;
+                2'b01: mesii2moesi = MOESI_MODIFIED;
+                2'b10: mesii2moesi = MOESI_EXCLUSIVE;
+                2'b11: mesii2moesi = MOESI_SHARED;
+                default: mesii2moesi = MOESI_INVALID;
+            endcase
+        end
+    endfunction
+
     // State machine
     reg [2:0]                 state;
     localparam S_IDLE         = 3'b000;
     localparam S_SNOOP_ALL    = 3'b001;
     localparam S_CHECK_STATES = 3'b010;
     localparam S_RESPOND      = 3'b011;
-    localparam S_BROADCAST    = 3'b100;
+    localparam S_SNOOP_WAIT   = 3'b100;  // Wait 1 cycle for snoop response
     localparam S_GAMING_PF    = 3'b101;  // NEW: Gaming priority prefetch
     localparam S_AI_BULK      = 3'b110;  // NEW: AI bulk prefetch
 
@@ -356,9 +376,11 @@ module mesi_controller #(
                         endcase
                     end
 
-                    // Check if any cache can supply data (M/O/F state) - simplified
-                    owner_cache_idx <= 0;  // Default to cache 0
-                    forward_target <= 0;  // Default to cache 0
+                    // Find which cache can supply data (M/O/F/G/A states)
+                    owner_cache_idx <= find_data_supplier(snoop_0_state, snoop_1_state, snoop_2_state,
+                                                          snoop_0_valid, snoop_1_valid, snoop_2_valid);
+                    forward_target <= find_forwarder(snoop_0_state, snoop_1_state, snoop_2_state,
+                                                      snoop_0_valid, snoop_1_valid, snoop_2_valid);
 
                     state <= S_CHECK_STATES;
                 end
@@ -431,8 +453,10 @@ module mesi_controller #(
                         endcase
                     end
 
-                    owner_cache_idx <= 0;  // Default to cache 0
-                    forward_target <= 0;  // Default to cache 0
+                    owner_cache_idx <= find_data_supplier(snoop_0_state, snoop_1_state, snoop_2_state,
+                                                          snoop_0_valid, snoop_1_valid, snoop_2_valid);
+                    forward_target <= find_forwarder(snoop_0_state, snoop_1_state, snoop_2_state,
+                                                      snoop_0_valid, snoop_1_valid, snoop_2_valid);
 
                     state <= S_CHECK_STATES;
                 end
@@ -441,16 +465,24 @@ module mesi_controller #(
                 // NORMAL SNOOP: Standard MOESIX-GA protocol
                 // ─────────────────────────────────────────────
                 S_SNOOP_ALL: begin
+                    // Cycle 1: Send snoop addresses ke L1 caches
                     snoop_0_addr <= req_addr;
                     snoop_1_addr <= req_addr;
                     snoop_2_addr <= req_addr;
 
+                    // Pipeline delay 1 cycle — baca snoop response di cycle berikutnya
+                    state <= S_SNOOP_WAIT;
+                end
+
+                // ─────────────────────────────────────────────
+                // SNOOP WAIT: Baca snoop response (1 cycle after address)
+                // ─────────────────────────────────────────────
+                S_SNOOP_WAIT: begin
+                    // Cycle 2: Baca snoop state responses (L1 sudah punya 1 cycle untuk proses)
                     l1_valids[0] <= snoop_0_valid;
                     l1_valids[1] <= snoop_1_valid;
-                    // l1_valids[2] <= snoop_2_valid; // Removed - NPU unused
                     l1_states[0] <= snoop_0_state;
                     l1_states[1] <= snoop_1_state;
-                    // l1_states[2] <= snoop_2_state; // Removed - NPU unused
 
                     any_modified <= 1'b0;
                     any_exclusive <= 1'b0;
@@ -505,8 +537,11 @@ module mesi_controller #(
                         endcase
                     end
 
-                    owner_cache_idx <= 0;  // Default to cache 0
-                    forward_target <= 0;  // Default to cache 0
+                    // CRITICAL FIX: Panggil find_data_supplier dan find_forwarder
+                    owner_cache_idx <= find_data_supplier(snoop_0_state, snoop_1_state, snoop_2_state,
+                                                          snoop_0_valid, snoop_1_valid, snoop_2_valid);
+                    forward_target <= find_forwarder(snoop_0_state, snoop_1_state, snoop_2_state,
+                                                      snoop_0_valid, snoop_1_valid, snoop_2_valid);
 
                     state <= S_CHECK_STATES;
                 end
@@ -572,6 +607,8 @@ module mesi_controller #(
                         // ─────────────────────────────────
                         if (any_modified) begin
                             // M state: dirty data → supply from cache (→O transition)
+                            resp_is_shared <= 1'b1;
+                            resp_is_exclusive <= 1'b0;
                             resp_need_writeback <= 1'b1;
                             resp_data_from_cache <= 512'b0;  // Data will be supplied by cache owner via snoop forward mechanism
                             writebacks_forced <= writebacks_forced + 1;
@@ -588,6 +625,8 @@ module mesi_controller #(
 
                         end else if (any_owned) begin
                             // O state: owner supplies data (no memory access!)
+                            resp_is_shared <= 1'b1;
+                            resp_is_exclusive <= 1'b0;
                             resp_data_from_cache <= 512'b0;  // Data will be supplied by cache owner via snoop forward mechanism
                             resp_need_writeback <= 1'b0;  // Owner already has data
                             owned_transitions <= owned_transitions + 1;
@@ -604,6 +643,8 @@ module mesi_controller #(
 
                         end else if (any_forward) begin
                             // F state: clean forwarder responds (Intel MESIF advantage)
+                            resp_is_shared <= 1'b1;
+                            resp_is_exclusive <= 1'b0;
                             resp_need_writeback <= 1'b0;
                             resp_data_from_cache <= 512'b0;  // Data will be supplied by cache owner via snoop forward mechanism
                             forwards_served <= forwards_served + 1;
@@ -618,6 +659,8 @@ module mesi_controller #(
 
                         end else if (any_gaming) begin
                             // G state: gaming priority read
+                            resp_is_shared <= 1'b1;
+                            resp_is_exclusive <= 1'b0;
                             resp_need_writeback <= 1'b0;
                             resp_data_from_cache <= 512'b0;  // Data will be supplied by cache owner via snoop forward mechanism
                             gaming_priority_hits <= gaming_priority_hits + 1;
@@ -632,6 +675,8 @@ module mesi_controller #(
 
                         end else if (any_ai) begin
                             // A state: AI bulk read (may prefetch adjacent lines)
+                            resp_is_shared <= 1'b1;
+                            resp_is_exclusive <= 1'b0;
                             resp_need_writeback <= 1'b0;
                             resp_data_from_cache <= 512'b0;  // Data will be supplied by cache owner via snoop forward mechanism
                             ai_bulk_prefetches <= ai_bulk_prefetches + 1;
@@ -646,12 +691,14 @@ module mesi_controller #(
                         end else if (any_shared) begin
                             // S state: normal shared read
                             resp_is_shared <= 1'b1;
+                            resp_is_exclusive <= 1'b0;
                             resp_need_writeback <= 1'b0;
                             shared_grants <= shared_grants + 1;
+                        end else begin
+                            // No cache has valid data — fetch from memory as exclusive
+                            resp_is_shared <= 1'b0;
+                            resp_is_exclusive <= 1'b1;
                         end
-
-                        resp_is_shared <= 1'b1;
-                        resp_is_exclusive <= !any_valid;
                     end
 
                     state <= S_RESPOND;

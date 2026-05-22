@@ -2,7 +2,6 @@
 
 // Import global package for parameters
 `include "interfaces/aurora_params.svh"
-import aurora_global_pkg::*;
 
 //////////////////////////////////////////////////////////////////////////////////
 // Company: AURORA Semiconductor
@@ -62,10 +61,10 @@ module hol_prevention #(
 );
 
     // Virtual Channel Types
-    localparam VC_URGENT   = 3'd0;   // Critical system packets
-    localparam VC_HIGH     = 3'd1;   // High priority traffic
-    localparam VC_NORMAL   = 3'd2;   // Normal traffic
-    localparam VC_LOW      = 3'd3;   // Background traffic
+    localparam VC_URGENT   = 2'd0;   // Critical system packets
+    localparam VC_HIGH     = 2'd1;   // High priority traffic
+    localparam VC_NORMAL   = 2'd2;   // Normal traffic
+    localparam VC_LOW      = 2'd3;   // Background traffic
     
     // HOL Prevention States
     localparam HOL_NORMAL  = 2'b00;
@@ -232,37 +231,37 @@ module hol_prevention #(
                     if (vc_head[i][vc_idx] != ((vc_tail[i][vc_idx] + 1) % BUFFER_DEPTH)) begin
                         // Assign packet to VC
                         integer buffer_idx = vc_head[i][vc_idx];
-                        vc_buffer_addr[i][vc_idx][buffer_idx] = packet_addr[i];
-                        vc_buffer_data[i][vc_idx][buffer_idx] = packet_data[i];
-                        vc_buffer_qos[i][vc_idx][buffer_idx] = packet_qos[i];
-                        vc_buffer_dir[i][vc_idx][buffer_idx] = packet_dir[i];
-                        vc_buffer_valid[i][vc_idx][buffer_idx] = 1'b1;
+                        vc_buffer_addr[i][vc_idx][buffer_idx] <= packet_addr[i];
+                        vc_buffer_data[i][vc_idx][buffer_idx] <= packet_data[i];
+                        vc_buffer_qos[i][vc_idx][buffer_idx] <= packet_qos[i];
+                        vc_buffer_dir[i][vc_idx][buffer_idx] <= packet_dir[i];
+                        vc_buffer_valid[i][vc_idx][buffer_idx] <= 1'b1;
                         
                         // Initialize packet age and TTL
-                        packet_age[i][vc_idx][buffer_idx] = 16'd0;
-                        packet_ttl[i][vc_idx][buffer_idx] = 8'd255;
+                        packet_age[i][vc_idx][buffer_idx] <= 16'd0;
+                        packet_ttl[i][vc_idx][buffer_idx] <= 8'd255;
                         
                         // Update VC head pointer and load
-                        vc_head[i][vc_idx] = (vc_head[i][vc_idx] == BUFFER_DEPTH-1) ? 0 : vc_head[i][vc_idx] + 1;
-                        vc_load[vc_idx] = vc_load[vc_idx] + 1;
+                        vc_head[i][vc_idx] <= (vc_head[i][vc_idx] == BUFFER_DEPTH-1) ? 0 : vc_head[i][vc_idx] + 1;
+                        vc_load[vc_idx] <= vc_load[vc_idx] + 1;
                         
                     end else begin
                         // VC full - try to find alternative VC or use bypass
                         if (packet_qos[i] <= 2'b01) begin // High priority or urgent
                             // Try to use bypass lane
                             if (!bypass_active[i]) begin
-                                bypass_addr[i] = packet_addr[i];
-                                bypass_data[i] = packet_data[i];
-                                bypass_qos[i] = packet_qos[i];
-                                bypass_dir[i] = packet_dir[i];
-                                bypass_valid[i] = 1'b1;
-                                bypass_active[i] = 1'b1;
-                                total_hol_bypasses = total_hol_bypasses + 1;
+                                bypass_addr[i] <= packet_addr[i];
+                                bypass_data[i] <= packet_data[i];
+                                bypass_qos[i] <= packet_qos[i];
+                                bypass_dir[i] <= packet_dir[i];
+                                bypass_valid[i] <= 1'b1;
+                                bypass_active[i] <= 1'b1;
+                                total_hol_bypasses <= total_hol_bypasses + 1;
                             end
                         end else begin
                             // Low priority packet - drop or queue in alternative VC
-                            hol_blocked_count[i] = hol_blocked_count[i] + 1;
-                            total_hol_blocks = total_hol_blocks + 1;
+                            hol_blocked_count[i] <= hol_blocked_count[i] + 1;
+                            total_hol_blocks <= total_hol_blocks + 1;
                         end
                     end
                 end
@@ -275,7 +274,7 @@ module hol_prevention #(
         integer i, j, head_packet_age;
         begin
             for (i = 0; i < NUM_NODES; i = i + 1) begin
-                hol_state[i] = HOL_NORMAL;
+                hol_state[i] <= HOL_NORMAL;
                 
                 // Check each VC for HOL blocking
                 for (j = 0; j < NUM_VCS; j = j + 1) begin
@@ -285,14 +284,14 @@ module hol_prevention #(
                         head_packet_age = packet_age[i][j][tail_idx];
                         
                         // Update wait time for head packet
-                        hol_wait_time[i][j] = hol_wait_time[i][j] + 1;
+                        hol_wait_time[i][j] <= hol_wait_time[i][j] + 1;
                         
                         // Check for HOL blocking conditions
                         if (head_packet_age > hol_threshold) begin
                             if (hol_state[i] == HOL_NORMAL) begin
-                                hol_state[i] = HOL_WARNING;
+                                hol_state[i] <= HOL_WARNING;
                             end else if (head_packet_age > (hol_threshold * 2)) begin
-                                hol_state[i] = HOL_CRITICAL;
+                                hol_state[i] <= HOL_CRITICAL;
                                 
                                 // Critical HOL: attempt recovery
                                 if (head_packet_age > max_wait_threshold) begin
@@ -305,7 +304,7 @@ module hol_prevention #(
                 
                 // Update system state based on worst HOL condition
                 if (hol_state[i] == HOL_CRITICAL && total_hol_blocks > (BUFFER_DEPTH * NUM_NODES / 4)) begin
-                    hol_state[i] = HOL_EMERGENCY;
+                    hol_state[i] <= HOL_EMERGENCY;
                     activate_emergency_bypass(i);
                 end
             end
@@ -441,13 +440,13 @@ module hol_prevention #(
                     // Try to send bypass packet directly
                     // This would connect to ring bus bypass logic
                     if (ring_out_ready[i][VC_URGENT]) begin
-                        ring_out_addr[i][VC_URGENT] = bypass_addr[i];
-                        ring_out_data[i][VC_URGENT] = bypass_data[i];
-                        ring_out_valid[i][VC_URGENT] = 1'b1;
+                        ring_out_addr[i][VC_URGENT] <= bypass_addr[i];
+                        ring_out_data[i][VC_URGENT] <= bypass_data[i];
+                        ring_out_valid[i][VC_URGENT] <= 1'b1;
                         
                         // Clear bypass
-                        bypass_valid[i] = 1'b0;
-                        bypass_active[i] = 1'b0;
+                        bypass_valid[i] <= 1'b0;
+                        bypass_active[i] <= 1'b0;
                     end
                 end
             end
@@ -462,15 +461,15 @@ module hol_prevention #(
                 for (j = 0; j < NUM_VCS; j = j + 1) begin
                     for (k = 0; k < BUFFER_DEPTH; k = k + 1) begin
                         if (vc_buffer_valid[i][j][k]) begin
-                            packet_age[i][j][k] = packet_age[i][j][k] + 1;
+                            packet_age[i][j][k] <= packet_age[i][j][k] + 1;
                             if (packet_ttl[i][j][k] > 0) begin
-                                packet_ttl[i][j][k] = packet_ttl[i][j][k] - 1;
+                                packet_ttl[i][j][k] <= packet_ttl[i][j][k] - 1;
                             end
                             
                             // Drop packet if TTL expires
                             if (packet_ttl[i][j][k] == 0) begin
-                                vc_buffer_valid[i][j][k] = 1'b0;
-                                vc_load[j] = vc_load[j] - 1;
+                                vc_buffer_valid[i][j][k] <= 1'b0;
+                                vc_load[j] <= vc_load[j] - 1;
                                 $display("[%0t] [HOL-PREVENTION] TTL_DROP: Node %0d VC%0d packet expired", $time, i, j);
                             end
                         end
@@ -486,7 +485,7 @@ module hol_prevention #(
         begin
             // Calculate VC utilization
             for (i = 0; i < NUM_VCS; i = i + 1) begin
-                vc_util[i] = (vc_load[i] * 100) / (BUFFER_DEPTH * NUM_NODES);
+                vc_util[i] <= (vc_load[i] * 100) / (BUFFER_DEPTH * NUM_NODES);
             end
             
             // Calculate overall system health
@@ -509,16 +508,16 @@ module hol_prevention #(
             
             // Health scoring (0-100)
             if (avg_utilization < 70 && max_wait < 50) begin
-                system_health = 8'd100; // Excellent
+                system_health <= 8'd100; // Excellent
             end else if (avg_utilization < 85 && max_wait < 100) begin
-                system_health = 8'd80;  // Good
+                system_health <= 8'd80;  // Good
             end else if (avg_utilization < 95 && max_wait < 200) begin
-                system_health = 8'd60;  // Fair
+                system_health <= 8'd60;  // Fair
             end else begin
-                system_health = 8'd40;  // Poor
+                system_health <= 8'd40;  // Poor
             end
             
-            hol_system_healthy_reg = (system_health >= 60);
+            hol_system_healthy_reg <= (system_health >= 60);
         end
     endtask
     
@@ -536,19 +535,19 @@ module hol_prevention #(
                     
                     if (vc_buffer_qos[node][j][tail_idx] <= 2'b01) begin // High priority or urgent
                         if (!bypass_active[node]) begin
-                            bypass_addr[node] = vc_buffer_addr[node][j][tail_idx];
-                            bypass_data[node] = vc_buffer_data[node][j][tail_idx];
-                            bypass_qos[node] = vc_buffer_qos[node][j][tail_idx];
-                            bypass_dir[node] = vc_buffer_dir[node][j][tail_idx];
-                            bypass_valid[node] = 1'b1;
-                            bypass_active[node] = 1'b1;
+                            bypass_addr[node] <= vc_buffer_addr[node][j][tail_idx];
+                            bypass_data[node] <= vc_buffer_data[node][j][tail_idx];
+                            bypass_qos[node] <= vc_buffer_qos[node][j][tail_idx];
+                            bypass_dir[node] <= vc_buffer_dir[node][j][tail_idx];
+                            bypass_valid[node] <= 1'b1;
+                            bypass_active[node] <= 1'b1;
                             
                             // Clear from VC
-                            vc_buffer_valid[node][j][tail_idx] = 1'b0;
-                            vc_tail[node][j] = (vc_tail[node][j] == BUFFER_DEPTH-1) ? 0 : vc_tail[node][j] + 1;
-                            vc_load[j] = vc_load[j] - 1;
+                            vc_buffer_valid[node][j][tail_idx] <= 1'b0;
+                            vc_tail[node][j] <= (vc_tail[node][j] == BUFFER_DEPTH-1) ? 0 : vc_tail[node][j] + 1;
+                            vc_load[j] <= vc_load[j] - 1;
                             
-                            total_hol_bypasses = total_hol_bypasses + 1;
+                            total_hol_bypasses <= total_hol_bypasses + 1;
                         end
                     end
                 end

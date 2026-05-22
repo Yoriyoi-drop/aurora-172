@@ -60,6 +60,7 @@ module l1_cache #(
     input  wire [ADDR_WIDTH-1:0]        snoop_addr,
     input  wire                         snoop_invalidate,
     input  wire                         snoop_update,
+    output reg [1:0]                    snoop_state_out,     // FIX: Expose MESI state for snoop
 
     // Performance counters
     output reg [31:0]                   hits,
@@ -79,12 +80,13 @@ module l1_cache #(
 
     // Cache arrays
     // Each way: [NUM_SETS][LINE_SIZE]
-    reg [LINE_SIZE-1:0]       cache_data [0:ASSOCIATIVITY-1][0:NUM_SETS-1];
+    reg [DATA_WIDTH-1:0]       cache_data [0:ASSOCIATIVITY-1][0:NUM_SETS-1];
     reg [TAG_WIDTH-1:0]       cache_tags [0:ASSOCIATIVITY-1][0:NUM_SETS-1];
     reg [1:0]                 cache_mesi [0:ASSOCIATIVITY-1][0:NUM_SETS-1];  // M=01, E=10, S=11, I=00
     reg                       cache_valid [0:ASSOCIATIVITY-1][0:NUM_SETS-1];
     reg [ASSOCIATIVITY-1:0]   lru_counter [0:NUM_SETS-1];  // Pseudo-LRU tracking
-
+    reg                       snoop_writeback_active;      // Snoop writeback pending
+    
     // MESI state encoding (FIXED: Match L2 cache encoding)
     localparam MESI_INVALID   = 2'b00;
     localparam MESI_MODIFIED  = 2'b01;
@@ -125,6 +127,14 @@ module l1_cache #(
     // Hit detection
     integer                 hit_way;
     reg                     is_hit;
+
+    // Module-level declarations for snoop block (moved from inside always block)
+    integer                 snoop_w;
+    reg [SET_IDX_WIDTH-1:0] snoop_set_index;
+    reg [TAG_WIDTH-1:0]     snoop_tag;
+    reg [DATA_WIDTH-1:0]    snoop_wb_data;
+    reg [ADDR_WIDTH-1:0]    snoop_wb_addr;
+    reg                     snoop_needs_wb;
 
     // =========================================================================
     // High-Performance Cache Access Functions - Optimized for 6GHz Operation
@@ -205,54 +215,73 @@ module l1_cache #(
             access_type <= 2'b0;
             bank_conflict_detected <= 1'b0;
             bank_conflict_penalty <= 4'h0;
+            snoop_writeback_active <= 1'b0;
+            for (int lru_i = 0; lru_i < NUM_SETS; lru_i = lru_i + 1) begin
+                lru_counter[lru_i] = {ASSOCIATIVITY{1'b0}};  // Blocking OK in for loop reset
+            end
         end else begin
             // Snoop handling with PROPER writeback
-            if (snoop_invalidate) begin
-                integer w;
-                logic [SET_IDX_WIDTH-1:0] snoop_set_index;
-                logic [TAG_WIDTH-1:0]     snoop_tag;
-                reg [LINE_SIZE-1:0] writeback_data;
-                reg [ADDR_WIDTH-1:0] writeback_addr;
-                reg needs_writeback;
-
+            if (snoop_invalidate && !snoop_writeback_active) begin
                 snoop_set_index = snoop_addr[$clog2(LINE_SIZE) +: SET_IDX_WIDTH];
                 snoop_tag       = snoop_addr[ADDR_WIDTH-1 -: TAG_WIDTH];
-                
-                needs_writeback = 1'b0;
-                writeback_data = {LINE_SIZE{1'b0}};
-                writeback_addr = {ADDR_WIDTH{1'b0}};
 
-                for (w = 0; w < ASSOCIATIVITY; w = w + 1) begin
-                    if (cache_valid[w][snoop_set_index] && cache_tags[w][snoop_set_index] == snoop_tag) begin
+                // Snoop race check: if core access in progress to same address, stall core
+                if (state != S_IDLE && snoop_addr[ADDR_WIDTH-1:0] == current_addr[ADDR_WIDTH-1:0]) begin
+                    $display("[%0t] [L1-CACHE] SNOOP RACE: snoop addr matches in-flight core access, stalling core", $time);
+                    core_ready <= 1'b0;
+                end
+                
+                snoop_needs_wb = 1'b0;
+                snoop_wb_data = {DATA_WIDTH{1'b0}};
+                snoop_wb_addr = {ADDR_WIDTH{1'b0}};
+
+                for (snoop_w = 0; snoop_w < ASSOCIATIVITY; snoop_w = snoop_w + 1) begin
+                    if (cache_valid[snoop_w][snoop_set_index] && cache_tags[snoop_w][snoop_set_index] == snoop_tag) begin
                         // PROPER MESI: Modified lines MUST writeback before invalidation
-                        if (cache_mesi[w][snoop_set_index] == MESI_MODIFIED) begin
+                        if (cache_mesi[snoop_w][snoop_set_index] == MESI_MODIFIED) begin
                             // Writeback dirty data to L2
-                            writeback_data = cache_data[w][snoop_set_index];
-                            writeback_addr = {cache_tags[w][snoop_set_index], snoop_set_index, {$clog2(LINE_SIZE){1'b0}}};
-                            needs_writeback = 1'b1;
+                            snoop_wb_data = cache_data[snoop_w][snoop_set_index];
+                            snoop_wb_addr = {cache_tags[snoop_w][snoop_set_index], snoop_set_index, {$clog2(LINE_SIZE){1'b0}}};
+                            snoop_needs_wb = 1'b1;
                             
                             // Send writeback to L2
-                            l2_addr <= writeback_addr;
-                            l2_wr_data <= writeback_data;
+                            l2_addr <= snoop_wb_addr;
+                            l2_wr_data <= snoop_wb_data;
                             l2_wr_en <= 1'b1;
+                            snoop_writeback_active <= 1'b1;
                             writebacks <= writebacks + 1;
                             
-                            $display("[%0t] [L1-CACHE] 🔄 SNOOP WRITEBACK: addr=0x%h (Modified->Invalid)", $time, snoop_addr);
-                        end else if (cache_mesi[w][snoop_set_index] == MESI_SHARED) begin
-                            $display("[%0t] [L1-CACHE] ❌ SNOOP INVALIDATE: addr=0x%h (Shared->Invalid)", $time, snoop_addr);
+                            $display("[%0t] [L1-CACHE] SNOOP WRITEBACK: addr=0x%h (Modified->Invalid)", $time, snoop_addr);
+                        end else if (cache_mesi[snoop_w][snoop_set_index] == MESI_SHARED) begin
+                            $display("[%0t] [L1-CACHE] SNOOP INVALIDATE: addr=0x%h (Shared->Invalid)", $time, snoop_addr);
                         end
                         
-                        cache_mesi[w][snoop_set_index] <= MESI_INVALID;
-                        cache_valid[w][snoop_set_index] <= 1'b0;
+                        // FIX: Capture state before invalidation for MESI controller
+                        snoop_state_out <= cache_mesi[snoop_w][snoop_set_index];
+                        cache_mesi[snoop_w][snoop_set_index] <= MESI_INVALID;
+                        cache_valid[snoop_w][snoop_set_index] <= 1'b0;
                         invalidations <= invalidations + 1;
                     end
+                end
+            end else if (snoop_writeback_active) begin
+                // Keep writeback signals active until l2_ready
+                if (l2_ready) begin
+                    snoop_writeback_active <= 1'b0;
+                    l2_wr_en <= 1'b0;
+                end else begin
+                    l2_wr_en <= 1'b1;
                 end
             end else begin
                 case (state)
                     S_IDLE: begin
                         core_ready <= 1'b1;
-                        l2_rd_en <= 1'b0;
-                        l2_wr_en <= 1'b0;
+                        if (!snoop_writeback_active) begin
+                            l2_rd_en <= 1'b0;
+                            l2_wr_en <= 1'b0;
+                        end else if (l2_ready) begin
+                            snoop_writeback_active <= 1'b0;
+                            l2_wr_en <= 1'b0;
+                        end
 
                         if (core_rd_en || core_wr_en) begin
                             core_ready <= 1'b0;
@@ -302,30 +331,41 @@ module l1_cache #(
                                         // Already Modified - just update data
                                         $display("[%0t] [L1-CACHE] Core%0d Write hit: Already Modified (addr=0x%h)", $time, CORE_ID, current_addr);
                                     end
+                                    MESI_INVALID: begin
+                                        // Write ke line invalid — treat sebagai miss
+                                        state <= S_MISS_ALLOC;
+                                        $display("[%0t] [L1-CACHE] Core%0d Write hit on INVALID line - forcing miss (addr=0x%h)", $time, CORE_ID, current_addr);
+                                    end
                                     default: begin
                                         cache_mesi[hit_way_local][set_index] <= MESI_MODIFIED;
                                     end
                                 endcase
 
-                                // Write data to cache line (byte-aligned)
-                                for (byte_idx = 0; byte_idx < DATA_WIDTH/8; byte_idx = byte_idx + 1) begin
-                                    cache_data[hit_way_local][set_index][(line_offset + byte_idx)*8 +: 8] <=
-                                        current_wr_data[byte_idx*8 +: 8];
-                                end
+                                if (cache_mesi[hit_way_local][set_index] != MESI_INVALID) begin
+                                    // Write data to cache line (byte-aligned)
+                                    if (line_offset + (DATA_WIDTH/8) < LINE_SIZE || line_offset == 0) begin
+                                        for (byte_idx = 0; byte_idx < DATA_WIDTH/8; byte_idx = byte_idx + 1) begin
+                                            cache_data[hit_way_local][set_index][(line_offset + byte_idx)*8 +: 8] <=
+                                                current_wr_data[byte_idx*8 +: 8];
+                                        end
+                                    end
 
-                                // Update LRU (FIXED: Use = not |= to clear other bits)
-                                lru_counter[set_index] <= (1 << hit_way_local);
-                                state <= S_COMPLETE;
+                                    // Update LRU (FIXED: Use = not |= to clear other bits)
+                                    lru_counter[set_index] <= (1 << hit_way_local);
+                                    state <= S_COMPLETE;
+                                end
                             end else begin
                                 // Read hit - maintain state
                                 $display("[%0t] [L1-CACHE] Core%0d Read hit (addr=0x%h, data=0x%h)", $time, CORE_ID, current_addr, cache_data[hit_way_local][set_index]);
                                     
-                                for (byte_idx = 0; byte_idx < DATA_WIDTH/8; byte_idx = byte_idx + 1) begin
-                                    core_rd_data[byte_idx*8 +: 8] <=
-                                        cache_data[hit_way_local][set_index][(line_offset + byte_idx)*8 +: 8];
-                                end
+                                    if (line_offset + (DATA_WIDTH/8) < LINE_SIZE || line_offset == 0) begin
+                                        for (byte_idx = 0; byte_idx < DATA_WIDTH/8; byte_idx = byte_idx + 1) begin
+                                            core_rd_data[byte_idx*8 +: 8] <=
+                                                cache_data[hit_way_local][set_index][(line_offset + byte_idx)*8 +: 8];
+                                        end
+                                    end
 
-                                // Update LRU (FIXED: Use = not |= to clear other bits)
+                                    // Update LRU (FIXED: Use = not |= to clear other bits)
                                 lru_counter[set_index] <= (1 << hit_way_local);
                                 state <= S_COMPLETE;
                             end
@@ -392,7 +432,7 @@ module l1_cache #(
                             end else begin
                                 // Timeout - fill with dummy data (L2 not connected)
                                 // CRITICAL: Use pattern 0xDEADBEEF for easier debugging
-                                for (byte_idx = 0; byte_idx < LINE_SIZE/8; byte_idx = byte_idx + 1) begin
+                                for (byte_idx = 0; byte_idx < DATA_WIDTH/8; byte_idx = byte_idx + 1) begin
                                     cache_data[victim_way][set_index][byte_idx*8 +: 8] <= 8'hDE;
                                 end
                                 $display("[%0t] [L1-CACHE] ** TIMEOUT: Filled with 0xDE pattern for debugging", $time);
@@ -421,17 +461,21 @@ module l1_cache #(
 
                             if (current_is_write) begin
                                 // Complete the write after allocation
-                                for (byte_idx = 0; byte_idx < DATA_WIDTH/8; byte_idx = byte_idx + 1) begin
-                                    cache_data[victim_way][set_index][(line_offset + byte_idx)*8 +: 8] <=
-                                        current_wr_data[byte_idx*8 +: 8];
+                                if (line_offset + (DATA_WIDTH/8) < LINE_SIZE || line_offset == 0) begin
+                                    for (byte_idx = 0; byte_idx < DATA_WIDTH/8; byte_idx = byte_idx + 1) begin
+                                        cache_data[victim_way][set_index][(line_offset + byte_idx)*8 +: 8] <=
+                                            current_wr_data[byte_idx*8 +: 8];
+                                    end
                                 end
                                 state <= S_COMPLETE;
                             end else begin
                                 // Read hit after fetch
                                 if (l2_ready) begin
-                                    for (byte_idx = 0; byte_idx < DATA_WIDTH/8; byte_idx = byte_idx + 1) begin
-                                        core_rd_data[byte_idx*8 +: 8] <=
-                                            l2_rd_data[(line_offset + byte_idx)*8 +: 8];
+                                    if (line_offset + (DATA_WIDTH/8) < LINE_SIZE || line_offset == 0) begin
+                                        for (byte_idx = 0; byte_idx < DATA_WIDTH/8; byte_idx = byte_idx + 1) begin
+                                            core_rd_data[byte_idx*8 +: 8] <=
+                                                l2_rd_data[(line_offset + byte_idx)*8 +: 8];
+                                        end
                                     end
                                 end else begin
                                     // Timeout - return dummy data with warning

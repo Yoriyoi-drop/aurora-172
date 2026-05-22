@@ -11,7 +11,7 @@
 //////////////////////////////////////////////////////////////////////////////////
 
 module smartshift #(
-    parameter DATA_WIDTH    = AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
+    parameter DATA_WIDTH    = `AURORA_DATA_WIDTH,   // FIXED: Use standard parameter
     parameter POWER_UNIT    = 1000,
     parameter MAX_TDP_WATTS = 250,
     parameter G_CORE_BASE_W = 100,   // OPTIMIZED: 150->100 (lower base)
@@ -133,9 +133,9 @@ module smartshift #(
             // Use registered counter instead of combinational increment
             if (gaming_mode && gpu_bound) begin
                 // Gaming: boost G from A+H surplus
-                g_budget_next = G_CORE_BASE_MW + (((A_CORE_BASE_MW - a_core_demand_mw) + (H_CORE_BASE_MW - h_core_demand_mw) + power_surplus_mw) * GAMING_G_W >> 8);
-                a_budget_next = A_CORE_BASE_MW - (A_CORE_BASE_MW - a_core_demand_mw);
-                h_budget_next = H_CORE_BASE_MW - (H_CORE_BASE_MW - h_core_demand_mw);
+                g_budget_next = G_CORE_BASE_MW + ((((a_core_demand_mw > A_CORE_BASE_MW) ? 0 : A_CORE_BASE_MW - a_core_demand_mw) + ((h_core_demand_mw > H_CORE_BASE_MW) ? 0 : H_CORE_BASE_MW - h_core_demand_mw) + power_surplus_mw) * GAMING_G_W >> 8);
+                a_budget_next = A_CORE_BASE_MW - ((a_core_demand_mw > A_CORE_BASE_MW) ? 0 : A_CORE_BASE_MW - a_core_demand_mw);
+                h_budget_next = H_CORE_BASE_MW - ((h_core_demand_mw > H_CORE_BASE_MW) ? 0 : H_CORE_BASE_MW - h_core_demand_mw);
                 n_budget_next = NPU_BASE_MW;
                 // Floor clamp
                 if (g_budget_next < G_FLOOR) g_budget_next = G_FLOOR;
@@ -144,8 +144,8 @@ module smartshift #(
                 if (n_budget_next < N_FLOOR) n_budget_next = N_FLOOR;
             end else if (ai_mode) begin
                 // AI: boost A from G surplus + NPU boost
-                a_budget_next = A_CORE_BASE_MW + (((G_CORE_BASE_MW - g_core_demand_mw) + power_surplus_mw) * AI_A_W >> 8);
-                g_budget_next = G_CORE_BASE_MW - (G_CORE_BASE_MW - g_core_demand_mw);
+                a_budget_next = A_CORE_BASE_MW + ((((g_core_demand_mw > G_CORE_BASE_MW) ? 0 : G_CORE_BASE_MW - g_core_demand_mw) + power_surplus_mw) * AI_A_W >> 8);
+                g_budget_next = G_CORE_BASE_MW - ((g_core_demand_mw > G_CORE_BASE_MW) ? 0 : G_CORE_BASE_MW - g_core_demand_mw);
                 h_budget_next = H_CORE_BASE_MW;
                 // FIX v2: NPU boost
                 if (npu_demand_mw > NPU_BASE_MW)

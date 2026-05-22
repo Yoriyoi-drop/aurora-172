@@ -16,8 +16,8 @@
 
 module chiplet_interconnect #(
     // Use standardized parameters
-    parameter ADDR_WIDTH    = AURORA_ADDR_WIDTH,
-    parameter DATA_WIDTH    = AURORA_DATA_WIDTH,
+    parameter ADDR_WIDTH    = `AURORA_ADDR_WIDTH,
+    parameter DATA_WIDTH    = `AURORA_DATA_WIDTH,
     parameter NUM_CHIPLETS  = 2     // OPTIMIZED: 4->2 (G and A only)
 )(
     input  wire                         clk,
@@ -167,13 +167,34 @@ module chiplet_interconnect #(
                 // This prevents starvation when one chiplet monopolizes
                 rr_pointer <= (rr_pointer == 2'b11) ? 2'b00 : rr_pointer + 1;
 
-                // FIX: Snoop using current request, not stale mem_valid (NBA ordering)
-                // Use selected_chiplet/has_request which are blocking-assigned in same cycle
+                // FIX: Snoop using selected chiplet's address directly (not stale NBA'd mem_addr)
                 snoop_broadcast_valid <= 1'b1;
-                snoop_broadcast_addr <= g_addr;
-                snoop_invalidate_targets <= snoop_table[mem_addr[5:0] % SNOOP_SIZE];
-                snoop_table[mem_addr[5:0] % SNOOP_SIZE] <= (1'b1 << selected_chiplet);
-                snoop_tags[mem_addr[5:0] % SNOOP_SIZE] <= mem_addr[ADDR_WIDTH-1 -: 16];
+                case (selected_chiplet)
+                    2'b00: begin
+                        snoop_broadcast_addr <= g_addr;
+                        snoop_invalidate_targets <= snoop_table[g_addr[5:0] % SNOOP_SIZE];
+                        snoop_table[g_addr[5:0] % SNOOP_SIZE] <= (1'b1 << selected_chiplet);
+                        snoop_tags[g_addr[5:0] % SNOOP_SIZE] <= g_addr[ADDR_WIDTH-1 -: 16];
+                    end
+                    2'b01: begin
+                        snoop_broadcast_addr <= a_addr;
+                        snoop_invalidate_targets <= snoop_table[a_addr[5:0] % SNOOP_SIZE];
+                        snoop_table[a_addr[5:0] % SNOOP_SIZE] <= (1'b1 << selected_chiplet);
+                        snoop_tags[a_addr[5:0] % SNOOP_SIZE] <= a_addr[ADDR_WIDTH-1 -: 16];
+                    end
+                    2'b10: begin
+                        snoop_broadcast_addr <= h_addr;
+                        snoop_invalidate_targets <= snoop_table[h_addr[5:0] % SNOOP_SIZE];
+                        snoop_table[h_addr[5:0] % SNOOP_SIZE] <= (1'b1 << selected_chiplet);
+                        snoop_tags[h_addr[5:0] % SNOOP_SIZE] <= h_addr[ADDR_WIDTH-1 -: 16];
+                    end
+                    2'b11: begin
+                        snoop_broadcast_addr <= npu_addr;
+                        snoop_invalidate_targets <= snoop_table[npu_addr[5:0] % SNOOP_SIZE];
+                        snoop_table[npu_addr[5:0] % SNOOP_SIZE] <= (1'b1 << selected_chiplet);
+                        snoop_tags[npu_addr[5:0] % SNOOP_SIZE] <= npu_addr[ADDR_WIDTH-1 -: 16];
+                    end
+                endcase
             end else begin
                 // CRITICAL FIX #10: Advance RR pointer even when memory not ready
                 // This prevents starvation - all chiplets get fair chance

@@ -164,10 +164,12 @@ module ai_branch_predictor #(
                 btb_valid[i][1] <= 1'b0;
             end
         end else begin
-            // Update statistics
-            total_branches <= total_branches + 1;
-            if (prediction_taken == branch_taken_actual) begin
-                correct_predictions <= correct_predictions + 1;
+            // Update statistics (only when training/processing an actual branch)
+            if (train_enable) begin
+                total_branches <= total_branches + 1;
+                if (prediction_taken == branch_taken_actual) begin
+                    correct_predictions <= correct_predictions + 1;
+                end
             end
 
             // Training mode: update weights
@@ -193,8 +195,8 @@ module ai_branch_predictor #(
                         // FIX v2: Saturate to prevent overflow/underflow
                         if (new_weight > ((1 << (WEIGHT_BITS-1)) - 1))
                             new_weight = (1 << (WEIGHT_BITS-1)) - 1;
-                        else if (new_weight < -(1 << (WEIGHT_BITS-1)))
-                            new_weight = -(1 << (WEIGHT_BITS-1));
+                        else if (new_weight < -((1 << (WEIGHT_BITS-1)) - 1))
+                            new_weight = -((1 << (WEIGHT_BITS-1)) - 1);
 
                         // FIX v2: Use pht[pht_index][i] instead of pht[pht_index][i % WEIGHT_BITS]
                         pht[pht_index][i] <= new_weight;
