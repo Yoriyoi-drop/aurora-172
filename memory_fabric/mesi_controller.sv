@@ -100,13 +100,11 @@ module mesi_controller #(
     output reg                          resp_is_shared,
     output reg                          resp_is_exclusive,
     output reg                          resp_need_writeback,
-    output reg [511:0]                   resp_data_from_cache,   // NEW: Data from cache (O/F state) - 512-bit cache line
-    // TODO: L1 cache data inputs for data forwarding (MOESIX-GA: O/F/G/A states supply data)
-    // L1 cache (l1_cache.sv) does not have snoop data/forward ports yet.
-    // Commented out until L1 is updated. Hardwired to 0 internally.
-    // input  wire [511:0]                  snoop_0_data,           // L1 0 data for forwarding
-    // input  wire [511:0]                  snoop_1_data,           // L1 1 data for forwarding
-    // input  wire [511:0]                  snoop_2_data,           // L1 2 data for forwarding
+    output reg [511:0]                   resp_data_from_cache,   // Data from cache (O/F/G/A/M state) - 512-bit cache line
+    // TAPE-OUT: Snoop data inputs from L1 caches (for MOESI data forwarding)
+    input  wire [511:0]                  snoop_0_data,           // L1 0 cache line data for forwarding
+    input  wire [511:0]                  snoop_1_data,           // L1 1 cache line data for forwarding
+    input  wire [511:0]                  snoop_2_data,           // L1 2 cache line data for forwarding
     output reg                          resp_ready,
 
     // Performance counters
@@ -159,6 +157,7 @@ module mesi_controller #(
     // Snoop results
     reg [2:0]                 l1_states [0:NUM_CACHES-1];
     reg                       l1_valids [0:NUM_CACHES-1];
+    reg [511:0]               l1_cdata [0:NUM_CACHES-1];  // TAPE-OUT: Captured snoop data for forwarding
     reg                       any_modified;
     reg                       any_exclusive;  // FIX: Add exclusive state tracking
     reg                       any_owned;
@@ -277,6 +276,8 @@ module mesi_controller #(
             gaming_priority_hits <= 32'h0;
             ai_bulk_prefetches <= 32'h0;
             owned_transitions <= 32'h0;
+            l1_cdata[0] <= 512'b0;
+            l1_cdata[1] <= 512'b0;
         end else begin
             // Performance optimization: Clear snoop signals (pulse for 1 cycle)
             // Parallel clearing for minimal latency
@@ -321,6 +322,9 @@ module mesi_controller #(
                     // Parallel state capture for minimal latency
                     {l1_valids[0], l1_valids[1]} <= {snoop_0_valid, snoop_1_valid};
                     {l1_states[0], l1_states[1]} <= {snoop_0_state, snoop_1_state};
+                    // TAPE-OUT: Capture snoop data for MOESI forwarding (O/F/G/A/M)
+                    l1_cdata[0] <= snoop_0_data;
+                    l1_cdata[1] <= snoop_1_data;
                     // NPU cache unused - removed for performance
 
                     any_modified <= 1'b0;
@@ -398,6 +402,9 @@ module mesi_controller #(
                     // l1_valids[2] <= snoop_2_valid; // Removed - NPU unused
                     l1_states[0] <= snoop_0_state;
                     l1_states[1] <= snoop_1_state;
+                    // TAPE-OUT: Capture snoop data for MOESI forwarding (O/F/G/A/M)
+                    l1_cdata[0] <= snoop_0_data;
+                    l1_cdata[1] <= snoop_1_data;
                     // l1_states[2] <= snoop_2_state; // Removed - NPU unused
 
                     any_modified <= 1'b0;
@@ -483,6 +490,9 @@ module mesi_controller #(
                     l1_valids[1] <= snoop_1_valid;
                     l1_states[0] <= snoop_0_state;
                     l1_states[1] <= snoop_1_state;
+                    // TAPE-OUT: Capture snoop data for MOESI forwarding (O/F/G/A/M)
+                    l1_cdata[0] <= snoop_0_data;
+                    l1_cdata[1] <= snoop_1_data;
 
                     any_modified <= 1'b0;
                     any_exclusive <= 1'b0;
@@ -567,7 +577,7 @@ module mesi_controller #(
                         end else if (any_owned) begin
                             // O state: owner has dirty shared data → writeback + invalidate
                             resp_need_writeback <= 1'b1;
-                            resp_data_from_cache <= 512'b0;  // Data will be supplied by cache owner via snoop forward mechanism
+                            resp_data_from_cache <= l1_cdata[owner_cache_idx];  // TAPE-OUT: Forward data from O-state owner
                             writebacks_forced <= writebacks_forced + 1;
                             owned_transitions <= owned_transitions + 1;
 
@@ -610,7 +620,7 @@ module mesi_controller #(
                             resp_is_shared <= 1'b1;
                             resp_is_exclusive <= 1'b0;
                             resp_need_writeback <= 1'b1;
-                            resp_data_from_cache <= 512'b0;  // Data will be supplied by cache owner via snoop forward mechanism
+                            resp_data_from_cache <= l1_cdata[owner_cache_idx];  // TAPE-OUT: Forward data from M-state owner
                             writebacks_forced <= writebacks_forced + 1;
                             owned_transitions <= owned_transitions + 1;
 
@@ -627,7 +637,7 @@ module mesi_controller #(
                             // O state: owner supplies data (no memory access!)
                             resp_is_shared <= 1'b1;
                             resp_is_exclusive <= 1'b0;
-                            resp_data_from_cache <= 512'b0;  // Data will be supplied by cache owner via snoop forward mechanism
+                            resp_data_from_cache <= l1_cdata[owner_cache_idx];  // TAPE-OUT: Forward data from O-state owner
                             resp_need_writeback <= 1'b0;  // Owner already has data
                             owned_transitions <= owned_transitions + 1;
 
@@ -646,7 +656,7 @@ module mesi_controller #(
                             resp_is_shared <= 1'b1;
                             resp_is_exclusive <= 1'b0;
                             resp_need_writeback <= 1'b0;
-                            resp_data_from_cache <= 512'b0;  // Data will be supplied by cache owner via snoop forward mechanism
+                            resp_data_from_cache <= l1_cdata[forward_target];  // TAPE-OUT: Forward data from F-state forwarder
                             forwards_served <= forwards_served + 1;
 
                             // Forward request to F cache
@@ -662,7 +672,7 @@ module mesi_controller #(
                             resp_is_shared <= 1'b1;
                             resp_is_exclusive <= 1'b0;
                             resp_need_writeback <= 1'b0;
-                            resp_data_from_cache <= 512'b0;  // Data will be supplied by cache owner via snoop forward mechanism
+                            resp_data_from_cache <= l1_cdata[owner_cache_idx];  // TAPE-OUT: Forward data from G-state owner
                             gaming_priority_hits <= gaming_priority_hits + 1;
 
                             // Forward to G cache
@@ -678,7 +688,7 @@ module mesi_controller #(
                             resp_is_shared <= 1'b1;
                             resp_is_exclusive <= 1'b0;
                             resp_need_writeback <= 1'b0;
-                            resp_data_from_cache <= 512'b0;  // Data will be supplied by cache owner via snoop forward mechanism
+                            resp_data_from_cache <= l1_cdata[owner_cache_idx];  // TAPE-OUT: Forward data from A-state owner
                             ai_bulk_prefetches <= ai_bulk_prefetches + 1;
 
                             case (owner_cache_idx)

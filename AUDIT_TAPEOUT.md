@@ -255,12 +255,15 @@ Di silicon dengan 6 GHz + memory fabric congestion, timeout akan sering terjadi 
 | C-2 | Multi-driven `error_rate_count` | `exception_handler.sv` | Dipisahkan ke satu always block |
 | C-7 | Priority inversion fabric arbiter | `top.sv` | Ditambahkan `fab_sel == -1` guard untuk first-match |
 | C-7 | Priority inversion L2 arbiter | `top.sv` | Ditambahkan `found` flag untuk first-match |
+| C-5 | Data forwarding return 0 | `mesi_controller.sv` | Added snoop data inputs, capture mechanism, replaced `512'b0` with `l1_cdata[owner]` |
+| C-5 | MESI↔MOESI mapping inverted | `cache_profiler.sv` | Swapped 01↔11 encoding to match `l1_cache.sv` M=01, S=11 |
+| C-5 | L1 missing snoop data output | `l1_cache.sv` | Added `snoop_data_out` port + reset + capture during snoop |
 
 ### ⏳ BELUM DIPERBAIKI (Perlu Arsitektur Ulang)
 
 | # | Issue | Alasan |
 |---|-------|--------|
-| C-5 | Cache coherency protocol non-functional | MESI tanpa snoop, forwarding return 0 — perlu rewrite besar |
+| C-5 | Cache coherency protocol non-functional | Lihat progress di bawah — sebagian diperbaiki |
 | C-6 | BVH/sqrt/div combinational (timing impossible) | Perlu pipeline multi-stage — redesign arsitektural |
 | C-8 | Parameter mismatch FPGA | Accepted untuk prototyping FPGA (resource constraint) |
 | H-1 | 155 $display tanpa synthesis guard | Perlu `\`ifndef SYNTHESIS` di 10 file |
@@ -271,8 +274,23 @@ Di silicon dengan 6 GHz + memory fabric congestion, timeout akan sering terjadi 
 | H-8 | Testbench tanpa self-checking | Rewrite testbench |
 | Verif gap | 6+ domain tidak dites | Butuh verification engineer |
 
+### ⏳ C-5 FIX PROGRESS (Cache Coherency):
+
+| Sub-issue | File | Status | Keterangan |
+|-----------|------|--------|------------|
+| Data forwarding return 0 | `mesi_controller.sv` | ✅ Fixed | Added snoop data inputs + l1_cdata capture. `resp_data_from_cache` now forwards real data from owner cache instead of 0. |
+| MESI↔MOESI mapping inverted | `cache_profiler.sv` | ✅ Fixed | M=01 (was 11), S=11 (was 01), E=10, I=00 — matches l1_cache encoding |
+| No snoop data port | `l1_cache.sv` | ✅ Fixed | Added `snoop_data_out` port, initialized in reset, captures cache line data during snoop |
+| S_SNOOP_CHECK placeholder | `l2_cache.sv` | ⚠️ Unchanged | State is never entered (no `state <= S_SNOOP_CHECK`), dead code |
+| Snoop bus floating | `top.sv:2096-2098` | ⚠️ Unchanged | L2 bank snoop outputs not connected — but L2 already issues snoop invalidate for write-hit on Shared lines (L2 has its own snoop mechanism via snoop_addr/snoop_invalidate outputs at lines 493-494) |
+| cache_hierarchy not instantiated | `cache_hierarchy.sv` | ⚠️ Unchanged | mesi_controller is dead code in current top-level. cache_hierarchy module exists but never instantiated. Full MOESIX-GA integration requires wiring g_core/a_core snoop ports in top.sv + instantiating cache_hierarchy. |
+
+**Catatan:** L1 cache currently does self-invalidation (not true snoop). Full snoop bus integration requires:
+1. Instantiate cache_hierarchy in top.sv (or integrate mesi_controller directly)
+2. Add external snoop input ports to g_core.sv and a_core.sv 
+3. Route snoop signals from mesi_controller → L1 caches in top.sv
+
 ### Prioritas selanjutnya:
 1. H-1: Guard 155 $display dengan `\`ifndef SYNTHESIS` (10 files)
 2. C-6: Pipeline BVH traversal (rt_engine.sv) dan integer sqrt (g_core.sv)
 3. H-24: Fix barycentric coordinate area2 bit-OR bug (g_core.sv)
-4. C-5: Implementasi snoop bus untuk MESI protocol

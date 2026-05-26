@@ -218,10 +218,10 @@ module cache_profiler #(
             // Invalid: line not present
             if (valid_mesi_states) begin
                 case (mesi_tag_state)
-                    2'b11: mesi_modified_count <= mesi_modified_count + 32'd1;
-                    2'b10: mesi_exclusive_count <= mesi_exclusive_count + 32'd1;
-                    2'b01: mesi_shared_count <= mesi_shared_count + 32'd1;
-                    default: mesi_invalid_count <= mesi_invalid_count + 32'd1;
+                    2'b01: mesi_modified_count <= mesi_modified_count + 32'd1;  // FIXED: M=01 (was 11)
+                    2'b10: mesi_exclusive_count <= mesi_exclusive_count + 32'd1;  // E=10
+                    2'b11: mesi_shared_count <= mesi_shared_count + 32'd1;  // FIXED: S=11 (was 01)
+                    default: mesi_invalid_count <= mesi_invalid_count + 32'd1;  // I=00
                 endcase
             end
 

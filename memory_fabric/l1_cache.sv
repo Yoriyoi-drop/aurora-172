@@ -221,6 +221,7 @@ module l1_cache #(
             bank_conflict_detected <= 1'b0;
             bank_conflict_penalty <= 4'h0;
             snoop_writeback_active <= 1'b0;
+            snoop_data_out <= {DATA_WIDTH{1'b0}};
             for (int lru_i = 0; lru_i < NUM_SETS; lru_i = lru_i + 1) begin
                 lru_counter[lru_i] = {ASSOCIATIVITY{1'b0}};  // Blocking OK in for loop reset
             end
@@ -261,8 +262,9 @@ module l1_cache #(
                             $display("[%0t] [L1-CACHE] SNOOP INVALIDATE: addr=0x%h (Shared->Invalid)", $time, snoop_addr);
                         end
                         
-                        // FIX: Capture state before invalidation for MESI controller
+                        // FIX: Capture state + data before invalidation for MESI controller
                         snoop_state_out <= cache_mesi[snoop_w][snoop_set_index];
+                        snoop_data_out <= cache_data[snoop_w][snoop_set_index];  // TAPE-OUT: Capture cache line data for MOESI forwarding
                         cache_mesi[snoop_w][snoop_set_index] <= MESI_INVALID;
                         cache_valid[snoop_w][snoop_set_index] <= 1'b0;
                         invalidations <= invalidations + 1;
