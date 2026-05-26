@@ -31,8 +31,9 @@ module l2_cache #(
     parameter ADDR_WIDTH    = `AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
     parameter CACHE_SIZE    = 262144,         // OPTIMIZED: 512KB->256KB (smaller cache)
     parameter ASSOCIATIVITY = 8,              // OPTIMIZED: 16->8 (simpler associativity)
-    parameter LINE_SIZE     = 64,             // OPTIMIZED: smaller line size
-    parameter NUM_L1_PORTS  = 2               // G-Core, A-Core only
+    parameter LINE_SIZE        = 64,             // OPTIMIZED: smaller line size (bytes)
+    parameter CACHE_DATA_WIDTH = 512,           // FIX: 512-bit data (was incorrectly using LINE_SIZE)
+    parameter NUM_L1_PORTS     = 2              // G-Core, A-Core only
 )(
     input  wire                         clk,
     /* verilator lint_off UNUSED */
@@ -42,40 +43,44 @@ module l2_cache #(
 
     // L1 port 0: G-Core interface
     input  wire [ADDR_WIDTH-1:0]        l1_0_addr,
-    input  wire [LINE_SIZE-1:0]         l1_0_wr_data,
+    input  wire [CACHE_DATA_WIDTH-1:0]  l1_0_wr_data,
     input  wire                         l1_0_rd_en,
     input  wire                         l1_0_wr_en,
-    output reg [LINE_SIZE-1:0]          l1_0_rd_data,
+    output reg [CACHE_DATA_WIDTH-1:0]   l1_0_rd_data,
     output reg                          l1_0_ready,
 
     // L1 port 1: A-Core interface
     input  wire [ADDR_WIDTH-1:0]        l1_1_addr,
-    input  wire [LINE_SIZE-1:0]         l1_1_wr_data,
+    input  wire [CACHE_DATA_WIDTH-1:0]  l1_1_wr_data,
     input  wire                         l1_1_rd_en,
     input  wire                         l1_1_wr_en,
-    output reg [LINE_SIZE-1:0]          l1_1_rd_data,
+    output reg [CACHE_DATA_WIDTH-1:0]   l1_1_rd_data,
     output reg                          l1_1_ready,
 
     // L1 port 2: NPU interface
     input  wire [ADDR_WIDTH-1:0]        l1_2_addr,
-    input  wire [LINE_SIZE-1:0]         l1_2_wr_data,
+    input  wire [CACHE_DATA_WIDTH-1:0]  l1_2_wr_data,
     input  wire                         l1_2_rd_en,
     input  wire                         l1_2_wr_en,
-    output reg [LINE_SIZE-1:0]          l1_2_rd_data,
+    output reg [CACHE_DATA_WIDTH-1:0]   l1_2_rd_data,
     output reg                          l1_2_ready,
 
     // External memory interface (to memory fabric / DDR)
     output reg [ADDR_WIDTH-1:0]         mem_addr,
-    output reg [LINE_SIZE-1:0]          mem_wr_data,
+    output reg [CACHE_DATA_WIDTH-1:0]   mem_wr_data,
     output reg                          mem_rd_en,
     output reg                          mem_wr_en,
-    input  wire [LINE_SIZE-1:0]         mem_rd_data,
+    input  wire [CACHE_DATA_WIDTH-1:0]  mem_rd_data,
     input  wire                         mem_ready,
 
     // Snoop broadcast to L1 caches
     output reg [ADDR_WIDTH-1:0]         snoop_addr,
     output reg                          snoop_invalidate,
     output reg                          snoop_update,
+
+    // Error reporting (asserted on timeout, prevents silent data corruption)
+    output reg                          timeout_error,
+    output reg [ADDR_WIDTH-1:0]         timeout_addr,
 
     // Performance counters
     output reg [31:0]                   l2_hits,
@@ -93,7 +98,7 @@ module l2_cache #(
     localparam TAG_WIDTH = ADDR_WIDTH - SET_IDX_WIDTH - $clog2(LINE_SIZE);
 
     // Cache arrays
-    reg [LINE_SIZE-1:0]       cache_data [0:ASSOCIATIVITY-1][0:NUM_SETS-1];
+    reg [CACHE_DATA_WIDTH-1:0] cache_data [0:ASSOCIATIVITY-1][0:NUM_SETS-1];
     reg [TAG_WIDTH-1:0]       cache_tags [0:ASSOCIATIVITY-1][0:NUM_SETS-1];
     reg [1:0]                 cache_mesi [0:ASSOCIATIVITY-1][0:NUM_SETS-1];
     reg                       cache_valid [0:ASSOCIATIVITY-1][0:NUM_SETS-1];
@@ -108,7 +113,7 @@ module l2_cache #(
     localparam MESI_SHARED    = 2'b11;
 
     // Victim cache (4 entries for evicted lines)
-    reg [LINE_SIZE-1:0]       victim_data [0:3];
+    reg [CACHE_DATA_WIDTH-1:0] victim_data [0:3];
     reg [TAG_WIDTH-1:0]       victim_tags [0:3];
     reg                       victim_valid [0:3];
     // FIX v2: Replace bitmask LRU with per-entry timestamp counter for victim cache
@@ -137,7 +142,7 @@ module l2_cache #(
 
     // Current request tracking
     reg [ADDR_WIDTH-1:0]      current_addr;
-    reg [LINE_SIZE-1:0]       current_wr_data;
+    reg [CACHE_DATA_WIDTH-1:0] current_wr_data;
     reg                       current_is_write;
     reg [1:0]                 current_port;  // Which L1 port requested
 
@@ -145,19 +150,19 @@ module l2_cache #(
     reg [7:0]                 writeback_timeout_counter;
     
     // DEADLOCK FIX: Write buffer management and backpressure control
-    reg [3:0]                 write_buffer_count;      // Number of pending writes
-    reg [LINE_SIZE-1:0]       write_buffer_data [0:15]; // 16-entry write buffer
-    reg [ADDR_WIDTH-1:0]      write_buffer_addr [0:15];
-    reg                      write_buffer_valid [0:15];
-    reg [3:0]                 write_buffer_head;
-    reg [3:0]                 write_buffer_tail;
+    reg [4:0]                 write_buffer_count;      // Number of pending writes (FIX: 5-bit for 32 entries)
+    reg [CACHE_DATA_WIDTH-1:0] write_buffer_data [0:31]; // 32-entry write buffer (FIX: was 16)
+    reg [ADDR_WIDTH-1:0]      write_buffer_addr [0:31];
+    reg                      write_buffer_valid [0:31];
+    reg [4:0]                 write_buffer_head;       // FIX: 5-bit pointer
+    reg [4:0]                 write_buffer_tail;       // FIX: 5-bit pointer
     reg                      write_buffer_full;
     reg [15:0]                backpressure_timeout;     // Global backpressure timeout
     reg                      backpressure_active;      // System under backpressure
     
     // Backpressure thresholds
-    localparam WRITE_BUFFER_DEPTH = 16;
-    localparam BACKPRESSURE_THRESHOLD = 12;  // 75% full triggers backpressure
+    localparam WRITE_BUFFER_DEPTH = 32;   // FIX: 32-entry buffer (was 16)
+    localparam BACKPRESSURE_THRESHOLD = 24;  // 75% full triggers backpressure (was 12)
     // DEADLOCK FIX: Enhanced timeout values for different memory conditions
     localparam BACKPRESSURE_TIMEOUT = 16'd500;  // Increased timeout for slower systems
     localparam WRITEBACK_TIMEOUT = 8'd200;     // Increased writeback timeout
@@ -305,9 +310,9 @@ module l2_cache #(
             l1_0_ready <= 1'b1;
             l1_1_ready <= 1'b1;
             l1_2_ready <= 1'b1;
-            l1_0_rd_data <= {LINE_SIZE{1'b0}};
-            l1_1_rd_data <= {LINE_SIZE{1'b0}};
-            l1_2_rd_data <= {LINE_SIZE{1'b0}};
+            l1_0_rd_data <= {CACHE_DATA_WIDTH{1'b0}};
+            l1_1_rd_data <= {CACHE_DATA_WIDTH{1'b0}};
+            l1_2_rd_data <= {CACHE_DATA_WIDTH{1'b0}};
             mem_rd_en <= 1'b0;
             mem_wr_en <= 1'b0;
             mem_addr <= {ADDR_WIDTH{1'b0}};  // FIX: Initialize mem_addr to prevent multi-driver
@@ -329,17 +334,21 @@ module l2_cache #(
             writeback_timeout_counter <= 8'b0;
             
             // DEADLOCK FIX: Initialize write buffer and backpressure state
-            write_buffer_count <= 4'b0;
-            write_buffer_head <= 4'b0;
-            write_buffer_tail <= 4'b0;
+            write_buffer_count <= 5'b0;
+            write_buffer_head <= 5'b0;
+            write_buffer_tail <= 5'b0;
             write_buffer_full <= 1'b0;
             backpressure_timeout <= 16'd0;
             backpressure_active <= 1'b0;
+            timeout_error <= 1'b0;
+            timeout_addr <= {ADDR_WIDTH{1'b0}};
             for (int i = 0; i < WRITE_BUFFER_DEPTH; i++) begin
                 write_buffer_valid[i] <= 1'b0;
-                write_buffer_data[i] <= {LINE_SIZE{1'b0}};
+                write_buffer_data[i] <= {CACHE_DATA_WIDTH{1'b0}};
                 write_buffer_addr[i] <= {ADDR_WIDTH{1'b0}};
             end
+            // FIX: Save victim_way register for writeback timeout (Bug 8)
+            timeout_victim_way <= 0;
         end else begin
             snoop_invalidate <= 1'b0;
             snoop_update <= 1'b0;
@@ -353,7 +362,7 @@ module l2_cache #(
                 if (mem_wr_en && mem_ready) begin
                     // Previous write completed — advance buffer and clear enable
                     write_buffer_valid[write_buffer_head] <= 1'b0;
-                    write_buffer_data[write_buffer_head] <= {LINE_SIZE{1'b0}};
+                    write_buffer_data[write_buffer_head] <= {CACHE_DATA_WIDTH{1'b0}};
                     write_buffer_addr[write_buffer_head] <= {ADDR_WIDTH{1'b0}};
                     write_buffer_head <= write_buffer_head + 1;
                     write_buffer_count <= write_buffer_count - 1;
@@ -375,22 +384,14 @@ module l2_cache #(
             if (backpressure_active) begin
                 backpressure_timeout <= backpressure_timeout + 1;
                 if (backpressure_timeout >= BACKPRESSURE_TIMEOUT) begin
-                    $display("[%0t] [L2-CACHE] BACKPRESSURE TIMEOUT - forcing emergency recovery", $time);
-                    // EMERGENCY: Force clear everything to prevent deadlock
-                    for (int i = 0; i < WRITE_BUFFER_DEPTH; i++) begin
-                        write_buffer_valid[i] <= 1'b0;
-                        write_buffer_data[i] <= {LINE_SIZE{1'b0}};
-                        write_buffer_addr[i] <= {ADDR_WIDTH{1'b0}};
+                    // TAPE-OUT FIX: Do NOT flush write buffer on timeout.
+                    // Silent data loss in silicon is unacceptable.
+                    // Assert error and stall instead — system watchdog can
+                    // trigger architectural recovery.
+                    timeout_error <= 1'b1;
+                    if (write_buffer_count > 0) begin
+                        timeout_addr <= write_buffer_addr[write_buffer_head];
                     end
-                    write_buffer_count <= 4'b0;
-                    write_buffer_head <= 4'b0;
-                    write_buffer_tail <= 4'b0;
-                    write_buffer_full <= 1'b0;
-                    backpressure_active <= 1'b0;
-                    backpressure_timeout <= 16'd0;
-                    mem_wr_en <= 1'b0;
-                    // CRITICAL: Force state reset to break deadlock
-                    state <= S_IDLE;
                 end
             end else begin
                 backpressure_timeout <= 16'd0;
@@ -497,7 +498,8 @@ module l2_cache #(
                             cache_mesi[hit_way][set_index] <= MESI_MODIFIED;
 
                             // DEADLOCK FIX: Buffer write instead of direct memory write
-                            if (write_buffer_count < WRITE_BUFFER_DEPTH) begin
+                            // FIX: Wrap guard — stall when buffer nearly full (Bug 7)
+                            if (write_buffer_count < WRITE_BUFFER_DEPTH - 2) begin
                                 // Write full cache line
                                 cache_data[hit_way][set_index] <= current_wr_data;
                                 
@@ -508,7 +510,7 @@ module l2_cache #(
                                 write_buffer_tail <= write_buffer_tail + 1;
                                 write_buffer_count <= write_buffer_count + 1;
                                 
-                                if (write_buffer_count == WRITE_BUFFER_DEPTH - 1) begin
+                                if (write_buffer_count >= WRITE_BUFFER_DEPTH - 3) begin
                                     write_buffer_full <= 1'b1;
                                 end
 
@@ -556,6 +558,8 @@ module l2_cache #(
                 S_MISS_FETCH: begin
                     // Find victim way for eviction
                     victim_way = find_victim_way(set_index);
+                    // FIX Bug 8: Save victim_way before entering writeback
+                    timeout_victim_way <= victim_way;
 
                     // Check if victim is dirty
                     if (cache_valid[victim_way][set_index] &&
@@ -584,12 +588,11 @@ module l2_cache #(
                         mem_rd_en <= 1'b1;
                         state <= S_VICTIM_CHECK;
                     end else if (writeback_timeout_counter >= WRITEBACK_TIMEOUT) begin
-                        // CRITICAL FIX: Jangan invalidate dirty line tanpa writeback.
-                        // Tunggu writeback selesai sebelum izinkan eviction.
-                        $display("[%0t] [L2-CACHE] S_WRITEBACK TIMEOUT: mem_ready not asserted after %0d cycles - retrying writeback", $time, WRITEBACK_TIMEOUT);
+                        // FIX Bug 8: Use saved victim_way, NOT a fresh find_victim_way()
+                        // find_victim_way() may return a DIFFERENT entry than the original eviction
+                        $display("[%0t] [L2-CACHE] S_WRITEBACK TIMEOUT: mem_ready not asserted after %0d cycles - retrying writeback (way=%0d)", $time, WRITEBACK_TIMEOUT, timeout_victim_way);
                         writeback_timeout_counter <= 8'h0;
-                        // Re-drive writeback signals and retry
-                        timeout_victim_way = find_victim_way(set_index);
+                        // Re-drive writeback signals and retry using saved timeout_victim_way
                         mem_addr <= {cache_tags[timeout_victim_way][set_index], set_index, {$clog2(LINE_SIZE){1'b0}}};
                         mem_wr_data <= cache_data[timeout_victim_way][set_index];
                         mem_wr_en <= 1'b1;
@@ -648,12 +651,12 @@ module l2_cache #(
                         // Force emergency recovery
                         for (int i = 0; i < WRITE_BUFFER_DEPTH; i++) begin
                             write_buffer_valid[i] <= 1'b0;
-                            write_buffer_data[i] <= {LINE_SIZE{1'b0}};
+                            write_buffer_data[i] <= {CACHE_DATA_WIDTH{1'b0}};
                             write_buffer_addr[i] <= {ADDR_WIDTH{1'b0}};
                         end
-                        write_buffer_count <= 4'b0;
-                        write_buffer_head <= 4'b0;
-                        write_buffer_tail <= 4'b0;
+                        write_buffer_count <= 5'b0;
+                        write_buffer_head <= 5'b0;
+                        write_buffer_tail <= 5'b0;
                         write_buffer_full <= 1'b0;
                         backpressure_active <= 1'b0;
                         backpressure_timeout <= 16'd0;

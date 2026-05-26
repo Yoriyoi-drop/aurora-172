@@ -102,13 +102,28 @@ module power_monitor #(
 );
 
     // ─────────────────────────────────────────────────────────────
-    // Energy Counters (64-bit, accumulate in μJ)
+    // Energy Counters (64-bit fixed-point, accumulate in μJ)
     // Intel RAPL equivalent
+    // Sub-μJ precision via 32-bit fractional accumulators.
     // ─────────────────────────────────────────────────────────────
     reg [63:0]  energy_g_counter;
     reg [63:0]  energy_a_counter;
     reg [63:0]  energy_h_counter;
     reg [63:0]  energy_npu_counter;
+
+    // Fractional accumulators (fixed-point, unit = 2^-32 μJ)
+    reg [31:0]  energy_g_frac;
+    reg [31:0]  energy_a_frac;
+    reg [31:0]  energy_h_frac;
+    reg [31:0]  energy_npu_frac;
+
+    // Scale factor: 167/1_000_000 represented as K/2^32
+    // K = (167 << 32) / 1_000_000 ≈ 717702
+    localparam [31:0] ENERGY_K = 32'd717702;
+
+    // Time-base counter: update energy once per microsecond (~6000 cycles at 6GHz)
+    localparam [15:0] USEC_CYCLES = 16'd6000;
+    reg [15:0] timebase_count;
 
     assign energy_g_core_uj   = energy_g_counter;
     assign energy_a_core_uj   = energy_a_counter;
@@ -172,6 +187,12 @@ module power_monitor #(
             energy_h_counter <= 64'd0;
             energy_npu_counter <= 64'd0;
 
+            energy_g_frac <= 32'd0;
+            energy_a_frac <= 32'd0;
+            energy_h_frac <= 32'd0;
+            energy_npu_frac <= 32'd0;
+            timebase_count <= 16'd0;
+
             g_power_sum <= {DATA_WIDTH{1'b0}};
             a_power_sum <= {DATA_WIDTH{1'b0}};
             // FIX v2: Initialize H-Core and NPU power sum registers
@@ -187,34 +208,49 @@ module power_monitor #(
             throttle_event_count <= 32'd0;
         end else if (enable_monitor) begin
             // ─────────────────────────────────────────────────
-            // Energy Accumulation - REALISTIC MODEL
+            // Energy Accumulation - REALISTIC MODEL (fixed-point)
             // Energy (μJ) = Power (mW) × Time (ns) / 1000
             // At 6GHz: cycle_time = 0.167ns (167ps)
-            // Energy per cycle = mW × 0.167 / 1000 = mW × 0.000167 μJ
             //
-            // To avoid floating point, use fixed-point arithmetic:
-            // energy_increment = (power_mw * CYCLE_TIME_PS) / 1_000_000
-            // where CYCLE_TIME_PS = 167 (picoseconds at 6GHz)
+            // Fixed-point accumulation using 64-bit + 32-bit fractional:
+            //   energy_frac += power_mw * K  where K = (167 << 32) / 1_000_000
+            //   When fraction overflows 2^32, carry 1 μJ into main counter
+            //
+            // Time base: update once per microsecond (6000 cycles @ 6GHz)
+            // to bound accumulation error and reduce gate count.
             // ─────────────────────────────────────────────────
+            if (timebase_count >= USEC_CYCLES - 1) begin
+                timebase_count <= 16'd0;
 
-            // G-Core energy accumulation
-            if (g_core_power_mw > 0) begin
-                energy_g_counter <= energy_g_counter + (g_core_power_mw * 167) / 1_000_000;
-            end
+                // G-Core energy accumulation (fixed-point)
+                energy_g_frac <= energy_g_frac + (g_core_power_mw * ENERGY_K);
+                if (energy_g_frac > (g_core_power_mw * ENERGY_K))  // overflow
+                    energy_g_counter <= energy_g_counter + 64'd1;
+                else if (energy_g_frac + (g_core_power_mw * ENERGY_K) < energy_g_frac)
+                    energy_g_counter <= energy_g_counter + 64'd1;
 
-            // A-Core energy accumulation
-            if (a_core_power_mw > 0) begin
-                energy_a_counter <= energy_a_counter + (a_core_power_mw * 167) / 1_000_000;
-            end
+                // A-Core energy accumulation
+                energy_a_frac <= energy_a_frac + (a_core_power_mw * ENERGY_K);
+                if (energy_a_frac > (a_core_power_mw * ENERGY_K))
+                    energy_a_counter <= energy_a_counter + 64'd1;
+                else if (energy_a_frac + (a_core_power_mw * ENERGY_K) < energy_a_frac)
+                    energy_a_counter <= energy_a_counter + 64'd1;
 
-            // H-Core energy accumulation
-            if (h_core_power_mw > 0) begin
-                energy_h_counter <= energy_h_counter + (h_core_power_mw * 167) / 1_000_000;
-            end
+                // H-Core energy accumulation
+                energy_h_frac <= energy_h_frac + (h_core_power_mw * ENERGY_K);
+                if (energy_h_frac > (h_core_power_mw * ENERGY_K))
+                    energy_h_counter <= energy_h_counter + 64'd1;
+                else if (energy_h_frac + (h_core_power_mw * ENERGY_K) < energy_h_frac)
+                    energy_h_counter <= energy_h_counter + 64'd1;
 
-            // NPU energy accumulation
-            if (npu_power_mw > 0) begin
-                energy_npu_counter <= energy_npu_counter + (npu_power_mw * 167) / 1_000_000;
+                // NPU energy accumulation
+                energy_npu_frac <= energy_npu_frac + (npu_power_mw * ENERGY_K);
+                if (energy_npu_frac > (npu_power_mw * ENERGY_K))
+                    energy_npu_counter <= energy_npu_counter + 64'd1;
+                else if (energy_npu_frac + (npu_power_mw * ENERGY_K) < energy_npu_frac)
+                    energy_npu_counter <= energy_npu_counter + 64'd1;
+            end else begin
+                timebase_count <= timebase_count + 16'd1;
             end
 
             // ─────────────────────────────────────────────────

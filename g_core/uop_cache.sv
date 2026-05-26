@@ -1,8 +1,5 @@
 `timescale 1ns / 1ps
 
-// verilator lint_off DECLFILENAME
-// verilator lint_off WIDTHEXPAND
-
 // Include parameters (Icarus compatibility)
 `include "interfaces/aurora_params.svh"
 
@@ -164,16 +161,16 @@ module uop_cache #(
     endfunction
 
     // Update logic
-    always @(posedge clk) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            // Initialize arrays to zero
+            // Initialize arrays to zero (use NBA for synthesis safety)
             for (int s = 0; s < NUM_SETS; s++) begin
                 for (int w = 0; w < ASSOCIATIVITY; w++) begin
-                    cache_valid[s][w] = 1'b0;
-                    cache_tags[s][w] = {TAG_WIDTH{1'b0}};
-                    cache_uops[s][w] = 64'h0;
-                    cache_uop_counts[s][w] = 8'd0;
-                    cache_lru[s][w] = 8'd0;
+                    cache_valid[s][w] <= 1'b0;
+                    cache_tags[s][w] <= {TAG_WIDTH{1'b0}};
+                    cache_uops[s][w] <= 64'h0;
+                    cache_uop_counts[s][w] <= 8'd0;
+                    cache_lru[s][w] <= 8'd0;
                 end
             end
             hit_counter <= 32'd0;

@@ -63,6 +63,11 @@ module exception_handler #(
     output reg [15:0]                   system_error_source,  // Core ID that caused error
     output reg                          system_error_valid,
     
+    // Error history FIFO read interface (Bug 19)
+    input  wire                         error_fifo_rd_en,
+    output reg  [31:0]                  error_fifo_rd_data,
+    output reg                          error_fifo_empty,
+    
     // Error statistics
     output reg [31:0]                   total_error_count,
     output reg [31:0]                   g_core_error_count,
@@ -438,10 +443,9 @@ module exception_handler #(
             performance_impact <= 32'b0;
             npu_error_count <= EXC_ERROR_COUNT_ZERO;
             
-            // Initialize error rate counters
-            error_rate_window <= EXC_ERROR_COUNT_ZERO;
-            error_rate_count <= EXC_ERROR_COUNT_ZERO;
-            error_rate_total <= EXC_ERROR_COUNT_ZERO;
+            // error_rate_count, error_rate_window, error_rate_total are reset
+            // in the dedicated error monitoring always block (line 636+).
+            // Removing from here to eliminate multi-driver conflict.
             
             recovery_core_id <= EXC_CORE_ID_ZERO;
             recovery_request <= 1'b0;
@@ -450,6 +454,8 @@ module exception_handler #(
             error_history_head <= 7'b00;
             error_history_tail <= 7'b00;
             current_error_valid <= 1'b0;
+            error_fifo_empty <= 1'b1;
+            error_fifo_rd_data <= 32'b0;
         end else begin
             // Clear system error valid after one cycle
             if (system_error_valid) begin
@@ -459,6 +465,13 @@ module exception_handler #(
             // Clear recovery request after one cycle
             if (recovery_request) begin
                 recovery_request <= 1'b0;
+            end
+            
+            // Error history FIFO read logic (Bug 19)
+            error_fifo_empty <= (error_history_head == error_history_tail);
+            if (error_fifo_rd_en && !error_fifo_empty) begin
+                error_fifo_rd_data <= error_history[error_history_head];
+                error_history_head <= error_history_head + 1;
             end
             
             // FIX Issue A: Prioritize errors by core type severity: G-core > A-core > H-core > NPU

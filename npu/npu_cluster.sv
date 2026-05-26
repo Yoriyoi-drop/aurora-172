@@ -421,7 +421,7 @@ module npu_cluster #(
                     if (reduce_level == 0) begin
                         integer total;
                         total = 0;
-                        for (p = 0; p < NUM_PE; p++) begin
+                        for (int p = 0; p < NUM_PE; p++) begin
                             total = total + pe_acc[p];
                         end
                         pe_acc[0] <= total;
@@ -435,6 +435,10 @@ module npu_cluster #(
 
                 // ─────────────────────────────────────────────────
                 // ACTIVATE: Apply activation function
+                // CRITICAL FIX: Use pe_acc[0] (the reduced sum from ACCUMULATE state)
+                // instead of per-PE pe_acc[p] values. After multi-level tree reduction
+                // in ACCUMULATE, only pe_acc[0] contains the final sum; pe_acc[1:31]
+                // retain their pre-reduction partial accumulators and must not be used.
                 // ─────────────────────────────────────────────────
                 ACTIVATE: begin
                     if (exec_counter < exec_target) begin
@@ -442,37 +446,26 @@ module npu_cluster #(
                     end else begin
                         case (opcode)
                             OP_RELU: begin
-                                // ReLU: max(0, x)
-                                for (int p = 0; p < NUM_PE; p++) begin
-                                    if (pe_acc[p] > 0)
-                                        act_out[p] <= pe_acc[p];
-                                    else
-                                        act_out[p] <= 32'sb0;
-                                end
+                                // ReLU: max(0, reduced_sum)
+                                if (pe_acc[0] > 0)
+                                    act_out[0] <= pe_acc[0];
+                                else
+                                    act_out[0] <= 32'sb0;
                             end
                             OP_SIGMOID: begin
                                 // Sigmoid approximation: 1 / (1 + exp(-x))
-                                for (int p = 0; p < NUM_PE; p++) begin
-                                    if (pe_acc[p] > 32'sd64)
-                                        act_out[p] <= 32'sd128;  // ~1.0 in Q7.8
-                                    else if (pe_acc[p] < -32'sd64)
-                                        act_out[p] <= 32'sb0;    // ~0.0
-                                    else
-                                        act_out[p] <= 32'sd64 + (pe_acc[p] >> 1);  // Linear approx
-                                end
+                                if (pe_acc[0] > 32'sd64)
+                                    act_out[0] <= 32'sd128;  // ~1.0 in Q7.8
+                                else if (pe_acc[0] < -32'sd64)
+                                    act_out[0] <= 32'sb0;    // ~0.0
+                                else
+                                    act_out[0] <= 32'sd64 + (pe_acc[0] >> 1);  // Linear approx
                             end
                             OP_SOFTMAX: begin
-                                for (int p = 0; p < NUM_PE; p++) begin
-                                    act_out[p] <= pe_acc[p];
-                                end
+                                act_out[0] <= pe_acc[0];
                             end
                             OP_POOL: begin
-                                // Max pooling
                                 act_out[0] <= pe_acc[0];
-                                for (int p = 1; p < 4; p++) begin
-                                    if (pe_acc[p] > act_out[0])
-                                        act_out[0] <= pe_acc[p];
-                                end
                             end
                             default: begin
                                 act_out[0] <= pe_acc[0];

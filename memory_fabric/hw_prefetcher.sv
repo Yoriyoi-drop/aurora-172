@@ -379,7 +379,8 @@ module hw_prefetcher #(
                 total_pf_useful <= total_pf_useful + 32'd1;
                 // Clear pending for the stream that used this
                 for (i = 0; i < NUM_STREAMS; i = i + 1) begin
-                    prefetch_addr = stream_base[i] + stream_stride[i] * pf_dist_at_send[i];
+                    prefetch_addr = stream_dir[i] ? (stream_base[i] - stream_stride[i] * pf_dist_at_send[i])
+                                                   : (stream_base[i] + stream_stride[i] * pf_dist_at_send[i]);
                     if (pf_result_addr == prefetch_addr) begin
                         pf_pending_mask[i] <= 1'b0;
                         stream_useless[i] <= 8'd0;  // Reset useless
@@ -393,7 +394,8 @@ module hw_prefetcher #(
                 total_pf_useless <= total_pf_useless + 32'd1;
                 // Increment useless counter
                 for (i = 0; i < NUM_STREAMS; i = i + 1) begin
-                    prefetch_addr = stream_base[i] + stream_stride[i] * pf_dist_at_send[i];
+                    prefetch_addr = stream_dir[i] ? (stream_base[i] - stream_stride[i] * pf_dist_at_send[i])
+                                                   : (stream_base[i] + stream_stride[i] * pf_dist_at_send[i]);
                     if (pf_result_addr == prefetch_addr) begin
                         if (stream_useless[i] < USELESS_THRESHOLD) begin
                             stream_useless[i] <= stream_useless[i] + 8'd1;

@@ -63,6 +63,10 @@ module vcache #(
     input  wire                         mem_fill_valid,
     input  wire [ADDR_WIDTH-1:0]        mem_fill_addr,
 
+    // Error reporting (tape-out: stall on timeout, never fabricate data)
+    output reg                          timeout_error,
+    output reg [ADDR_WIDTH-1:0]         timeout_addr,
+
     // Debug / performance counters
     output wire [31:0]                  vcache_hits,
     output wire [31:0]                  vcache_misses,
@@ -261,6 +265,8 @@ module vcache #(
             access_index <= {INDEX_BITS{1'b0}};
             access_tag <= {TAG_BITS{1'b0}};
             miss_timeout_counter <= 8'd0;
+            timeout_error <= 1'b0;
+            timeout_addr <= {ADDR_WIDTH{1'b0}};
 
         end else begin
             lru_counter <= lru_counter + 1;
@@ -305,18 +311,21 @@ module vcache #(
                 end
 
                 ST_MISS: begin
-                    // CRITICAL FIX #2: Add 64-cycle timeout to prevent permanent stall
-                    // If mem_fill_valid never arrives, timeout and proceed with dummy data
+                    // TAPE-OUT FIX: On timeout, DO NOT proceed to ST_FILL with stale data.
+                    // Instead, assert error and stall. Silent data corruption in
+                    // silicon is unacceptable.
                     if (mem_fill_valid &&
                         mem_fill_addr[INDEX_BITS+OFFSET_BITS-1:OFFSET_BITS] == access_index &&
-                        fill_tag == access_tag) begin  // FIXED: Check tag too, not just index
-                        miss_timeout_counter <= 8'd0;  // Reset counter on success
+                        fill_tag == access_tag) begin
+                        miss_timeout_counter <= 8'd0;
+                        timeout_error <= 1'b0;
+                        timeout_addr <= {ADDR_WIDTH{1'b0}};
                         state <= ST_FILL;
                     end else if (miss_timeout_counter >= MISS_TIMEOUT_CYCLES) begin
-                        // TIMEOUT: Memory fill did not arrive
-                        $display("[%0t] [V-CACHE] ST_MISS TIMEOUT: mem_fill_valid not asserted after 64 cycles", $time);
-                        miss_timeout_counter <= 8'd0;
-                        state <= ST_FILL;  // Proceed to fill with dummy data
+                        // TIMEOUT: Stall instead of fabricating data
+                        timeout_error <= 1'b1;
+                        timeout_addr <= {fill_tag, access_index, {OFFSET_BITS{1'b0}}};
+                        // Stay in ST_MISS — do NOT proceed with stale data
                     end else begin
                         miss_timeout_counter <= miss_timeout_counter + 1;
                     end

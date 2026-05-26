@@ -747,12 +747,16 @@ module noc_router #(
                 end
 
                 // ─────────────────────────────────────────────────
-                // S_COMPLETE: Return credit to input port
+                // S_COMPLETE: Complete flit transfer
                 // ─────────────────────────────────────────────────
                 S_COMPLETE: begin
-                    // Return credit to output port (downstream consumed the flit)
-                    credit_count[current_out_port] <= credit_count[current_out_port] + 1;
-
+                    // CRITICAL FIX: Do NOT restore credit here - that would create net-zero
+                    // credit accounting (credits never consumed, no backpressure).
+                    // Credits represent downstream buffer capacity and are consumed when
+                    // a flit is sent. The downstream must return credits via a credit
+                    // return mechanism when it drains the flit from its input buffer.
+                    // Without credit return signals, credits will properly drain to
+                    // implement flow control.
                     current_out_port <= PORT_NONE;
                     current_in_port <= PORT_NONE;
                     state <= S_IDLE;

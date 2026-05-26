@@ -539,43 +539,10 @@ module a_core #(
                 if (state_stuck_counter == 0)  // First cycle stuck
                     state_when_stuck <= state;
                 
-                // Force recovery if stuck > DEADLOCK_TIMEOUT_CYCLES cycles (reduced timeout)
-                if (state_stuck_counter > 100) begin  // OPTIMIZED: 1000->100 for faster recovery
-                    // COMPLETELY SILENT: No recovery messages to eliminate all spam
+                // Warn if stuck > 5000 cycles but do NOT force state transitions
+                if (state_stuck_counter > 5000) begin
+                    $display("[%0t] [A-CORE#%0d] WARNING: State %b stuck for %0d cycles", $time, CORE_ID, state, state_stuck_counter);
                     state_stuck_counter <= 16'd0;
-                    // Force transition to safe state based on current state
-                    case (state)
-                        LOAD_INPUT, LOAD_WEIGHT: state <= MAC_INIT;
-                        MAC_COMPUTE, ACTIVATE, NORMALIZE, POOL: state <= STORE_RESULT;
-                        IDLE: begin
-                            // COMPLETELY SILENT IDLE RECOVERY: No messages at all
-                            
-                            // Force reset semua control signals
-                            cmd_ready <= 1'b1;
-                            busy <= 1'b0;
-                            fifo_full_warn <= 1'b0;  // CRITICAL: Reset warning flag
-                            
-                            // Reset semua flag yang mungkin menyebabkan stuck
-                            result_wait_pushed <= 1'b0;
-                            mac_compute_started <= 1'b0;
-                            mac_ops_complete <= 1'b0;
-                            complete_reg <= 1'b0;
-                            
-                            // Reset backpressure counter
-                            backpressure_counter <= 8'd0;
-                            
-                            // FIX Issue A: Instead of hard resetting FIFO (which drops data),
-                            // transition to DRAIN_FIFO to drain entries safely first
-                            if (result_fifo_count > 0) begin
-                                state <= DRAIN_FIFO;
-                            end else begin
-                                // FIFO already empty, safe to stay in IDLE
-                                state <= IDLE;
-                            end
-                        end
-                        DRAIN_FIFO, PIPE_BUBBLE: state <= IDLE;
-                        default: state <= IDLE;
-                    endcase
                 end
             end else begin
                 state_stuck_counter <= 16'd0;  // Reset counter when state changes
@@ -656,24 +623,8 @@ module a_core #(
                     // Phase 3: Enhanced backpressure dengan timeout protection
                     // Ini prevent FIFO overflow saat scheduler lambat consume
                     if (fifo_full_warn && result_fifo_count > (RESULT_FIFO_DEPTH * 3 / 4)) begin
-                        cmd_ready <= 1'b0;  // Backpressure: jangan terima command baru
-                        // CRITICAL: Add timeout to prevent permanent backpressure
-                        if (backpressure_counter >= BACKPRESSURE_TIMEOUT_CYCLES) begin  // Faster recovery
-                            $display("[%0t] [A-CORE#%0d] BACKPRESSURE TIMEOUT - forcing recovery", $time, CORE_ID);
-                            // Force clear some FIFO entries to prevent deadlock
-                            if (result_fifo_has_data) begin
-                                result_fifo_head <= (result_fifo_head + 1) % RESULT_FIFO_DEPTH;
-                                result_fifo_count <= result_fifo_count - 1;
-                                result_fifo_full <= 1'b0;
-                                result_fifo_empty <= (result_fifo_count - 1 == 0);
-                            end
-                            // CRITICAL FIX: Force cmd_ready back to 1 after timeout
-                            cmd_ready <= 1'b1;
-                            backpressure_counter <= 8'd0;
-                            $display("[%0t] [A-CORE#%0d] BACKPRESSURE RECOVERY: cmd_ready restored", $time, CORE_ID);
-                        end else begin
-                            backpressure_counter <= backpressure_counter + 1;
-                        end
+                        cmd_ready <= 1'b0;  // Backpressure: hold until FIFO drains naturally
+                        // No force-drop: data integrity is critical, just keep backpressure active
                     end else begin
                         cmd_ready <= 1'b1;  // CRITICAL: Ensure cmd_ready is 1 when no backpressure
                         backpressure_counter <= 8'd0;
@@ -1642,35 +1593,114 @@ module a_core #(
                 STORE_RESULT: begin
                     l1_rd_en <= 1'b0;
                     l1_wr_en <= 1'b0;
-                    if (CORE_ID == 0 && stage_counter == 0)
-                        $display("[%0t] [A-CORE#%0d] STORE_RESULT: Computing result hash", $time, CORE_ID);
 
-                    case (stage_counter)
-                        0: begin
-                            mac_accum <= $signed(matrix_c[0]) + $signed(matrix_c[1]) +
-                                         $signed(matrix_c[2]) + $signed(matrix_c[3]);
-                            stage_counter <= 6'b1;
-                        end
-                        1: begin
-                            // Compute hash dan simpan ke result_reg (untuk FIFO)
-                            // Result akan di-push ke FIFO di RESULT_WAIT
-                            if (CORE_ID == 0)  // DEBUG: Enable for master core only
-                                $display("[%0t] [A-CORE#%0d] STORE_RESULT: Pushing to RESULT_WAIT", $time, CORE_ID);
-                            computed_result <= compute_hash(mac_accum, saved_opcode, cmd_addr[15:0]);
-                            // Transition ke RESULT_WAIT untuk push ke FIFO
-                            stage_counter <= 6'b0;
-                            state <= RESULT_WAIT;
-                        end
-                        2: begin
-                            // Tidak digunakan - langsung ke IDLE di stage 1
-                            stage_counter <= 6'b0;
-                            state <= IDLE;
-                        end
-                        default: begin
-                            stage_counter <= 6'b0;
-                            state <= IDLE;
-                        end
-                    endcase
+                    if (saved_opcode == OP_MATMUL) begin
+                        // Actual 4x4 matrix multiply using mac_parallel_units dot products
+                        case (stage_counter)
+                            0: begin
+                                // Row 0: C[0..3] = A[0..3] * B[0..3][0..3]
+                                mac_parallel_units[0] <= $signed(matrix_a[0]) * $signed(matrix_b[0]) +
+                                                         $signed(matrix_a[1]) * $signed(matrix_b[4]) +
+                                                         $signed(matrix_a[2]) * $signed(matrix_b[8]) +
+                                                         $signed(matrix_a[3]) * $signed(matrix_b[12]);
+                                mac_parallel_units[1] <= $signed(matrix_a[0]) * $signed(matrix_b[1]) +
+                                                         $signed(matrix_a[1]) * $signed(matrix_b[5]) +
+                                                         $signed(matrix_a[2]) * $signed(matrix_b[9]) +
+                                                         $signed(matrix_a[3]) * $signed(matrix_b[13]);
+                                mac_parallel_units[2] <= $signed(matrix_a[0]) * $signed(matrix_b[2]) +
+                                                         $signed(matrix_a[1]) * $signed(matrix_b[6]) +
+                                                         $signed(matrix_a[2]) * $signed(matrix_b[10]) +
+                                                         $signed(matrix_a[3]) * $signed(matrix_b[14]);
+                                mac_parallel_units[3] <= $signed(matrix_a[0]) * $signed(matrix_b[3]) +
+                                                         $signed(matrix_a[1]) * $signed(matrix_b[7]) +
+                                                         $signed(matrix_a[2]) * $signed(matrix_b[11]) +
+                                                         $signed(matrix_a[3]) * $signed(matrix_b[15]);
+                                stage_counter <= 6'd1;
+                            end
+                            1: begin
+                                // Pack row 0 from previous cycle, compute row 1
+                                computed_result[127:0] <= {mac_parallel_units[3][31:0], mac_parallel_units[2][31:0],
+                                                          mac_parallel_units[1][31:0], mac_parallel_units[0][31:0]};
+                                mac_parallel_units[0] <= $signed(matrix_a[4]) * $signed(matrix_b[0]) +
+                                                         $signed(matrix_a[5]) * $signed(matrix_b[4]) +
+                                                         $signed(matrix_a[6]) * $signed(matrix_b[8]) +
+                                                         $signed(matrix_a[7]) * $signed(matrix_b[12]);
+                                mac_parallel_units[1] <= $signed(matrix_a[4]) * $signed(matrix_b[1]) +
+                                                         $signed(matrix_a[5]) * $signed(matrix_b[5]) +
+                                                         $signed(matrix_a[6]) * $signed(matrix_b[9]) +
+                                                         $signed(matrix_a[7]) * $signed(matrix_b[13]);
+                                mac_parallel_units[2] <= $signed(matrix_a[4]) * $signed(matrix_b[2]) +
+                                                         $signed(matrix_a[5]) * $signed(matrix_b[6]) +
+                                                         $signed(matrix_a[6]) * $signed(matrix_b[10]) +
+                                                         $signed(matrix_a[7]) * $signed(matrix_b[14]);
+                                mac_parallel_units[3] <= $signed(matrix_a[4]) * $signed(matrix_b[3]) +
+                                                         $signed(matrix_a[5]) * $signed(matrix_b[7]) +
+                                                         $signed(matrix_a[6]) * $signed(matrix_b[11]) +
+                                                         $signed(matrix_a[7]) * $signed(matrix_b[15]);
+                                stage_counter <= 6'd2;
+                            end
+                            2: begin
+                                // Pack row 1, compute row 2
+                                computed_result[255:128] <= {mac_parallel_units[3][31:0], mac_parallel_units[2][31:0],
+                                                            mac_parallel_units[1][31:0], mac_parallel_units[0][31:0]};
+                                mac_parallel_units[0] <= $signed(matrix_a[8]) * $signed(matrix_b[0]) +
+                                                         $signed(matrix_a[9]) * $signed(matrix_b[4]) +
+                                                         $signed(matrix_a[10]) * $signed(matrix_b[8]) +
+                                                         $signed(matrix_a[11]) * $signed(matrix_b[12]);
+                                mac_parallel_units[1] <= $signed(matrix_a[8]) * $signed(matrix_b[1]) +
+                                                         $signed(matrix_a[9]) * $signed(matrix_b[5]) +
+                                                         $signed(matrix_a[10]) * $signed(matrix_b[9]) +
+                                                         $signed(matrix_a[11]) * $signed(matrix_b[13]);
+                                mac_parallel_units[2] <= $signed(matrix_a[8]) * $signed(matrix_b[2]) +
+                                                         $signed(matrix_a[9]) * $signed(matrix_b[6]) +
+                                                         $signed(matrix_a[10]) * $signed(matrix_b[10]) +
+                                                         $signed(matrix_a[11]) * $signed(matrix_b[14]);
+                                mac_parallel_units[3] <= $signed(matrix_a[8]) * $signed(matrix_b[3]) +
+                                                         $signed(matrix_a[9]) * $signed(matrix_b[7]) +
+                                                         $signed(matrix_a[10]) * $signed(matrix_b[11]) +
+                                                         $signed(matrix_a[11]) * $signed(matrix_b[15]);
+                                stage_counter <= 6'd3;
+                            end
+                            3: begin
+                                // Pack row 2, compute row 3
+                                computed_result[383:256] <= {mac_parallel_units[3][31:0], mac_parallel_units[2][31:0],
+                                                            mac_parallel_units[1][31:0], mac_parallel_units[0][31:0]};
+                                mac_parallel_units[0] <= $signed(matrix_a[12]) * $signed(matrix_b[0]) +
+                                                         $signed(matrix_a[13]) * $signed(matrix_b[4]) +
+                                                         $signed(matrix_a[14]) * $signed(matrix_b[8]) +
+                                                         $signed(matrix_a[15]) * $signed(matrix_b[12]);
+                                mac_parallel_units[1] <= $signed(matrix_a[12]) * $signed(matrix_b[1]) +
+                                                         $signed(matrix_a[13]) * $signed(matrix_b[5]) +
+                                                         $signed(matrix_a[14]) * $signed(matrix_b[9]) +
+                                                         $signed(matrix_a[15]) * $signed(matrix_b[13]);
+                                mac_parallel_units[2] <= $signed(matrix_a[12]) * $signed(matrix_b[2]) +
+                                                         $signed(matrix_a[13]) * $signed(matrix_b[6]) +
+                                                         $signed(matrix_a[14]) * $signed(matrix_b[10]) +
+                                                         $signed(matrix_a[15]) * $signed(matrix_b[14]);
+                                mac_parallel_units[3] <= $signed(matrix_a[12]) * $signed(matrix_b[3]) +
+                                                         $signed(matrix_a[13]) * $signed(matrix_b[7]) +
+                                                         $signed(matrix_a[14]) * $signed(matrix_b[11]) +
+                                                         $signed(matrix_a[15]) * $signed(matrix_b[15]);
+                                stage_counter <= 6'd4;
+                            end
+                            4: begin
+                                // Pack row 3, finalize
+                                computed_result[511:384] <= {mac_parallel_units[3][31:0], mac_parallel_units[2][31:0],
+                                                            mac_parallel_units[1][31:0], mac_parallel_units[0][31:0]};
+                                stage_counter <= 6'b0;
+                                state <= RESULT_WAIT;
+                            end
+                            default: begin
+                                stage_counter <= 6'b0;
+                                state <= RESULT_WAIT;
+                            end
+                        endcase
+                    end else begin
+                        // Non-MATMUL operations use hash fallback
+                        computed_result <= compute_hash(mac_accum, saved_opcode, cmd_addr[15:0]);
+                        stage_counter <= 6'b0;
+                        state <= RESULT_WAIT;
+                    end
                 end
 
                 // ─────────────────────────────────────────────────

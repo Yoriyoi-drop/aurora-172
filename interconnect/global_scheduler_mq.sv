@@ -1741,27 +1741,36 @@ module global_scheduler_mq #(
 
             // ── DYNAMIC QUEUE BALANCER (DQB) ──
             // Spill overflow from busy EQ to less busy EQ
+            // CRITICAL FIX: Only spill tasks with compatible opcodes.
+            // ALU tasks (DRAW, PHYSICS, etc) cannot execute on VEC unit.
+            // Check bits [31:24] of eq_alu_data for opcode compatibility.
             begin
                 if (eq_alu_count > (EQ_ALU_DEPTH * 3 / 4) && eq_vec_count < EQ_VEC_DEPTH / 2) begin
                     fsm_found_spill = 1'b0;
                     for (fsm_li_spill = 0; fsm_li_spill < EQ_ALU_DEPTH && !fsm_found_spill; fsm_li_spill = fsm_li_spill + 1) begin
                         if (eq_alu_valid[fsm_li_spill] && eq_vec_count < EQ_VEC_DEPTH) begin
-                            fsm_found_vec = 1'b0;
-                            for (fsm_li_vec = 0; fsm_li_vec < EQ_VEC_DEPTH && !fsm_found_vec; fsm_li_vec = fsm_li_vec + 1) begin
-                                if (!eq_vec_valid[fsm_li_vec]) begin
-                                    eq_vec_tag_id[fsm_li_vec] <= eq_alu_tag_id[fsm_li_spill];
-                                    eq_vec_addr[fsm_li_vec]   <= eq_alu_addr[fsm_li_spill];
-                                    eq_vec_data[fsm_li_vec]   <= eq_alu_data[fsm_li_spill];
-                                    eq_vec_valid[fsm_li_vec]  <= 1'b1;
-                                    eq_vec_ready[fsm_li_vec]  <= eq_alu_ready[fsm_li_spill];
-                                    eq_vec_count <= eq_vec_count + 1;
-                                    fsm_found_vec = 1'b1;
+                            // CRITICAL: Only spill VEC-compatible opcodes (0x05 RAYTRACE,
+                            // 0x06 FRAMEGEN, 0x20 MATMUL, 0x21 ATTENTION, 0x22 CONV)
+                            // to VEC queue. ALU-only ops (DRAW, PHYSICS) must NOT be
+                            // spilled to VEC — VEC cannot execute them.
+                            if (eq_alu_data[fsm_li_spill][31:24] inside {8'h05, 8'h06, 8'h20, 8'h21, 8'h22}) begin
+                                fsm_found_vec = 1'b0;
+                                for (fsm_li_vec = 0; fsm_li_vec < EQ_VEC_DEPTH && !fsm_found_vec; fsm_li_vec = fsm_li_vec + 1) begin
+                                    if (!eq_vec_valid[fsm_li_vec]) begin
+                                        eq_vec_tag_id[fsm_li_vec] <= eq_alu_tag_id[fsm_li_spill];
+                                        eq_vec_addr[fsm_li_vec]   <= eq_alu_addr[fsm_li_spill];
+                                        eq_vec_data[fsm_li_vec]   <= eq_alu_data[fsm_li_spill];
+                                        eq_vec_valid[fsm_li_vec]  <= 1'b1;
+                                        eq_vec_ready[fsm_li_vec]  <= eq_alu_ready[fsm_li_spill];
+                                        eq_vec_count <= eq_vec_count + 1;
+                                        fsm_found_vec = 1'b1;
+                                    end
                                 end
+                                eq_alu_valid[fsm_li_spill] <= 1'b0;
+                                eq_alu_count <= eq_alu_count - 1;
+                                dqb_spill_count <= dqb_spill_count + 1;
+                                fsm_found_spill = 1'b1;
                             end
-                            eq_alu_valid[fsm_li_spill] <= 1'b0;
-                            eq_alu_count <= eq_alu_count - 1;
-                            dqb_spill_count <= dqb_spill_count + 1;
-                            fsm_found_spill = 1'b1;
                         end
                     end
                 end

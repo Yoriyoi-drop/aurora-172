@@ -61,6 +61,11 @@ module l1_cache #(
     input  wire                         snoop_invalidate,
     input  wire                         snoop_update,
     output reg [1:0]                    snoop_state_out,     // FIX: Expose MESI state for snoop
+    output reg [DATA_WIDTH-1:0]         snoop_data_out,      // TAPE-OUT: Cache data for MOESI forwarding (O/F state)
+
+    // Error reporting (asserted on timeout, prevents silent data corruption)
+    output reg                          timeout_error,
+    output reg [ADDR_WIDTH-1:0]         timeout_addr,
 
     // Performance counters
     output reg [31:0]                   hits,
@@ -413,54 +418,35 @@ module l1_cache #(
                             l2_wait_counter <= l2_wait_counter + 1;
                         end
 
-                        // CRITICAL FIX: Increased timeout to 64 cycles to reduce false timeouts
-                        if (!l2_ready && l2_wait_counter >= 8'h40) begin
-                            $display("[%0t] [L1-CACHE] ** L2 TIMEOUT at set=%0d after %0d cycles - using dummy data", 
-                                    $time, set_index, l2_wait_counter);
-                        end
-
-                        if (l2_ready || l2_wait_counter >= 8'h40) begin
-                            // L2 responded OR timeout - proceed anyway (prevents hangs)
+                        // TAPE-OUT FIX: On timeout, DO NOT fabricate data.
+                        // Instead, assert error and stall. Silent data corruption
+                        // in silicon is unacceptable — a hung core is debuggable,
+                        // corrupted game state / AI weights are not.
+                        if (l2_ready) begin
+                            // L2 responded normally
                             integer victim_way;
                             integer byte_idx;
                             victim_way = find_lru_way(set_index);
-                            l2_wait_counter <= 8'h0;  // Reset counter
+                            l2_wait_counter <= 8'h0;
 
-                            // Fill cache line from L2 (or dummy data on timeout)
-                            if (l2_ready) begin
-                                cache_data[victim_way][set_index] <= l2_rd_data;
-                            end else begin
-                                // Timeout - fill with dummy data (L2 not connected)
-                                // CRITICAL: Use pattern 0xDEADBEEF for easier debugging
-                                for (byte_idx = 0; byte_idx < DATA_WIDTH/8; byte_idx = byte_idx + 1) begin
-                                    cache_data[victim_way][set_index][byte_idx*8 +: 8] <= 8'hDE;
-                                end
-                                $display("[%0t] [L1-CACHE] ** TIMEOUT: Filled with 0xDE pattern for debugging", $time);
-                            end
+                            cache_data[victim_way][set_index] <= l2_rd_data;
                             cache_tags[victim_way][set_index] <= tag;
                             cache_valid[victim_way][set_index] <= 1'b1;
+                            timeout_error <= 1'b0;
+                            timeout_addr <= {ADDR_WIDTH{1'b0}};
 
-                            // Set MESI state (CRITICAL FIX: Use EXCLUSIVE for read miss when possible)
                             if (current_is_write) begin
-                                cache_mesi[victim_way][set_index] <= MESI_MODIFIED;  // Write-allocate
-                                $display("[%0t] [L1-CACHE] Core%0d Miss allocate: Modified (write, addr=0x%h)", $time, CORE_ID, current_addr);
+                                cache_mesi[victim_way][set_index] <= MESI_MODIFIED;
                             end else begin
-                                // Read miss: try to get Exclusive, fallback to Shared
-                                // For simplicity, allocate as Shared (real MESI would probe other caches)
-                                cache_mesi[victim_way][set_index] <= MESI_SHARED;  // Read miss -> Shared
-                                $display("[%0t] [L1-CACHE] Core%0d Cache miss - need replacement (addr=0x%h)", $time, CORE_ID, current_addr);
+                                cache_mesi[victim_way][set_index] <= MESI_SHARED;
                             end
 
-                            // Update LRU
                             lru_counter[set_index] <= lru_counter[set_index] | (1 << victim_way);
-
-                            // Set MEM MISS latency (realistic DRAM access)
                             access_type <= 2'b10;
                             cache_latency_target <= MEM_MISS_CYCLES;
                             cache_latency_counter <= 16'h0;
 
                             if (current_is_write) begin
-                                // Complete the write after allocation
                                 if (line_offset + (DATA_WIDTH/8) < LINE_SIZE || line_offset == 0) begin
                                     for (byte_idx = 0; byte_idx < DATA_WIDTH/8; byte_idx = byte_idx + 1) begin
                                         cache_data[victim_way][set_index][(line_offset + byte_idx)*8 +: 8] <=
@@ -469,21 +455,21 @@ module l1_cache #(
                                 end
                                 state <= S_COMPLETE;
                             end else begin
-                                // Read hit after fetch
-                                if (l2_ready) begin
-                                    if (line_offset + (DATA_WIDTH/8) < LINE_SIZE || line_offset == 0) begin
-                                        for (byte_idx = 0; byte_idx < DATA_WIDTH/8; byte_idx = byte_idx + 1) begin
-                                            core_rd_data[byte_idx*8 +: 8] <=
-                                                l2_rd_data[(line_offset + byte_idx)*8 +: 8];
-                                        end
+                                if (line_offset + (DATA_WIDTH/8) < LINE_SIZE || line_offset == 0) begin
+                                    for (byte_idx = 0; byte_idx < DATA_WIDTH/8; byte_idx = byte_idx + 1) begin
+                                        core_rd_data[byte_idx*8 +: 8] <=
+                                            l2_rd_data[(line_offset + byte_idx)*8 +: 8];
                                     end
-                                end else begin
-                                    // Timeout - return dummy data with warning
-                                    core_rd_data <= {DATA_WIDTH{1'b0}};
-                                    $display("[%0t] [L1-CACHE] ⚠ Returning DUMMY DATA to core - execution may be incorrect", $time);
                                 end
                                 state <= S_COMPLETE;
                             end
+                        end else if (l2_wait_counter >= 8'h40) begin
+                            // TAPE-OUT: Timeout — stall instead of silent corruption.
+                            // Pipeline stalls, backpressure propagates, system watchdog
+                            // can trigger architectural reset if needed.
+                            timeout_error <= 1'b1;
+                            timeout_addr <= {tag, set_index, {$clog2(LINE_SIZE){1'b0}}};
+                            // Stay in S_FETCH_L2 — do NOT proceed with dummy data
                         end
                     end
 

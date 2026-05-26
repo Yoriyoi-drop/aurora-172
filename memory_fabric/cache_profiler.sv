@@ -49,6 +49,10 @@ module cache_profiler #(
     input  wire [31:0]                  mesi_writebacks,
     input  wire [31:0]                  mesi_shared_grants,
 
+    // MESI tag array read interface (actual state from L2 tag SRAM)
+    input  wire                         valid_mesi_states,     // Tag read valid
+    input  wire [1:0]                   mesi_tag_state,        // Actual MESI state from tag array
+
     // Access latency tracking
     input  wire                         access_start,
     input  wire                         access_complete,
@@ -206,18 +210,19 @@ module cache_profiler #(
                 latency_histogram[access_latency] <= latency_histogram[access_latency] + 1;
             end
 
-            // MESI state distribution (sampled from L2 cache state)
-            // (Simplified: track via snoop responses)
-            if (mesi_shared_grants > 0) begin
-                mesi_shared_count <= mesi_shared_count + mesi_shared_grants;
-            end
-            if (mesi_writebacks > 0) begin
-                mesi_modified_count <= mesi_modified_count + mesi_writebacks;
-            end
-            // Track exclusive lines: inferred as read misses that get exclusive state
-            // (approximated as L1 misses - L1 writebacks - shared grants)
-            if (total_l1_misses >= total_writebacks + mesi_shared_count) begin
-                mesi_exclusive_count <= total_l1_misses - total_writebacks - mesi_shared_count;
+            // MESI state distribution (tracked from actual tag array inputs)
+            // Each L2 line reports its MESI state via the cache_state input signals.
+            // Modified: line dirty in this cache (must writeback on evict)
+            // Exclusive: line clean, owned exclusively
+            // Shared: line clean, may be in other caches
+            // Invalid: line not present
+            if (valid_mesi_states) begin
+                case (mesi_tag_state)
+                    2'b11: mesi_modified_count <= mesi_modified_count + 32'd1;
+                    2'b10: mesi_exclusive_count <= mesi_exclusive_count + 32'd1;
+                    2'b01: mesi_shared_count <= mesi_shared_count + 32'd1;
+                    default: mesi_invalid_count <= mesi_invalid_count + 32'd1;
+                endcase
             end
 
             // Print trigger

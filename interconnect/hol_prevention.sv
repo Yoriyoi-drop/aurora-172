@@ -115,50 +115,14 @@ module hol_prevention #(
     reg [7:0]               system_health;                     // Overall system health
     reg                     hol_system_healthy_reg;             // System health flag
     
-    // Initialize HOL Prevention System
-    integer init_i, init_j, init_k;
-    initial begin
-        // Initialize VC buffers
-        for (init_i = 0; init_i < NUM_NODES; init_i = init_i + 1) begin
-            for (init_j = 0; init_j < NUM_VCS; init_j = init_j + 1) begin
-                vc_head[init_i][init_j] = 0;
-                vc_tail[init_i][init_j] = 0;
-                vc_load[init_j] = 32'd0;
-                vc_priority_boost[init_j] = 8'd0;
-                
-                for (init_k = 0; init_k < BUFFER_DEPTH; init_k = init_k + 1) begin
-                    vc_buffer_valid[init_i][init_j][init_k] = 1'b0;
-                    packet_age[init_i][init_j][init_k] = 16'd0;
-                    packet_ttl[init_i][init_j][init_k] = 8'd255;
-                    hol_wait_time[init_i][init_j] = 32'd0;
-                end
-            end
-            
-            // Initialize per-node state
-            hol_state[init_i] = HOL_NORMAL;
-            hol_blocked_count[init_i] = 32'd0;
-            bypass_active[init_i] = 1'b0;
-            bypass_valid[init_i] = 1'b0;
-            
-            // Initialize QoS to VC mapping (default mapping)
-            vc_mapping[init_i][0] = VC_URGENT;   // QoS 0 -> Urgent VC
-            vc_mapping[init_i][1] = VC_HIGH;     // QoS 1 -> High VC
-            vc_mapping[init_i][2] = VC_NORMAL;   // QoS 2 -> Normal VC
-            vc_mapping[init_i][3] = VC_LOW;      // QoS 3 -> Low VC
-        end
-        
-        // Initialize system parameters
-        hol_threshold = 8'd10;           // 10 cycles before HOL detection
-        max_wait_threshold = 16'd100;     // 100 cycles max wait time
-        total_hol_blocks = 32'd0;
-        total_hol_bypasses = 32'd0;
-        hol_recoveries = 32'd0;
-        rebalance_active = 1'b0;
-        system_health = 8'd100;
-        hol_system_healthy_reg = 1'b1;
-        
-        $display("[%0t] [HOL-PREVENTION] Multi-VC HOL Prevention System Initialized", $time);
-    end
+    // Synthesis-safe initialization is handled in the always_ff reset block below.
+    // Parameter validation at elaboration time:
+    generate
+        if (NUM_NODES < 1)
+            $error("[HOL-PREVENTION] NUM_NODES must be >= 1");
+        if (BUFFER_DEPTH < 2)
+            $error("[HOL-PREVENTION] BUFFER_DEPTH must be >= 2");
+    endgenerate
     
     // Main HOL Prevention Logic
     always_ff @(posedge clk or negedge rst_n) begin

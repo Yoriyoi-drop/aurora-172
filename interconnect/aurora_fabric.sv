@@ -270,9 +270,10 @@ module aurora_fabric #(
     reg [QOS_LEVELS-1:0][31:0] qos_wait_counter;
     localparam QOS_STARVATION_THRESHOLD = 1000;  // Threshold for starvation detection
     
-    // Arbiter state variables
-    reg [6:0]               arbiter_serving_port;
-    reg [1:0]               arbiter_current_qos;
+    // Per-output-port crossbar arbiters (replaces single-port arbiter)
+    reg [6:0]               arbiter_serving_port_out [0:NUM_PORTS-1];
+    reg [1:0]               arbiter_current_qos_out [0:NUM_PORTS-1];
+    reg                     arbiter_valid_out [0:NUM_PORTS-1];
     
     // Optimization tracking variables (accessible across always blocks)
     reg [7:0]               active_ports;           // Track active ports count
@@ -336,9 +337,12 @@ module aurora_fabric #(
                 qos_wait_counter[qos] <= 32'b0;
             end
             
-            // Initialize arbiter state
-            arbiter_serving_port <= 7'b0;
-            arbiter_current_qos <= 2'b0;
+            // Initialize per-output-port arbiter state
+            for (int arb_rst = 0; arb_rst < NUM_PORTS; arb_rst = arb_rst + 1) begin
+                arbiter_serving_port_out[arb_rst] <= 7'b0;
+                arbiter_current_qos_out[arb_rst] <= 2'b0;
+                arbiter_valid_out[arb_rst] <= 1'b0;
+            end
 
             // FIX v2 #1: Reset fabric arb state machine
             fabric_arb_state <= ARB_IDLE;
@@ -581,121 +585,129 @@ module aurora_fabric #(
             end  // end begin
 
             // ═══════════════════════════════════════════════════════
-            // STAGE 2: QoS ARBITRATION (Select highest priority packet)
-            // FIX v2 #2: Now uses effective priority from qos_priority_map
-            // FIX v2 #1: Coordinated with fabric_arb FSM
+            // STAGE 2: PER-OUTPUT-PORT CROSSBAR ARBITRATION
+            // Each output port independently selects the highest-priority
+            // input port whose packet is routed to this output.
+            // CRITICAL FIX #8: Replaces single-port arbiter (1 pkt/cycle
+            // bottleneck) with per-output-port arbiters (NUM_PORTS pkts/cycle).
             // ═══════════════════════════════════════════════════════
             begin
+                integer sel_o, sel_i;
 
-                // FIX v2 #1: If fabric_arb granted a port, prefer it
-                if (arb_grant_valid) begin
-                    selected_port = arb_granted_port;
-                    selected_qos = arb_granted_priority;
-                    found_packet = 1'b1;
-                end else begin
-                    // Fallback: scan ports by effective QoS priority
-                    found_packet = 1'b0;
-                    selected_port = 0;
-                    selected_qos = 0;
+                // Clear all output port selections
+                for (sel_o = 0; sel_o < NUM_PORTS; sel_o = sel_o + 1) begin
+                    arbiter_valid_out[sel_o] <= 1'b0;
+                end
 
-                    // Scan ports by QoS priority (RT -> LL -> RS -> BE) - OPTIMIZED
-                    for (int qos = QOS_LEVELS - 1; qos >= 0 && !found_packet; qos = qos - 1) begin
-                        for (int p = 0; p < NUM_PORTS && !found_packet; p = p + 1) begin
+                // Per-output-port arbitration with input conflict resolution
+                // For each output port, scan all input ports by QoS priority
+                // and select the first that routes to this output.
+                for (sel_o = 0; sel_o < NUM_PORTS; sel_o = sel_o + 1) begin
+                    integer found;
+                    reg [6:0] best_port;
+                    reg [1:0] best_qos;
+                    found = 0;
+                    best_port = 0;
+                    best_qos = 0;
+
+                    // Scan input ports by QoS priority
+                    for (int qos = QOS_LEVELS - 1; qos >= 0 && !found; qos = qos - 1) begin
+                        for (sel_i = 0; sel_i < NUM_PORTS && !found; sel_i = sel_i + 1) begin
+                            if (!fifo_empty[sel_i]) begin
+                                reg [6:0] route_dest;
+                                reg [6:0] route_src;
                                 reg [1:0] eff_prio;
-                                eff_prio = get_effective_priority(p[6:0], qos_fifo[p][fifo_head[p]]);
-                                if (!fifo_empty[p] && (eff_prio == qos)) begin
-                                    selected_port = p[6:0];
-                                    selected_qos = qos[1:0];
-                                    found_packet = 1'b1;
+                                route_src = src_port_fifo[sel_i][fifo_head[sel_i]];
+                                route_dest = xy_route(addr_fifo[sel_i][fifo_head[sel_i]], route_src);
+                                eff_prio = get_effective_priority(sel_i[6:0], qos_fifo[sel_i][fifo_head[sel_i]]);
+                                if (route_dest == sel_o && eff_prio == qos) begin
+                                    best_port = sel_i[6:0];
+                                    best_qos = qos[1:0];
+                                    found = 1;
                                 end
                             end
                         end
                     end
-                end
 
-                // QoS starvation check - OPTIMIZED
-                if (!found_packet) begin
-                    // Check if any QoS level is starving
-                    for (int qos = 0; qos < QOS_LEVELS && !found_packet; qos = qos + 1) begin
-                        if (qos_wait_counter[qos] > QOS_STARVATION_THRESHOLD && !found_packet) begin
-                            // Force serve starving QoS
-                            for (int p = 0; p < NUM_PORTS && !found_packet; p = p + 1) begin
-                                if (!fifo_empty[p] && (qos_fifo[p][fifo_head[p]] == qos)) begin
-                                    selected_port = p[6:0];
-                                    selected_qos = qos[1:0];
-                                    found_packet = 1'b1;
-                                    qos_wait_counter[qos] <= 0;  // Reset starvation counter
+                    // QoS starvation fallback for this output port
+                    if (!found) begin
+                        for (int qos = 0; qos < QOS_LEVELS && !found; qos = qos + 1) begin
+                            if (qos_wait_counter[qos] > QOS_STARVATION_THRESHOLD) begin
+                                for (sel_i = 0; sel_i < NUM_PORTS && !found; sel_i = sel_i + 1) begin
+                                    if (!fifo_empty[sel_i]) begin
+                                        reg [6:0] route_dest;
+                                        reg [6:0] route_src;
+                                        route_src = src_port_fifo[sel_i][fifo_head[sel_i]];
+                                        route_dest = xy_route(addr_fifo[sel_i][fifo_head[sel_i]], route_src);
+                                        if (route_dest == sel_o && qos_fifo[sel_i][fifo_head[sel_i]] == qos) begin
+                                            best_port = sel_i[6:0];
+                                            best_qos = qos[1:0];
+                                            found = 1;
+                                            qos_wait_counter[qos] <= 0;
+                                        end
+                                    end
                                 end
                             end
                         end
                     end
-                end
 
-                // Update wait counters
-                for (int qos = 0; qos < QOS_LEVELS; qos = qos + 1) begin
-                    if (!found_packet || (selected_qos != qos))
-                        qos_wait_counter[qos] <= qos_wait_counter[qos] + 1;
-                end
-
-                if (found_packet) begin
-                    arbiter_serving_port <= selected_port;
-                    arbiter_current_qos <= selected_qos;
+                    if (found) begin
+                        arbiter_serving_port_out[sel_o] <= best_port;
+                        arbiter_current_qos_out[sel_o] <= best_qos;
+                        arbiter_valid_out[sel_o] <= 1'b1;
+                    end
                 end
             end
 
             // ═══════════════════════════════════════════════════════
-            // STAGE 3: ROUTING & FORWARDING - OPTIMIZED
+            // STAGE 3: PER-OUTPUT-PORT FORWARDING with input conflict
+            // resolution. Multiple output ports may select the same input
+            // port — only the lowest-indexed output port wins each input.
             // ═══════════════════════════════════════════════════════
             begin
-                integer p;
-                forwarded_count = 0;  // OPTIMIZED: Track forwarded packets
-                
-                // Initialize all outputs to zero
-                for (p = 0; p < NUM_PORTS; p = p + 1) begin
-                    port_data_out[p] <= {DATA_WIDTH{1'b0}};
+                integer fwd_o, fwd_i;
+                reg [NUM_PORTS-1:0] input_claimed;  // Which input ports already claimed
+                forwarded_count = 0;
+
+                // Initialize all output data and valid flags
+                for (fwd_o = 0; fwd_o < NUM_PORTS; fwd_o = fwd_o + 1) begin
+                    port_data_out[fwd_o] <= {DATA_WIDTH{1'b0}};
+                    port_out_valid_reg[fwd_o] <= 1'b0;
+                end
+                for (fwd_i = 0; fwd_i < NUM_PORTS; fwd_i = fwd_i + 1) begin
+                    input_claimed[fwd_i] = 1'b0;
                 end
 
-                // Process selected packet
-                if (!fifo_empty[arbiter_serving_port]) begin
-                    reg [6:0] dest_port;
-                    reg [6:0] src_port;
+                // Forward: lowest output port wins each input
+                for (fwd_o = 0; fwd_o < NUM_PORTS; fwd_o = fwd_o + 1) begin
+                    if (arbiter_valid_out[fwd_o]) begin
+                        integer inp;
+                        inp = arbiter_serving_port_out[fwd_o];
+                        if (!input_claimed[inp] && !fifo_empty[inp]) begin
+                            reg [6:0] src_port;
+                            input_claimed[inp] = 1'b1;
 
-                    src_port = src_port_fifo[arbiter_serving_port][fifo_head[arbiter_serving_port]];
-                    dest_port = xy_route(addr_fifo[arbiter_serving_port][fifo_head[arbiter_serving_port]], src_port);
+                            src_port = src_port_fifo[inp][fifo_head[inp]];
 
-                    // Forward to output port
-                    // Hazard detection: skip self-forward (dest == source) to avoid
-                    // read-during-write on the same FIFO head pointer
-                    if (dest_port != arbiter_serving_port) begin
-                        port_data_out[dest_port] <= input_fifo[arbiter_serving_port][fifo_head[arbiter_serving_port]];
-                        port_out_valid_reg[dest_port] <= 1'b1;
-                    end
+                            // Forward packet to output port
+                            port_data_out[fwd_o] <= input_fifo[inp][fifo_head[inp]];
+                            port_out_valid_reg[fwd_o] <= 1'b1;
 
-                    // Update head pointer
-                    if (fifo_head[arbiter_serving_port] == FIFO_DEPTH - 1)
-                        fifo_head[arbiter_serving_port] <= 0;
-                    else
-                        fifo_head[arbiter_serving_port] <= fifo_head[arbiter_serving_port] + 1;
+                            // Update input FIFO head pointer
+                            if (fifo_head[inp] == FIFO_DEPTH - 1)
+                                fifo_head[inp] <= 0;
+                            else
+                                fifo_head[inp] <= fifo_head[inp] + 1;
 
-                    fifo_cnt[arbiter_serving_port] <= fifo_cnt[arbiter_serving_port] - 1;
-                    forwarded_packet_count <= forwarded_packet_count + 1;
+                            fifo_cnt[inp] <= fifo_cnt[inp] - 1;
+                            forwarded_packet_count <= forwarded_packet_count + 1;
+                            bw_window_packets <= bw_window_packets + 1;
+                            total_latency_cycles <= total_latency_cycles + timestamp_fifo[inp][fifo_head[inp]];
 
-                    // FIX v2 #3: Increment bandwidth window counter
-                    bw_window_packets <= bw_window_packets + 1;
-
-                    // Calculate latency using actual cycle count from timestamp
-                    // Estimate: current_cycle - arrival_cycle gives true latency
-                    total_latency_cycles <= total_latency_cycles + timestamp_fifo[arbiter_serving_port][fifo_head[arbiter_serving_port]];
-
-                    // Send credit back to source
-                    credit_count[src_port] <= credit_count[src_port] + 1;
-                    forwarded_count = forwarded_count + 1;  // OPTIMIZED: Track forwarding
-                    
-
-                end else begin
-                    // No packet to forward
-                    for (p = 0; p < NUM_PORTS; p = p + 1) begin
-                        port_out_valid_reg[p] <= 1'b0;
+                            // Send credit back to source
+                            credit_count[src_port] <= credit_count[src_port] + 1;
+                            forwarded_count = forwarded_count + 1;
+                        end
                     end
                 end
             end
@@ -778,8 +790,9 @@ module aurora_fabric #(
                 // Reset window
                 bw_window_packets <= 32'b0;
                 bw_window_counter <= 8'b0;
-            end
-        end
+            end  // bandwidth window if
+        end  // else (non-reset)
+    end  // always @(posedge clk or negedge rst_n)
 
     // =========================================================================
     // Ready signal generation (per port)

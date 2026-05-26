@@ -17,6 +17,15 @@
 //   - Multi-port arbitration for concurrent access
 //   - Quality of Service (QoS) for different core types
 //   - Built-in performance monitoring
+//
+// NOTE (Bug 12): This is a SIMPLE SINGLE-TRANSACTION fabric, NOT full AXI4.
+//   AXI4 features NOT implemented:
+//   - Burst support (all transactions are single-beat)
+//   - Separate address/数据 channels (AW, AR, W, R, B)
+//   - ID tracking for out-of-order transactions
+//   - Transaction IDs for multi-threaded access
+//   - Outstanding transaction tracking (>1 in-flight)
+//   For full AXI4 compliance, add a separate AXI4 wrapper layer.
 //////////////////////////////////////////////////////////////////////////////////
 
 module memory_fabric #(
@@ -58,10 +67,12 @@ module memory_fabric #(
     parameter MAX_OUTSTANDING_REQ  = 32,   // Backpressure limit
     parameter TIMEOUT_CYCLES       = 200,  // Fallback timeout
     
-    // Memory ordering enforcement
-    parameter MEMORY_ORDERING_EN = 1,  // Enable memory ordering
+    // Memory ordering enforcement (currently unused — see Bug 4 note below)
+    parameter MEMORY_ORDERING_EN = 0,  // FIX: Disabled (was 1 but never connected)
     parameter CORE_ID           = 999, // ID for debug (999=Fabric)
-    parameter MEM_LATENCY       = 20   // Default memory latency
+    parameter MEM_LATENCY       = 20,  // Default memory latency
+    // FIX Bug 3: FPGA prototype memory size (replace with external controller for ASIC)
+    parameter MEM_SIZE_WORDS    = 4096 // Number of cache-line words in on-chip memory
 )(
     input  wire                         clk,
     input  wire                         rst_n,
@@ -117,21 +128,18 @@ module memory_fabric #(
     reg [31:0]                  fallback_count;
     reg [31:0]                  timeout_count;
     
-    // LPDDR5X Fast Tier Memory Array (modeled — 1024 entries for simulation only)
-    // synthesis translate_off
-    localparam LPDDR_SIZE = 1024;
-    // synthesis translate_on
-    reg [CACHE_LINE_WIDTH-1:0] lpddr_memory [0:1023];
+    // LPDDR5X Fast Tier Memory Array
+    // FIX Bug 3: Made synthesizable with configurable size (was wrapped in translate_off)
+    localparam LPDDR_SIZE = MEM_SIZE_WORDS;
+    reg [CACHE_LINE_WIDTH-1:0] lpddr_memory [0:MEM_SIZE_WORDS-1];
     reg [7:0] lpddr_latency_counter;
     reg [ADDR_WIDTH-1:0] lpddr_pending_addr;
     reg lpddr_pending_rd_en, lpddr_pending_wr_en;
     reg [CACHE_LINE_WIDTH-1:0] lpddr_pending_wr_data;
     
-    // DDR5 Capacity Tier Memory Array (modeled — 1024 entries for simulation only)
-    // synthesis translate_off
-    localparam DDR_SIZE = 1024;
-    // synthesis translate_on
-    reg [CACHE_LINE_WIDTH-1:0] ddr_memory [0:1023];
+    // DDR5 Capacity Tier Memory Array
+    localparam DDR_SIZE = MEM_SIZE_WORDS;
+    reg [CACHE_LINE_WIDTH-1:0] ddr_memory [0:MEM_SIZE_WORDS-1];
     reg [7:0] ddr_latency_counter;
     reg [ADDR_WIDTH-1:0] ddr_pending_addr;
     reg ddr_pending_rd_en, ddr_pending_wr_en;
@@ -140,6 +148,15 @@ module memory_fabric #(
     // Outstanding request tracking (backpressure)
     reg [5:0]                   outstanding_requests;
     reg                         backpressure_active;
+    
+    // FIX Bug 3: For ASIC synthesis, replace lpddr_memory and ddr_memory arrays with
+    // an external memory controller interface (SRAM/DRAM controller).
+    // The current implementation infers block RAM for FPGA prototyping.
+    // To connect an external controller:
+    //   1. Replace `reg [CACHE_LINE_WIDTH-1:0] ddr_memory [0:MEM_SIZE_WORDS-1]`
+    //      with output ports to the controller
+    //   2. Add ready/valid handshake for the controller interface
+    //   3. Remove internal latency counter logic; let the controller drive mem_ready
     
     // mem_ready is controlled by external testbench/memory controller
     
@@ -173,27 +190,13 @@ module memory_fabric #(
     reg [L2_INDEX_BITS-1:0]     req_set_idx;
     reg [ADDR_WIDTH-L2_INDEX_BITS-$clog2(L2_LINE_SIZE)-1:0] req_tag;
     
-    // CRITICAL FIX: Memory ordering enforcement
-    generate if (MEMORY_ORDERING_EN) begin : memory_ordering
-        
-        // Memory ordering queue for write ordering
-        reg [7:0]                   mo_queue_head, mo_queue_tail;
-        reg [7:0]                   mo_queue_depth;
-        reg [ADDR_WIDTH-1:0]        mo_queue_addr [0:255];
-        reg [DATA_WIDTH-1:0]        mo_queue_data [0:255];
-        reg                         mo_queue_valid [0:255];
-        reg                         mo_queue_is_write [0:255];
-        
-        // Barrier tracking
-        reg                         mo_barrier_active;
-        reg [7:0]                   mo_barrier_count;
-        reg [7:0]                   mo_barrier_target;
-        
-        // Memory ordering state
-        reg                         mo_drain_pending;
-        reg [7:0]                   mo_drain_count;
-        
-    end endgenerate
+    // NOTE (Bug 4): Memory ordering generate block removed — was dead code.
+    // The generate block declared queues but they were never read/written by the FSM.
+    // If memory ordering is needed in the future, implement:
+    //   1. Track write order with sequence numbers
+    //   2. Reorder read responses to match program order
+    //   3. Handle memory barriers (sync instruction)
+    // For now, this fabric processes transactions in-order (single-transaction).
 
     // =========================================================================
     // Helper Functions (ENHANCED for tiered memory)
@@ -313,10 +316,10 @@ module memory_fabric #(
             
             // Initialize LPDDR5X and DDR5 memory arrays (SIM only)
 `ifdef SIMULATION
-            for (int i = 0; i < 1024; i++) begin
+            for (int i = 0; i < MEM_SIZE_WORDS; i++) begin
                 lpddr_memory[i] = {CACHE_LINE_WIDTH{1'b0}};
             end
-            for (int i = 0; i < 1024; i++) begin
+            for (int i = 0; i < MEM_SIZE_WORDS; i++) begin
                 ddr_memory[i] = {CACHE_LINE_WIDTH{1'b0}};
             end
 `endif
@@ -445,7 +448,8 @@ module memory_fabric #(
                         end else begin
                             // LPDDR access complete
                             if (lpddr_pending_rd_en) begin
-                                fabric_rd_data <= {{(DATA_WIDTH-CACHE_LINE_WIDTH){1'b0}}, lpddr_memory[lpddr_pending_addr[$clog2(1024)-1:0]]};
+                                // FIX Bug 3: Proper address decode — cache-line-word index above byte offset
+                                fabric_rd_data <= {{(DATA_WIDTH-CACHE_LINE_WIDTH){1'b0}}, lpddr_memory[lpddr_pending_addr[$clog2(CACHE_LINE_WIDTH/8) +: $clog2(MEM_SIZE_WORDS)]]};
                             end
                             lpddr_pending_rd_en <= 1'b0;
                             lpddr_pending_wr_en <= 1'b0;
@@ -474,7 +478,8 @@ module memory_fabric #(
                         end else begin
                             // DDR access complete
                             if (ddr_pending_rd_en) begin
-                                fabric_rd_data <= {{(DATA_WIDTH-CACHE_LINE_WIDTH){1'b0}}, ddr_memory[ddr_pending_addr[$clog2(1024)-1:0]]};
+                                // FIX Bug 3: Proper address decode
+                                fabric_rd_data <= {{(DATA_WIDTH-CACHE_LINE_WIDTH){1'b0}}, ddr_memory[ddr_pending_addr[$clog2(CACHE_LINE_WIDTH/8) +: $clog2(MEM_SIZE_WORDS)]]};
                             end
                             ddr_pending_rd_en <= 1'b0;
                             ddr_pending_wr_en <= 1'b0;

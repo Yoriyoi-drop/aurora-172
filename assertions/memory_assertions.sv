@@ -175,20 +175,21 @@ module memory_assertions #(
         if (!rst_n) begin
             cache_state_prev <= 2'b00;
         end else begin
-            // Check for invalid transitions
+            // Check for invalid transitions (I->M is illegal without ownership)
             if (cache_state != cache_state_prev) begin
                 case (cache_state)
                     2'b00: begin
                         case (cache_state_prev)
-                            2'b01: $display("[%0t] [ASSERTION] MESI: Shared -> Invalid", $time);
-                            2'b10: $display("[%0t] [ASSERTION] MESI: Exclusive -> Invalid", $time);
-                            2'b11: $display("[%0t] [ASSERTION] MESI: Modified -> Invalid", $time);
-                            default: $display("[%0t] [ASSERTION] MESI: Invalid -> Invalid", $time);
+                            2'b01: $error("[%0t] ASSERTION VIOLATION: MESI: Illegal transition Shared -> Invalid", $time);
+                            2'b10: $error("[%0t] ASSERTION VIOLATION: MESI: Illegal transition Exclusive -> Invalid", $time);
+                            2'b11: $error("[%0t] ASSERTION VIOLATION: MESI: Illegal transition Modified -> Invalid", $time);
+                            default: ; // Invalid -> Invalid is legal (stays invalid)
                         endcase
                     end
-                    2'b01: if (cache_state_prev != 2'b01) $display("[%0t] [ASSERTION] MESI: Transition to Shared", $time);
-                    2'b10: if (cache_state_prev != 2'b10) $display("[%0t] [ASSERTION] MESI: Transition to Exclusive", $time);
-                    2'b11: if (cache_state_prev != 2'b11) $display("[%0t] [ASSERTION] MESI: Transition to Modified", $time);
+                    2'b01: if (cache_state_prev == 2'b11)
+                        $error("[%0t] ASSERTION VIOLATION: MESI: Illegal transition Modified -> Shared (must writeback first)", $time);
+                    2'b11: if (cache_state_prev == 2'b00)
+                        $error("[%0t] ASSERTION VIOLATION: MESI: Illegal transition Invalid -> Modified (must acquire ownership)", $time);
                 endcase
             end
             cache_state_prev <= cache_state;

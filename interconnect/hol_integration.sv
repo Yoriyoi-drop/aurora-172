@@ -113,39 +113,11 @@ module hol_integration #(
     logic                     rb_node_resp_valid[0:NUM_NODES-1];
     logic [NUM_NODES-1:0]     rb_node_resp_ready;
     
-    // Initialize HOL integration
-    integer init_i;
-    initial begin
-        // Initialize HOL state
-        hol_blocked_count = 32'd0;
-        hol_bypass_count = 32'd0;
-        hol_recovery_counter = 32'd0;
-        hol_health_score = 8'd100;
-        hol_healthy_flag = 1'b1;
-        
-        // Initialize per-node state
-        for (init_i = 0; init_i < NUM_NODES; init_i = init_i + 1) begin
-            packet_priority[init_i] = 2'd2; // Default normal priority
-            packet_wait_time[init_i] = 8'd0;
-            packet_timestamp[init_i] = 32'd0;
-            hol_threshold[init_i] = 8'd10; // 10 cycles default threshold
-            hol_detected[init_i] = 1'b0;
-            hol_wait_cycles[init_i] = 16'd0;
-            
-            bypass_active[init_i] = 1'b0;
-            bypass_addr[init_i] = {ADDR_WIDTH{1'b0}};
-            bypass_data[init_i] = {DATA_WIDTH{1'b0}};
-            bypass_qos[init_i] = 2'd2;
-            bypass_valid[init_i] = 1'b0;
-            bypass_ready[init_i] = 1'b1;
-            
-            node_load[init_i] = 32'd0;
-        end
-        
-        load_balance_threshold = 8'd75; // 75% load threshold
-        
-        $display("[%0t] [HOL-INTEGRATION] HOL Prevention Integration Initialized", $time);
-    end
+    // Synthesis-safe initialization is handled in the always_ff reset block below.
+    generate
+        if (NUM_NODES < 1)
+            $error("[HOL-INTEGRATION] NUM_NODES must be >= 1");
+    endgenerate
     
     // TODO: instantiate ring_bus module — module file not yet available (ring_bus_stub provided separately)
     /* ring_bus #(

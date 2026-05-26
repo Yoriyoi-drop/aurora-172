@@ -81,6 +81,13 @@ module h_core #(
     reg [DATA_WIDTH-1:0]    alu_result;
     reg [DATA_WIDTH-1:0]    load_data;
 
+    // Bug 6: ROB ready tracking (execution completion per entry)
+    reg                     rob_ready [0:ROB_SIZE-1];
+
+    // Bug 7: MEM→EXEC bypass signals
+    wire                    fwd_mem_valid;
+    wire [4:0]              fwd_mem_addr;
+
     // Pipeline state
     reg [2:0]               pipeline_state;
     reg [15:0]              h_exec_counter;
@@ -106,15 +113,24 @@ module h_core #(
     wire [4:0] fwd_wb_addr  = rob_data[rob_head][21:17];
     wire       fwd_wb_valid = (pipeline_state == WRITEBACK);
 
+    // Bug 7: MEM→EXEC bypass
+    // Forward from MEMORY stage when a load result is coming
+    wire [4:0] fwd_mem_addr  = rob_data[(rob_tail > 0) ? (rob_tail - 1) : (ROB_SIZE - 1)][21:17];
+    wire       fwd_mem_valid = (pipeline_state == MEMORY);
+
     reg [DATA_WIDTH-1:0] fwd_rs1_val;
     reg [DATA_WIDTH-1:0] fwd_rs2_val;
     always @(*) begin
         fwd_rs1_val = register_file[fwd_rs1_addr];
         if (fwd_wb_valid && fwd_wb_addr == fwd_rs1_addr)
             fwd_rs1_val = alu_result;
+        else if (fwd_mem_valid && fwd_mem_addr == fwd_rs1_addr && fwd_mem_addr != 5'b0)
+            fwd_rs1_val = load_data;  // MEM→EXEC bypass
         fwd_rs2_val = register_file[fwd_rs2_addr];
         if (fwd_wb_valid && fwd_wb_addr == fwd_rs2_addr)
             fwd_rs2_val = alu_result;
+        else if (fwd_mem_valid && fwd_mem_addr == fwd_rs2_addr && fwd_mem_addr != 5'b0)
+            fwd_rs2_val = load_data;  // MEM→EXEC bypass
     end
 
     // ALU operations
@@ -133,6 +149,9 @@ module h_core #(
     // Error codes - using standardized definitions from aurora_error_codes.svh
     // No local error codes needed - use `AURORA_ERR_ILLEGAL_OPCODE from include file
 
+    // Bug 6: Track which ROB slot the current in-flight instruction uses
+    reg [5:0]               rob_dispatch_idx;
+
     // =========================================================================
     // Main pipeline
     // =========================================================================
@@ -141,6 +160,7 @@ module h_core #(
             pipeline_state      <= IDLE;
             rob_head            <= 6'b0;
             rob_tail            <= 6'b0;
+            rob_dispatch_idx    <= 6'b0;
             busy                <= 1'b0;
             complete            <= 1'b0;
             cmd_ready           <= 1'b1;
@@ -170,22 +190,22 @@ module h_core #(
             register_file[28] <= {DATA_WIDTH{1'b0}}; register_file[29] <= {DATA_WIDTH{1'b0}}; register_file[30] <= {DATA_WIDTH{1'b0}}; register_file[31] <= {DATA_WIDTH{1'b0}};
             
             // Initialize ROB (16 entries)
-            rob_valid[0] <= 1'b0; rob_data[0] <= {DATA_WIDTH{1'b0}}; rob_addr[0] <= {ADDR_WIDTH{1'b0}};
-            rob_valid[1] <= 1'b0; rob_data[1] <= {DATA_WIDTH{1'b0}}; rob_addr[1] <= {ADDR_WIDTH{1'b0}};
-            rob_valid[2] <= 1'b0; rob_data[2] <= {DATA_WIDTH{1'b0}}; rob_addr[2] <= {ADDR_WIDTH{1'b0}};
-            rob_valid[3] <= 1'b0; rob_data[3] <= {DATA_WIDTH{1'b0}}; rob_addr[3] <= {ADDR_WIDTH{1'b0}};
-            rob_valid[4] <= 1'b0; rob_data[4] <= {DATA_WIDTH{1'b0}}; rob_addr[4] <= {ADDR_WIDTH{1'b0}};
-            rob_valid[5] <= 1'b0; rob_data[5] <= {DATA_WIDTH{1'b0}}; rob_addr[5] <= {ADDR_WIDTH{1'b0}};
-            rob_valid[6] <= 1'b0; rob_data[6] <= {DATA_WIDTH{1'b0}}; rob_addr[6] <= {ADDR_WIDTH{1'b0}};
-            rob_valid[7] <= 1'b0; rob_data[7] <= {DATA_WIDTH{1'b0}}; rob_addr[7] <= {ADDR_WIDTH{1'b0}};
-            rob_valid[8] <= 1'b0; rob_data[8] <= {DATA_WIDTH{1'b0}}; rob_addr[8] <= {ADDR_WIDTH{1'b0}};
-            rob_valid[9] <= 1'b0; rob_data[9] <= {DATA_WIDTH{1'b0}}; rob_addr[9] <= {ADDR_WIDTH{1'b0}};
-            rob_valid[10] <= 1'b0; rob_data[10] <= {DATA_WIDTH{1'b0}}; rob_addr[10] <= {ADDR_WIDTH{1'b0}};
-            rob_valid[11] <= 1'b0; rob_data[11] <= {DATA_WIDTH{1'b0}}; rob_addr[11] <= {ADDR_WIDTH{1'b0}};
-            rob_valid[12] <= 1'b0; rob_data[12] <= {DATA_WIDTH{1'b0}}; rob_addr[12] <= {ADDR_WIDTH{1'b0}};
-            rob_valid[13] <= 1'b0; rob_data[13] <= {DATA_WIDTH{1'b0}}; rob_addr[13] <= {ADDR_WIDTH{1'b0}};
-            rob_valid[14] <= 1'b0; rob_data[14] <= {DATA_WIDTH{1'b0}}; rob_addr[14] <= {ADDR_WIDTH{1'b0}};
-            rob_valid[15] <= 1'b0; rob_data[15] <= {DATA_WIDTH{1'b0}}; rob_addr[15] <= {ADDR_WIDTH{1'b0}};
+            rob_valid[0] <= 1'b0; rob_data[0] <= {DATA_WIDTH{1'b0}}; rob_addr[0] <= {ADDR_WIDTH{1'b0}}; rob_ready[0] <= 1'b0;
+            rob_valid[1] <= 1'b0; rob_data[1] <= {DATA_WIDTH{1'b0}}; rob_addr[1] <= {ADDR_WIDTH{1'b0}}; rob_ready[1] <= 1'b0;
+            rob_valid[2] <= 1'b0; rob_data[2] <= {DATA_WIDTH{1'b0}}; rob_addr[2] <= {ADDR_WIDTH{1'b0}}; rob_ready[2] <= 1'b0;
+            rob_valid[3] <= 1'b0; rob_data[3] <= {DATA_WIDTH{1'b0}}; rob_addr[3] <= {ADDR_WIDTH{1'b0}}; rob_ready[3] <= 1'b0;
+            rob_valid[4] <= 1'b0; rob_data[4] <= {DATA_WIDTH{1'b0}}; rob_addr[4] <= {ADDR_WIDTH{1'b0}}; rob_ready[4] <= 1'b0;
+            rob_valid[5] <= 1'b0; rob_data[5] <= {DATA_WIDTH{1'b0}}; rob_addr[5] <= {ADDR_WIDTH{1'b0}}; rob_ready[5] <= 1'b0;
+            rob_valid[6] <= 1'b0; rob_data[6] <= {DATA_WIDTH{1'b0}}; rob_addr[6] <= {ADDR_WIDTH{1'b0}}; rob_ready[6] <= 1'b0;
+            rob_valid[7] <= 1'b0; rob_data[7] <= {DATA_WIDTH{1'b0}}; rob_addr[7] <= {ADDR_WIDTH{1'b0}}; rob_ready[7] <= 1'b0;
+            rob_valid[8] <= 1'b0; rob_data[8] <= {DATA_WIDTH{1'b0}}; rob_addr[8] <= {ADDR_WIDTH{1'b0}}; rob_ready[8] <= 1'b0;
+            rob_valid[9] <= 1'b0; rob_data[9] <= {DATA_WIDTH{1'b0}}; rob_addr[9] <= {ADDR_WIDTH{1'b0}}; rob_ready[9] <= 1'b0;
+            rob_valid[10] <= 1'b0; rob_data[10] <= {DATA_WIDTH{1'b0}}; rob_addr[10] <= {ADDR_WIDTH{1'b0}}; rob_ready[10] <= 1'b0;
+            rob_valid[11] <= 1'b0; rob_data[11] <= {DATA_WIDTH{1'b0}}; rob_addr[11] <= {ADDR_WIDTH{1'b0}}; rob_ready[11] <= 1'b0;
+            rob_valid[12] <= 1'b0; rob_data[12] <= {DATA_WIDTH{1'b0}}; rob_addr[12] <= {ADDR_WIDTH{1'b0}}; rob_ready[12] <= 1'b0;
+            rob_valid[13] <= 1'b0; rob_data[13] <= {DATA_WIDTH{1'b0}}; rob_addr[13] <= {ADDR_WIDTH{1'b0}}; rob_ready[13] <= 1'b0;
+            rob_valid[14] <= 1'b0; rob_data[14] <= {DATA_WIDTH{1'b0}}; rob_addr[14] <= {ADDR_WIDTH{1'b0}}; rob_ready[14] <= 1'b0;
+            rob_valid[15] <= 1'b0; rob_data[15] <= {DATA_WIDTH{1'b0}}; rob_addr[15] <= {ADDR_WIDTH{1'b0}}; rob_ready[15] <= 1'b0;
         end else begin
             error_valid <= 1'b0;
             complete <= 1'b0;
@@ -285,6 +305,8 @@ module h_core #(
                         rob_addr[rob_tail] <= saved_cmd_addr;
                         rob_data[rob_tail] <= saved_cmd_data;
                         rob_valid[rob_tail] <= 1'b1;
+                        rob_ready[rob_tail] <= 1'b0;  // Not ready yet
+                        rob_dispatch_idx <= rob_tail;  // Track this entry
                         rob_tail <= (rob_tail + 1) % ROB_SIZE;  // Wrap-around
                         pipeline_state <= EXECUTE;
                         if (CORE_ID == 0)

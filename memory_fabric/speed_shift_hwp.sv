@@ -271,6 +271,12 @@ module speed_shift_hwp #(
     reg             sw_any_domain_changed;
     reg             hw_any_domain_changed;
 
+    // FIX BUG-4: Module-level declarations for P-state calculation intermediates
+    // (previously illegally declared inside the always block)
+    reg [3:0] g_target_p, a_target_p, h_target_p, n_target_p;
+    reg [3:0] g_thermal, a_thermal, h_thermal, n_thermal;
+    reg [3:0] g_bias, a_bias, h_bias, n_bias;
+
     // --- Main State Machine
     // ---
     always @(posedge clk or negedge rst_n) begin
@@ -399,11 +405,6 @@ module speed_shift_hwp #(
                 hwp_active <= 1'b1;
 
                 if (hwp_state == HWP_APPLY) begin
-                    // Calculate target P-states from utilization + EPP
-                    reg [3:0] g_target_p, a_target_p, h_target_p, n_target_p;
-                    reg [3:0] g_thermal, a_thermal, h_thermal, n_thermal;
-                    reg [3:0] g_bias, a_bias, h_bias, n_bias;
-
                     // EPP biases
                     g_bias = epp_to_bias(epp_g_core);
                     a_bias = epp_to_bias(epp_a_core);

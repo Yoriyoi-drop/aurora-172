@@ -41,7 +41,20 @@ module smartshift #(
     output reg  [31:0]                  redistribution_count,
     output reg  [31:0]                  g_core_boost_count,
     output reg  [31:0]                  a_core_boost_count,
-    output reg  [31:0]                  tdp_limit_hit_count
+    output reg  [31:0]                  tdp_limit_hit_count,
+
+    // Throttle control outputs (Bug 2: budget enforcement)
+    // Asserted when actual_power exceeds the computed budget
+    input  wire [DATA_WIDTH-1:0]        g_core_actual_mw,
+    input  wire [DATA_WIDTH-1:0]        a_core_actual_mw,
+    input  wire [DATA_WIDTH-1:0]        h_core_actual_mw,
+    input  wire [DATA_WIDTH-1:0]        npu_actual_mw,
+    output reg                          throttle_g_core,
+    output reg                          throttle_a_core,
+    output reg                          throttle_h_core,
+    output reg                          throttle_npu,
+    output reg                          throttle_any,
+    output reg [DATA_WIDTH-1:0]         throttle_excess_mw
 );
 
     // Internal signals
@@ -194,6 +207,93 @@ module smartshift #(
                 g_core_boost_count <= g_core_boost_count + 1;
             if (ai_mode && a_budget_next > A_CORE_BASE_MW)
                 a_core_boost_count <= a_core_boost_count + 1;
+        end
+    end
+
+    // ─────────────────────────────────────────────────────────────
+    // Bug 2: Power budget enforcement with hysteresis
+    // Compare actual power consumption against allocated budget
+    // and assert throttle signals when exceeded.
+    // ─────────────────────────────────────────────────────────────
+    reg [DATA_WIDTH-1:0] throttle_excess;
+    reg [3:0] throttle_hyst_cnt;
+
+    localparam THROTTLE_HYSTERESIS = 4'd3;  // cycles before throttle activates
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            throttle_g_core <= 1'b0;
+            throttle_a_core <= 1'b0;
+            throttle_h_core <= 1'b0;
+            throttle_npu    <= 1'b0;
+            throttle_any    <= 1'b0;
+            throttle_excess_mw <= {DATA_WIDTH{1'b0}};
+            throttle_excess <= {DATA_WIDTH{1'b0}};
+            throttle_hyst_cnt <= 4'd0;
+        end else begin
+            // Compute excess per domain
+            throttle_excess <= 32'd0;
+
+            // G-Core throttle
+            if (g_core_actual_mw > g_core_budget_mw) begin
+                throttle_excess <= g_core_actual_mw - g_core_budget_mw;
+                if (throttle_hyst_cnt >= THROTTLE_HYSTERESIS) begin
+                    throttle_g_core <= 1'b1;
+                end else begin
+                    throttle_hyst_cnt <= throttle_hyst_cnt + 4'd1;
+                end
+            end else begin
+                throttle_g_core <= 1'b0;
+            end
+
+            // A-Core throttle
+            if (a_core_actual_mw > a_core_budget_mw) begin
+                throttle_excess <= a_core_actual_mw - a_core_budget_mw;
+                if (throttle_hyst_cnt >= THROTTLE_HYSTERESIS) begin
+                    throttle_a_core <= 1'b1;
+                end else begin
+                    throttle_hyst_cnt <= throttle_hyst_cnt + 4'd1;
+                end
+            end else begin
+                throttle_a_core <= 1'b0;
+            end
+
+            // H-Core throttle
+            if (h_core_actual_mw > h_core_budget_mw) begin
+                throttle_excess <= h_core_actual_mw - h_core_budget_mw;
+                if (throttle_hyst_cnt >= THROTTLE_HYSTERESIS) begin
+                    throttle_h_core <= 1'b1;
+                end else begin
+                    throttle_hyst_cnt <= throttle_hyst_cnt + 4'd1;
+                end
+            end else begin
+                throttle_h_core <= 1'b0;
+            end
+
+            // NPU throttle
+            if (npu_actual_mw > npu_budget_mw) begin
+                throttle_excess <= npu_actual_mw - npu_budget_mw;
+                if (throttle_hyst_cnt >= THROTTLE_HYSTERESIS) begin
+                    throttle_npu <= 1'b1;
+                end else begin
+                    throttle_hyst_cnt <= throttle_hyst_cnt + 4'd1;
+                end
+            end else begin
+                throttle_npu <= 1'b0;
+            end
+
+            // Combined throttle flag
+            throttle_any <= throttle_g_core || throttle_a_core ||
+                            throttle_h_core || throttle_npu;
+            throttle_excess_mw <= throttle_excess;
+
+            // Clear hysteresis when all domains are within budget
+            if (!(g_core_actual_mw > g_core_budget_mw) &&
+                !(a_core_actual_mw > a_core_budget_mw) &&
+                !(h_core_actual_mw > h_core_budget_mw) &&
+                !(npu_actual_mw > npu_budget_mw)) begin
+                throttle_hyst_cnt <= 4'd0;
+            end
         end
     end
 

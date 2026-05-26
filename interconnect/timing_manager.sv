@@ -177,16 +177,24 @@ module timing_manager #(
     reg                     ic_to_core_valid_dst_prev [0:NUM_NODES-1];
     reg                     ic_to_mem_valid_dst_prev [0:NUM_NODES-1];
     reg                     mem_to_ic_valid_dst_prev [0:NUM_NODES-1];
+    // CRITICAL FIX: Multi-bit CDC handshake pending flags.
+    // After capturing data into the sync pipeline, the source must wait
+    // for the destination to acknowledge via the toggle synchronizer
+    // before the next capture. Without this, the sync register can be
+    // overwritten while the dest clock is still reading the previous
+    // value, causing multi-bit metastability (each bit settles at a
+    // different time).
+    reg                     core_to_ic_pending [0:NUM_NODES-1];
+    reg                     ic_to_core_pending [0:NUM_NODES-1];
+    reg                     ic_to_mem_pending  [0:NUM_NODES-1];
+    reg                     mem_to_ic_pending  [0:NUM_NODES-1];
     
     // Clock domain crossing control
     reg                     enable_crossing;
     reg [7:0]               sync_threshold;
     reg [31:0]              sync_timeout;
     
-    // Initialize timing manager (synthesis-safe: all registers init in reset blocks)
-    initial begin
-        $display("[%0t] [TIMING-MANAGER] Timing Drift Management System Initialized", $time);
-    end
+    // All registers initialized in reset blocks below (synthesis-safe)
     
     // Core clock domain processing
     always @(posedge core_clk or negedge rst_n) begin
@@ -198,6 +206,7 @@ module timing_manager #(
                 core_to_ic_ack_prev[i] <= 1'b1;
                 core_to_ic_valid_dst_prev[i] <= 1'b0;
                 ic_to_core_ack_toggle[i] <= 1'b0;
+                core_to_ic_pending[i] <= 1'b0;
                 for (integer j = 0; j < SYNC_STAGES; j = j + 1) begin
                     core_to_ic_sync[i][j] = {DATA_WIDTH{1'b0}};
                     core_to_ic_valid_sync[i][j] = 1'b0;
@@ -235,6 +244,13 @@ module timing_manager #(
                 end
                 core_to_ic_ack_sync[i][0] <= core_to_ic_ack_toggle[i];
 
+                // CRITICAL FIX: Detect ack from interconnect domain (core_to_ic_ack_toggle
+                // changed → interconnect consumed our data). Clear pending so new data can be captured.
+                if (core_to_ic_ack_sync[i][SYNC_STAGES-1] != core_to_ic_ack_prev[i]) begin
+                    core_to_ic_ack_prev[i] <= core_to_ic_ack_sync[i][SYNC_STAGES-1];
+                    core_to_ic_pending[i] <= 1'b0;
+                end
+
                 // Process clock domain crossing to interconnect
                 process_core_to_ic_crossing(i, dc_inc_core, meta_inc_core);
             end
@@ -255,6 +271,8 @@ module timing_manager #(
                 ic_to_mem_ack_prev[i] <= 1'b1;
                 ic_to_core_valid_dst_prev[i] <= 1'b0;
                 ic_to_mem_valid_dst_prev[i] <= 1'b0;
+                ic_to_core_pending[i] <= 1'b0;
+                ic_to_mem_pending[i] <= 1'b0;
                 for (integer j = 0; j < SYNC_STAGES; j = j + 1) begin
                     ic_to_core_sync[i][j] = {DATA_WIDTH{1'b0}};
                     ic_to_core_valid_sync[i][j] = 1'b0;
@@ -351,6 +369,16 @@ module timing_manager #(
                 if (mem_to_ic_valid_dst[i] && !mem_to_ic_valid_dst_prev[i])
                     mem_to_ic_ack_toggle[i] <= ~mem_to_ic_ack_toggle[i];
 
+                // CRITICAL FIX: Detect acks from core/mem domains for ic_to_core and ic_to_mem paths
+                if (ic_to_core_ack_sync[i][SYNC_STAGES-1] != ic_to_core_ack_prev[i]) begin
+                    ic_to_core_ack_prev[i] <= ic_to_core_ack_sync[i][SYNC_STAGES-1];
+                    ic_to_core_pending[i] <= 1'b0;
+                end
+                if (ic_to_mem_ack_sync[i][SYNC_STAGES-1] != ic_to_mem_ack_prev[i]) begin
+                    ic_to_mem_ack_prev[i] <= ic_to_mem_ack_sync[i][SYNC_STAGES-1];
+                    ic_to_mem_pending[i] <= 1'b0;
+                end
+
                 // Shift ack synchronizers for ic-to-core and ic-to-mem paths
                 for (integer s = SYNC_STAGES-1; s > 0; s = s - 1) begin
                     ic_to_core_ack_sync[i][s] <= ic_to_core_ack_sync[i][s-1];
@@ -389,6 +417,7 @@ module timing_manager #(
                 mem_to_ic_state[i] = SYNC_IDLE;
                 mem_to_ic_ack_prev[i] <= 1'b1;
                 ic_to_mem_valid_dst_prev[i] <= 1'b0;
+                mem_to_ic_pending[i] <= 1'b0;
                 for (integer j = 0; j < SYNC_STAGES; j = j + 1) begin
                     mem_to_ic_sync[i][j] = {DATA_WIDTH{1'b0}};
                     mem_to_ic_valid_sync[i][j] = 1'b0;
@@ -419,6 +448,12 @@ module timing_manager #(
                 if (ic_to_mem_valid_dst[i] && !ic_to_mem_valid_dst_prev[i])
                     ic_to_mem_ack_toggle[i] <= ~ic_to_mem_ack_toggle[i];
 
+                // CRITICAL FIX: Detect ack from interconnect domain (mem_to_ic path)
+                if (mem_to_ic_ack_sync[i][SYNC_STAGES-1] != mem_to_ic_ack_prev[i]) begin
+                    mem_to_ic_ack_prev[i] <= mem_to_ic_ack_sync[i][SYNC_STAGES-1];
+                    mem_to_ic_pending[i] <= 1'b0;
+                end
+
                 // Shift ack synchronizer for mem_to_ic path
                 for (integer s = SYNC_STAGES-1; s > 0; s = s - 1) begin
                     mem_to_ic_ack_sync[i][s] <= mem_to_ic_ack_sync[i][s-1];
@@ -441,10 +476,15 @@ module timing_manager #(
         begin
             case (core_to_ic_state[node])
                 SYNC_IDLE: begin
-                    if (core_to_ic_valid[node] && enable_crossing) begin
+                    // CRITICAL FIX: Only capture new data when previous transfer is
+                    // acknowledged (!pending). This prevents overwriting sync registers
+                    // while the destination clock domain is still reading them, which
+                    // would cause multi-bit metastability.
+                    if (core_to_ic_valid[node] && enable_crossing && !core_to_ic_pending[node]) begin
                         core_to_ic_state[node] = SYNC_CAPTURE;
                         core_to_ic_sync[node][0] = core_to_ic_data[node];
                         core_to_ic_valid_sync[node][0] = core_to_ic_valid[node];
+                        core_to_ic_pending[node] <= 1'b1;
                         dc_inc = dc_inc + 1;
                     end
                 end
@@ -491,10 +531,11 @@ module timing_manager #(
         begin
             case (ic_to_core_state[node])
                 SYNC_IDLE: begin
-                    if (ic_to_core_valid[node] && enable_crossing) begin
+                    if (ic_to_core_valid[node] && enable_crossing && !ic_to_core_pending[node]) begin
                         ic_to_core_state[node] = SYNC_CAPTURE;
                         ic_to_core_sync[node][0] = ic_to_core_data[node];
                         ic_to_core_valid_sync[node][0] = ic_to_core_valid[node];
+                        ic_to_core_pending[node] <= 1'b1;
                         dc_inc = dc_inc + 1;
                     end
                 end
@@ -524,10 +565,11 @@ module timing_manager #(
         begin
             case (ic_to_mem_state[node])
                 SYNC_IDLE: begin
-                    if (ic_to_mem_valid[node] && enable_crossing) begin
+                    if (ic_to_mem_valid[node] && enable_crossing && !ic_to_mem_pending[node]) begin
                         ic_to_mem_state[node] = SYNC_CAPTURE;
                         ic_to_mem_sync[node][0] = ic_to_mem_data[node];
                         ic_to_mem_valid_sync[node][0] = ic_to_mem_valid[node];
+                        ic_to_mem_pending[node] <= 1'b1;
                         dc_inc = dc_inc + 1;
                     end
                 end
@@ -569,10 +611,11 @@ module timing_manager #(
         begin
             case (mem_to_ic_state[node])
                 SYNC_IDLE: begin
-                    if (mem_to_ic_valid[node] && enable_crossing) begin
+                    if (mem_to_ic_valid[node] && enable_crossing && !mem_to_ic_pending[node]) begin
                         mem_to_ic_state[node] = SYNC_CAPTURE;
                         mem_to_ic_sync[node][0] = mem_to_ic_data[node];
                         mem_to_ic_valid_sync[node][0] = mem_to_ic_valid[node];
+                        mem_to_ic_pending[node] <= 1'b1;
                         dc_inc = dc_inc + 1;
                     end
                 end

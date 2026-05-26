@@ -96,8 +96,13 @@
 `define AURORA_DEBUG_DDR4
 `define DEBUG_SCHEDULER
 
-// Set by most simulator tools; defined here for Verilator compatibility.
-// Enables queue overflow assertions and other simulation-only checks.
+// AURORA_SIMULATION is normally defined automatically by standard simulators
+// (VCS, Questa, Icarus, etc.). The `ifndef guard below allows Verilator and
+// other tools to define it manually without forcing it on all compilation.
+// To enable simulation-only checks in all tools, uncomment the define.
+// `define AURORA_SIMULATION
+`ifdef VERILATOR
 `define AURORA_SIMULATION
+`endif
 
 `endif

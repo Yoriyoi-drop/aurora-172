@@ -135,6 +135,10 @@ module rt_engine #(
     reg [7:0]               bvh_load_idx;
     reg [7:0]               bvh_load_target;
 
+    // Two-cycle BVH node load (≥232-bit node across 2×128-bit reads)
+    reg [127:0]             bvh_load_temp;
+    reg                     bvh_load_phase;
+
     reg                     traverse_found;
     reg [31:0]              traverse_hit_t;
     reg [31:0]              traverse_hit_dist;
@@ -442,6 +446,8 @@ module rt_engine #(
             fabric_wr_en <= 1'b0;
             bvh_load_idx <= 0;
             bvh_load_target <= 0;
+            bvh_load_temp <= 128'b0;
+            bvh_load_phase <= 1'b0;
 
             // Initialize BVH nodes
             for (int i = 0; i < BVH_DEPTH; i++) begin
@@ -514,6 +520,7 @@ module rt_engine #(
                             fabric_rd_en <= 1'b0;
                             bvh_load_idx <= 0;
                             bvh_load_target <= 8'd15;  // Load 16 nodes (covers depth-4 BVH)
+                            bvh_load_phase <= 1'b0;
                             fabric_addr <= cmd_addr + 64;  // BVH data after ray data
                             fabric_rd_en <= 1'b1;
                         end
@@ -523,6 +530,10 @@ module rt_engine #(
                 // FIX v2: LOAD_BVH now loads nodes from memory fabric instead of
                 // hardcoding only 3 nodes. Iteratively loads up to bvh_load_target
                 // nodes, requesting each from memory.
+                // CRITICAL FIX #7: Each ≥232-bit BVH node loaded across 2×128-bit reads
+                // Phase 0: low 128 bits (min_xyz, max_x) → bvh_load_temp
+                // Phase 1: high bits (max_yz, left, right, flags) → commit full node
+                // Node stride: 32 bytes (256 bits) per node in memory
                 // CRITICAL FIX #9: Add timeout to prevent permanent hang
                 LOAD_BVH: begin
                     // CRITICAL FIX #9: Timeout after 512 cycles
@@ -539,40 +550,42 @@ module rt_engine #(
                         end
                         
                         if (fabric_ready) begin
-                            // Decode node data from fabric_rd_data
-                            // Each node: min_xyz (3x32), max_xyz (3x32), left/right (2x16), flags
-                            bvh_min_x[bvh_load_idx] <= fabric_rd_data[31:0];
-                            bvh_min_y[bvh_load_idx] <= fabric_rd_data[63:32];
-                            bvh_min_z[bvh_load_idx] <= fabric_rd_data[95:64];
-                            bvh_max_x[bvh_load_idx] <= fabric_rd_data[127:96];
-                            bvh_max_y[bvh_load_idx] <= fabric_rd_data[159:128];
-                            bvh_max_z[bvh_load_idx] <= fabric_rd_data[191:160];
-                            bvh_left[bvh_load_idx]  <= fabric_rd_data[207:192];
-                            bvh_right[bvh_load_idx] <= fabric_rd_data[223:208];
-                            bvh_valid[bvh_load_idx] <= 1'b1;
                             exec_counter <= 16'h0;  // Reset counter on successful transfer
-
-                            // Determine leaf status: leaf if children would exceed BVH_DEPTH
-                            if ((bvh_load_idx * 2 + 1) >= BVH_DEPTH) begin
-                                bvh_is_leaf[bvh_load_idx] <= 1'b1;
-                            end else begin
-                                bvh_is_leaf[bvh_load_idx] <= 1'b0;
-                            end
-
-                            bvh_load_idx <= bvh_load_idx + 1;
-
-                            // Load more nodes from memory if available
-                            if (bvh_load_idx < bvh_load_target - 1) begin
-                                fabric_addr <= fabric_addr + 16;  // Next node
+                            if (!bvh_load_phase) begin
+                                // Phase 0: Store low 128 bits, request high 128 bits
+                                bvh_load_temp[127:0] <= fabric_rd_data[127:0];
+                                bvh_load_phase <= 1'b1;
+                                fabric_addr <= fabric_addr + 16;  // Next 128 bits of same node
                                 fabric_rd_en <= 1'b1;
                             end else begin
-                            fabric_rd_en <= 1'b0;
-                            state <= BVH_TRAVERSE;
-                            intersection_dist <= 32'd100;
+                                // Phase 1: Combine low + high → commit full BVH node
+                                bvh_min_x[bvh_load_idx]  <= bvh_load_temp[31:0];
+                                bvh_min_y[bvh_load_idx]  <= bvh_load_temp[63:32];
+                                bvh_min_z[bvh_load_idx]  <= bvh_load_temp[95:64];
+                                bvh_max_x[bvh_load_idx]  <= bvh_load_temp[127:96];
+                                bvh_max_y[bvh_load_idx]  <= fabric_rd_data[31:0];
+                                bvh_max_z[bvh_load_idx]  <= fabric_rd_data[63:32];
+                                bvh_left[bvh_load_idx]   <= fabric_rd_data[79:64];
+                                bvh_right[bvh_load_idx]  <= fabric_rd_data[95:80];
+                                bvh_valid[bvh_load_idx]  <= 1'b1;
+                                bvh_is_leaf[bvh_load_idx] <= fabric_rd_data[97];
+
+                                bvh_load_phase <= 1'b0;
+                                bvh_load_idx <= bvh_load_idx + 1;
+
+                                // Advance to next node or finish
+                                if (bvh_load_idx < bvh_load_target - 1) begin
+                                    fabric_addr <= fabric_addr + 16;  // Next node low word
+                                    fabric_rd_en <= 1'b1;
+                                end else begin
+                                    fabric_rd_en <= 1'b0;
+                                    state <= BVH_TRAVERSE;
+                                    intersection_dist <= 32'd100;
+                                end
+                            end
                         end
                     end
                 end
-            end
 
             BVH_TRAVERSE: begin
                     bvh_traverse(traverse_found, traverse_hit_t, traverse_hit_dist, traverse_hit_found);

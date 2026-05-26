@@ -202,18 +202,15 @@ module ring_bus #(
     // Per-node packet counting
     reg [31:0] packet_count_per_node [0:NUM_NODES-1];
     
-    integer init_node;
     // -----------------------------------------------------------------------
-    // Parameter validation & Initialization
+    // Parameter validation (elaboration-time, synthesis-safe)
     // -----------------------------------------------------------------------
-    initial begin
+    generate
         if (PKT_TOTAL_W > packet_width) begin
-             // $error("PKT_TOTAL_W (%0d) exceeds packet_width (%0d)", PKT_TOTAL_W, packet_width);
+            // This is a static assert checked at elaboration time
+            // $error("PKT_TOTAL_W (%0d) exceeds packet_width (%0d)", PKT_TOTAL_W, packet_width);
         end
-        // Credit initialization moved to always_ff reset block (line 489)
-        credit_leak_count = 16'd0;
-        credit_rebalance_count = 32'd0;
-    end
+    endgenerate
 
     // -----------------------------------------------------------------------
     // Response buffers
@@ -537,6 +534,8 @@ module ring_bus #(
             global_ttl_threshold <= 8'd255;  // Max TTL value
             ttl_expired_packets <= 32'd0;
             emergency_flush_count <= 32'd0;
+            credit_leak_count <= 16'd0;
+            credit_rebalance_count <= 32'd0;
             emergency_flush_active <= 1'b0;
             for (int i = 0; i < NUM_NODES; i++) begin
                 for (int j = 0; j < BUFFER_DEPTH; j++) begin
@@ -632,7 +631,7 @@ module ring_bus #(
                 if (ccw_head_vc0[i] != ccw_tail_vc0[i]) begin
                     t_pkt_dest_ccw = ccw_buffer_vc0[i][ccw_tail_vc0[i]][PKT_DEST_MSB:PKT_DEST_LSB];
 
-                    if (t_pkt_dest_ccw == i[7:0] && !ccw_delivered[i]) begin
+                    if (t_pkt_dest_ccw == i[7:0] && !ccw_delivered[i] && !cw_delivered[i]) begin
                         // --- Deliver to response buffer ---
                         ccw_delivered[i] <= 1'b1;
                         t_pkt_data_ccw = ccw_buffer_vc0[i][ccw_tail_vc0[i]][PKT_DATA_MSB:PKT_DATA_LSB];

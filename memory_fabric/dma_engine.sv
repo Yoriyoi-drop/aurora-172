@@ -29,7 +29,10 @@ module dma_engine #(
     parameter ADDR_WIDTH      = `AURORA_ADDR_WIDTH,   // FIXED: Use standard parameter
     parameter DATA_WIDTH      = `AURORA_DATA_WIDTH,  // FIXED: Use standard parameter
     parameter BURST_SIZE_BITS = 14,   // OPTIMIZED: 12->14 (up to 16KB burst)
-    parameter DESC_FIFO_DEPTH = 16    // OPTIMIZED: 32->16 (smaller for efficiency)
+    parameter DESC_FIFO_DEPTH = 16,   // OPTIMIZED: 32->16 (smaller for efficiency)
+    // FIX Bug 5: Scatter-gather DMA support
+    parameter ENABLE_SCATTER_GATHER = 1,  // Enable descriptor-based DMA
+    parameter ENABLE_STRIDE         = 1   // Enable source/destination stride (2D transfers)
 )(
     input  wire                         clk,
     input  wire                         rst_n,
@@ -41,6 +44,10 @@ module dma_engine #(
     input  wire [3:0]                   cfg_channel,
     input  wire                         cfg_start,
     input  wire                         cfg_enable_interrupt,
+    // FIX Bug 5: Scatter-gather descriptor pointer and stride config
+    input  wire [ADDR_WIDTH-1:0]        cfg_desc_ptr,       // Pointer to first descriptor (0 = simple linear mode)
+    input  wire [BURST_SIZE_BITS-1:0]   cfg_src_stride,     // Source stride (bytes, 0 = linear)
+    input  wire [BURST_SIZE_BITS-1:0]   cfg_dst_stride,     // Destination stride (bytes, 0 = linear)
     
     // Memory interface
     output reg [ADDR_WIDTH-1:0]         mem_rd_addr,
@@ -78,8 +85,14 @@ module dma_engine #(
         logic [ADDR_WIDTH-1:0]          dst_addr;
         logic [BURST_SIZE_BITS-1:0]     remaining_size;
         logic [BURST_SIZE_BITS-1:0]     total_size;
-        logic [1:0]                     state;  // 0=IDLE, 1=READ, 2=WRITE, 3=DONE
+        logic [2:0]                     state;  // 0=IDLE, 1=READ, 2=WRITE, 3=DONE, 4=FETCH_DESC
         logic                           enable_interrupt;
+        // FIX Bug 5: Scatter-gather fields
+        logic [ADDR_WIDTH-1:0]          desc_ptr;           // Current descriptor pointer
+        logic [BURST_SIZE_BITS-1:0]     src_stride;         // Source stride
+        logic [BURST_SIZE_BITS-1:0]     dst_stride;         // Destination stride
+        logic [BURST_SIZE_BITS-1:0]     burst_count;        // Words transferred in current descriptor
+        logic [BURST_SIZE_BITS-1:0]     burst_limit;        // Words per descriptor before applying stride
     } dma_channel_t;
 
     dma_channel_t [0:NUM_CHANNELS-1] channels;
@@ -93,11 +106,12 @@ module dma_engine #(
     // MEDIUM FIX #5: Timeout counters per channel
     reg [15:0] channel_timeout_counter [0:NUM_CHANNELS-1];
     
-    // State enum
-    localparam ST_IDLE    = 2'b00;
-    localparam ST_READ    = 2'b01;
-    localparam ST_WRITE   = 2'b10;
-    localparam ST_DONE    = 2'b11;
+    // State enum (FIX Bug 5: Added ST_FETCH_DESC for scatter-gather)
+    localparam ST_IDLE      = 3'b000;
+    localparam ST_READ      = 3'b001;
+    localparam ST_WRITE     = 3'b010;
+    localparam ST_DONE      = 3'b011;
+    localparam ST_FETCH_DESC = 3'b100;
     
     // =========================================================================
     // Channel arbitration (round-robin)
@@ -143,15 +157,22 @@ module dma_engine #(
     // =========================================================================
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            // Reset all channels - use generate for Phase 1
-            channels[0].active <= 1'b0;
-            channels[0].state <= ST_IDLE;
-            channels[0].remaining_size <= {BURST_SIZE_BITS{1'b0}};
-            channels[0].total_size <= {BURST_SIZE_BITS{1'b0}};
-            channel_busy[0] <= 1'b0;
-            channel_complete[0] <= 1'b0;
-            channel_error[0] <= 1'b0;
-            channel_timeout_counter[0] <= 16'h0;
+            // Reset all channels
+            for (int ch_init = 0; ch_init < NUM_CHANNELS; ch_init++) begin
+                channels[ch_init].active <= 1'b0;
+                channels[ch_init].state <= ST_IDLE;
+                channels[ch_init].remaining_size <= {BURST_SIZE_BITS{1'b0}};
+                channels[ch_init].total_size <= {BURST_SIZE_BITS{1'b0}};
+                channels[ch_init].desc_ptr <= {ADDR_WIDTH{1'b0}};
+                channels[ch_init].src_stride <= {BURST_SIZE_BITS{1'b0}};
+                channels[ch_init].dst_stride <= {BURST_SIZE_BITS{1'b0}};
+                channels[ch_init].burst_count <= {BURST_SIZE_BITS{1'b0}};
+                channels[ch_init].burst_limit <= {BURST_SIZE_BITS{1'b0}};
+                channel_busy[ch_init] <= 1'b0;
+                channel_complete[ch_init] <= 1'b0;
+                channel_error[ch_init] <= 1'b0;
+                channel_timeout_counter[ch_init] <= 16'h0;
+            end
             
             current_channel <= 4'b0;
             interrupt_req <= 1'b0;
@@ -177,8 +198,20 @@ module dma_engine #(
                     channels[cfg_channel].remaining_size <= cfg_transfer_size;
                     channels[cfg_channel].total_size <= cfg_transfer_size;
                     channels[cfg_channel].active <= 1'b1;
-                    channels[cfg_channel].state <= ST_READ;
+                    // FIX Bug 5: Scatter-gather mode or linear mode
+                    if (ENABLE_SCATTER_GATHER && cfg_desc_ptr != {ADDR_WIDTH{1'b0}}) begin
+                        channels[cfg_channel].state <= ST_FETCH_DESC;
+                        channels[cfg_channel].desc_ptr <= cfg_desc_ptr;
+                    end else begin
+                        channels[cfg_channel].state <= ST_READ;
+                        channels[cfg_channel].desc_ptr <= {ADDR_WIDTH{1'b0}};
+                    end
                     channels[cfg_channel].enable_interrupt <= cfg_enable_interrupt;
+                    channels[cfg_channel].src_stride <= ENABLE_STRIDE ? cfg_src_stride : {BURST_SIZE_BITS{1'b0}};
+                    channels[cfg_channel].dst_stride <= ENABLE_STRIDE ? cfg_dst_stride : {BURST_SIZE_BITS{1'b0}};
+                    channels[cfg_channel].burst_count <= {BURST_SIZE_BITS{1'b0}};
+                    channels[cfg_channel].burst_limit <= (cfg_src_stride != {BURST_SIZE_BITS{1'b0}} || cfg_dst_stride != {BURST_SIZE_BITS{1'b0}}) ?
+                        cfg_transfer_size : {BURST_SIZE_BITS{1'b0}};
 
                     channel_busy[cfg_channel] <= 1'b1;
                     channel_complete[cfg_channel] <= 1'b0;
@@ -199,6 +232,46 @@ module dma_engine #(
                 begin
                     current_channel <= ch;
                     case (channels[ch].state)
+                        // FIX Bug 5: Descriptor fetch for scatter-gather
+                        ST_FETCH_DESC: begin
+                            if (channel_timeout_counter[ch] >= 16'd256) begin
+                                $display("[%0t] [DMA-CH%0d] ST_FETCH_DESC TIMEOUT", $time, ch);
+                                channel_error[ch] <= 1'b1;
+                                channels[ch].active <= 1'b0;
+                                channels[ch].state <= ST_IDLE;
+                                channel_busy[ch] <= 1'b0;
+                                channel_timeout_counter[ch] <= 16'h0;
+                                mem_rd_en <= 1'b0;
+                                dma_errors <= dma_errors + 1;
+                            end else if (!mem_rd_en) begin
+                                mem_rd_addr <= channels[ch].desc_ptr;
+                                mem_rd_en <= 1'b1;
+                                channel_timeout_counter[ch] <= channel_timeout_counter[ch] + 1;
+                            end else if (mem_rd_ready) begin
+                                mem_rd_en <= 1'b0;
+                                channel_timeout_counter[ch] <= 16'h0;
+                                // Parse descriptor from single 512-bit read
+                                // Layout: [src_addr(48), dst_addr(48), size(14), next_ptr(48), src_stride(14), dst_stride(14)]
+                                channels[ch].src_addr <= mem_rd_data[0*ADDR_WIDTH +: ADDR_WIDTH];
+                                channels[ch].dst_addr <= mem_rd_data[1*ADDR_WIDTH +: ADDR_WIDTH];
+                                channels[ch].remaining_size <= mem_rd_data[2*ADDR_WIDTH +: BURST_SIZE_BITS];
+                                channels[ch].total_size <= mem_rd_data[2*ADDR_WIDTH +: BURST_SIZE_BITS];
+                                if (ENABLE_SCATTER_GATHER) begin
+                                    channels[ch].desc_ptr <= mem_rd_data[2*ADDR_WIDTH + BURST_SIZE_BITS +: ADDR_WIDTH];
+                                end
+                                if (ENABLE_STRIDE) begin
+                                    channels[ch].src_stride <= mem_rd_data[2*ADDR_WIDTH + BURST_SIZE_BITS + ADDR_WIDTH +: BURST_SIZE_BITS];
+                                    channels[ch].dst_stride <= mem_rd_data[2*ADDR_WIDTH + BURST_SIZE_BITS + ADDR_WIDTH + BURST_SIZE_BITS +: BURST_SIZE_BITS];
+                                end
+                                channels[ch].burst_count <= {BURST_SIZE_BITS{1'b0}};
+                                channels[ch].burst_limit <= mem_rd_data[2*ADDR_WIDTH + BURST_SIZE_BITS + ADDR_WIDTH +: BURST_SIZE_BITS];
+                                channels[ch].state <= ST_READ;
+                                $display("[%0t] [DMA-CH%0d] Fetched descriptor: src=0x%h dst=0x%h size=%0d", $time, ch, mem_rd_data[0*ADDR_WIDTH +: ADDR_WIDTH], mem_rd_data[1*ADDR_WIDTH +: ADDR_WIDTH], mem_rd_data[2*ADDR_WIDTH +: BURST_SIZE_BITS]);
+                            end else begin
+                                channel_timeout_counter[ch] <= channel_timeout_counter[ch] + 1;
+                            end
+                        end
+
                         ST_READ: begin
                                 // MEDIUM FIX #5: Add 256-cycle timeout to prevent permanent stall
                                 if (channel_timeout_counter[ch] >= 16'd256) begin
@@ -243,9 +316,24 @@ module dma_engine #(
                                 end else if (mem_wr_ready) begin
                                     mem_wr_en <= 1'b0;
 
-                                    // Update addresses and remaining size
-                                    channels[ch].src_addr <= channels[ch].src_addr + (DATA_WIDTH/8);
-                                    channels[ch].dst_addr <= channels[ch].dst_addr + (DATA_WIDTH/8);
+                                    // FIX Bug 5: Stride-aware address update
+                                    if (ENABLE_STRIDE && channels[ch].src_stride != {BURST_SIZE_BITS{1'b0}}) begin
+                                        channels[ch].burst_count <= channels[ch].burst_count + 1;
+                                        if (channels[ch].burst_count >= channels[ch].burst_limit) begin
+                                            // Apply stride after burst completes
+                                            channels[ch].src_addr <= channels[ch].src_addr + channels[ch].src_stride;
+                                            channels[ch].dst_addr <= channels[ch].dst_addr + channels[ch].dst_stride;
+                                            channels[ch].burst_count <= {BURST_SIZE_BITS{1'b0}};
+                                        end else begin
+                                            // Normal linear increment within burst
+                                            channels[ch].src_addr <= channels[ch].src_addr + (DATA_WIDTH/8);
+                                            channels[ch].dst_addr <= channels[ch].dst_addr + (DATA_WIDTH/8);
+                                        end
+                                    end else begin
+                                        // Linear mode (original behavior)
+                                        channels[ch].src_addr <= channels[ch].src_addr + (DATA_WIDTH/8);
+                                        channels[ch].dst_addr <= channels[ch].dst_addr + (DATA_WIDTH/8);
+                                    end
                                     if (channels[ch].remaining_size >= (DATA_WIDTH/8)) begin
                                         channels[ch].remaining_size <= channels[ch].remaining_size - (DATA_WIDTH/8);
                                     end else begin
@@ -255,7 +343,12 @@ module dma_engine #(
 
                                     // Check if transfer complete
                                     if (channels[ch].remaining_size <= (DATA_WIDTH/8)) begin
-                                        channels[ch].state <= ST_DONE;
+                                        // FIX Bug 5: Check for linked-list next descriptor
+                                        if (ENABLE_SCATTER_GATHER && channels[ch].desc_ptr != {ADDR_WIDTH{1'b0}}) begin
+                                            channels[ch].state <= ST_FETCH_DESC;
+                                        end else begin
+                                            channels[ch].state <= ST_DONE;
+                                        end
                                     end else begin
                                         channels[ch].state <= ST_READ;
                                     end
@@ -274,13 +367,11 @@ module dma_engine #(
 
                                 // FIXED: Check for overflow error before marking complete
                                 if (channels[ch].remaining_size > channels[ch].total_size) begin
-                                    // Error: remaining size exceeded (overflow)
                                     channel_error[ch] <= 1'b1;
-                                    dma_errors <= dma_errors + 1;  // Combined error counter
+                                    dma_errors <= dma_errors + 1;
                                 end
 
                                 // Generate interrupt if enabled
-                                // FIX: Hold interrupt pending until consumer acknowledges
                                 if (channels[ch].enable_interrupt) begin
                                     interrupt_pending <= 1'b1;
                                     interrupt_channel <= ch;

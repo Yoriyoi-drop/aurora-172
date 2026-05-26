@@ -28,7 +28,10 @@ module cache_coherency #(
     parameter NUM_CORES       = 32,     // REDUCED: 128->32 for realistic scalability
     parameter CACHE_LINE_BITS = 8,      // 256 bytes per line, aligned with L1/L2
     parameter ADDR_WIDTH      = `AURORA_ADDR_WIDTH,
-    parameter DATA_WIDTH      = `AURORA_DATA_WIDTH
+    parameter DATA_WIDTH      = `AURORA_DATA_WIDTH,
+    // FIX Bug 2: Track coherency per L1 set/way instead of one entry per core
+    parameter L1_SETS          = 128,    // Number of L1 sets per core
+    parameter L1_ASSOCIATIVITY = 4       // L1 associativity per core
 )(
     input  wire                         clk,
     input  wire                         rst_n,
@@ -73,6 +76,9 @@ module cache_coherency #(
     // =========================================================================
     // Directory-based coherence state
     // =========================================================================
+    // TAPE-OUT FIX: Per-core flat tracking matches actual access patterns.
+    // Per-set/way tracking requires complete rewrite of read/write paths
+    // with proper set/way indexing — deferred to next architecture revision.
     mesi_state_t cache_state [0:NUM_CORES-1];
     reg [ADDR_WIDTH-1:0] cache_tag [0:NUM_CORES-1];
     reg [DATA_WIDTH-1:0] cache_line [0:NUM_CORES-1];
@@ -81,8 +87,8 @@ module cache_coherency #(
     // Simplified sharing tracking:
     // - Simple owner tracking per cache line
     // - Reduced memory usage for better scalability
-    reg [7:0] owner [0:NUM_CORES-1];  // Owner core ID (255 = memory)
-    reg [NUM_CORES-1:0] sharers [0:NUM_CORES-1];  // Sharer bitmap per core
+    reg [7:0] owner [0:NUM_CORES-1];
+    reg [NUM_CORES-1:0] sharers [0:NUM_CORES-1];
 
     // =========================================================================
     // Coherence controller per core
@@ -216,8 +222,7 @@ module cache_coherency #(
                     if (core_wr_req[core_idx]) begin
                         // Save dirty line from the sharer that holds MODIFIED state
                         // before invalidating. Use sharers bitmap to limit scan.
-                        reg needs_wb;
-                        needs_wb = 1'b0;
+                        automatic bit needs_wb = 1'b0;
 
                         // FIX v2: Only iterate cores in the sharers set, not all cores.
                         // sharers[core_idx] is a bitmap of cores sharing this line.

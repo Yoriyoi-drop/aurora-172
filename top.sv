@@ -282,18 +282,34 @@ module aurora_172_top #(
     wire                                rt_complete;
     wire [DATA_WIDTH-1:0]               rt_result;
     
-    // Internal signals - Interconnect (shared bus: multiple modules drive as outputs,
-    // only one active at a time; all inactive modules drive 0, so wired-OR resolves correctly)
-    /* verilator lint_off MULTIDRIVEN */
-    wire [CACHE_LINE_WIDTH-1:0]         fabric_addr;
-    wire                                fabric_rd_en;
-    wire                                fabric_wr_en;
-    wire [CACHE_LINE_WIDTH-1:0]         fabric_wr_data;
-    /* verilator lint_on MULTIDRIVEN */
-    wire [CACHE_LINE_WIDTH-1:0]         fabric_rd_data;
-    wire                                fabric_ready;
-    // Separate fabric signals for A-Core to avoid multiple drivers
-    wire [CACHE_LINE_WIDTH-1:0]         a_core_fabric_addr;
+    // Per-module fabric request signals for arbiter
+    wire [ADDR_WIDTH-1:0]               fabric_addr_a  [0:NUM_A_CORES-1];
+    wire                                fabric_rd_en_a [0:NUM_A_CORES-1];
+    wire                                fabric_wr_en_a [0:NUM_A_CORES-1];
+    wire [CACHE_LINE_WIDTH-1:0]         fabric_wr_data_a [0:NUM_A_CORES-1];
+
+    wire [ADDR_WIDTH-1:0]               fabric_addr_h  [0:NUM_H_CORES-1];
+    wire                                fabric_rd_en_h [0:NUM_H_CORES-1];
+    wire                                fabric_wr_en_h [0:NUM_H_CORES-1];
+    wire [CACHE_LINE_WIDTH-1:0]         fabric_wr_data_h [0:NUM_H_CORES-1];
+
+    wire [ADDR_WIDTH-1:0]               fabric_addr_n  [0:NUM_NPU_CLUSTERS-1];
+    wire                                fabric_rd_en_n [0:NUM_NPU_CLUSTERS-1];
+    wire                                fabric_wr_en_n [0:NUM_NPU_CLUSTERS-1];
+    wire [CACHE_LINE_WIDTH-1:0]         fabric_wr_data_n [0:NUM_NPU_CLUSTERS-1];
+
+    wire [ADDR_WIDTH-1:0]               fabric_addr_r  [0:NUM_RT_ENGINES-1];
+    wire                                fabric_rd_en_r [0:NUM_RT_ENGINES-1];
+    wire                                fabric_wr_en_r [0:NUM_RT_ENGINES-1];
+    wire [CACHE_LINE_WIDTH-1:0]         fabric_wr_data_r [0:NUM_RT_ENGINES-1];
+
+    // Resolved fabric bus (single driver from arbiter)
+    logic [ADDR_WIDTH-1:0]               fabric_addr;
+    logic                                fabric_rd_en;
+    logic                                fabric_wr_en;
+    logic [CACHE_LINE_WIDTH-1:0]         fabric_wr_data;
+    wire [CACHE_LINE_WIDTH-1:0]          fabric_rd_data;
+    wire                                 fabric_ready;
 
     // ─────────────────────────────────────────────────────────────
     // Cache Hierarchy signals (L1 → L2 → Memory Fabric) - 512-BIT BUS
@@ -328,12 +344,13 @@ module aurora_172_top #(
     wire [NUM_L2_BANKS*CACHE_LINE_WIDTH-1:0] a_l2_bank_rd_data;
     wire [NUM_L2_BANKS-1:0]                  a_l2_bank_ready;
 
-    // L2 → Memory Fabric interface (shared bus: all L2 banks drive addr/wr_data,
-    // only the bank matching the address is active; inactive banks drive 0)
-    /* verilator lint_off MULTIDRIVEN */
+    // Per-bank memory fabric request signals (resolves MULTIDRIVEN via mux)
+    wire [ADDR_WIDTH-1:0]               l2_bank_mem_addr [0:NUM_L2_BANKS-1];
+    wire [CACHE_LINE_WIDTH-1:0]         l2_bank_mem_wr_data [0:NUM_L2_BANKS-1];
+
+    // L2 → Memory Fabric interface (muxed from per-bank signals)
     wire [ADDR_WIDTH-1:0]               l2_mem_addr;
     wire [CACHE_LINE_WIDTH-1:0]         l2_mem_wr_data;    // 512-bit
-    /* verilator lint_on MULTIDRIVEN */
     wire                                l2_mem_rd_en;
     wire                                l2_mem_wr_en;
     wire [CACHE_LINE_WIDTH-1:0]         l2_mem_rd_data;    // 512-bit
@@ -347,19 +364,21 @@ module aurora_172_top #(
     wire clk_internal;
     wire rst_n_internal;
     
-    // CRITICAL FIX: Reset synchronization to prevent metastability
-    reg [2:0] rst_sync_ff;
+    // CRITICAL FIX: Reset synchronization to prevent metastability (2-flop synchronizer)
+    reg rst_sync_1, rst_sync_2;
     wire rst_n_sync;
     
-    // Reset synchronizer - 3-stage synchronizer
+    // 2-flop reset synchronizer: deasserts synchronously, asserts asynchronously
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            rst_sync_ff <= 3'b000;
+            rst_sync_1 <= 1'b0;
+            rst_sync_2 <= 1'b0;
         end else begin
-            rst_sync_ff <= {rst_sync_ff[1:0], 1'b1};
+            rst_sync_1 <= 1'b1;
+            rst_sync_2 <= rst_sync_1;
         end
     end
-    assign rst_n_sync = rst_sync_ff[2];
+    assign rst_n_sync = rst_sync_2;
     
     // ========================================================================
     // CLOCK DOMAIN CROSSING (CDC) SYNCHRONIZERS
@@ -395,22 +414,39 @@ module aurora_172_top #(
     assign l2_hit = l2_mem_ready;  // L2 ready indicates L2 hit
     assign l3_hit = 1'b0;          // No L3 cache in this design
     
-    // Simple MESI state tracking (simplified)
+    // MESI state machine: Invalid(00)→Exclusive(10) on read miss, Exclusive→Modified(11) on write hit
+    localparam MESI_INVALID    = 2'b00;
+    localparam MESI_SHARED     = 2'b01;
+    localparam MESI_EXCLUSIVE  = 2'b10;
+    localparam MESI_MODIFIED   = 2'b11;
     reg [1:0]                       mesi_state_reg;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            mesi_state_reg <= 2'b00;  // Invalid state
+            mesi_state_reg <= MESI_INVALID;
         end else begin
-            // Simple state machine: Modified → Exclusive → Shared → Invalid
-            if (l2_mem_wr_en) begin
-                mesi_state_reg <= 2'b11;  // Modified
-            end else if (l2_mem_rd_en && l2_mem_ready) begin
-                mesi_state_reg <= 2'b01;  // Shared
-            end else if (!l2_mem_rd_en && !l2_mem_wr_en) begin
-                mesi_state_reg <= 2'b00;  // Invalid
-            end else begin
-                mesi_state_reg <= 2'b10;  // Exclusive
-            end
+            unique case (mesi_state_reg)
+                MESI_INVALID: begin
+                    if (l2_mem_rd_en && l2_mem_ready)
+                        mesi_state_reg <= MESI_EXCLUSIVE;  // Read miss → Exclusive
+                    else if (l2_mem_wr_en && l2_mem_ready)
+                        mesi_state_reg <= MESI_MODIFIED;   // Write miss → Modified
+                end
+                MESI_EXCLUSIVE: begin
+                    if (l2_mem_wr_en && l2_mem_ready)
+                        mesi_state_reg <= MESI_MODIFIED;   // Write hit → Modified
+                    else if (l2_mem_rd_en && !l2_mem_ready)
+                        mesi_state_reg <= MESI_SHARED;     // Snoop read → Shared
+                end
+                MESI_SHARED: begin
+                    if (l2_mem_wr_en && l2_mem_ready)
+                        mesi_state_reg <= MESI_MODIFIED;   // Write hit → Modified
+                end
+                MESI_MODIFIED: begin
+                    if (l2_mem_rd_en && l2_mem_ready && !l2_mem_wr_en)
+                        mesi_state_reg <= MESI_SHARED;     // Snoop read → Shared
+                end
+                default: mesi_state_reg <= MESI_INVALID;
+            endcase
         end
     end
     assign mesi_state = mesi_state_reg;
@@ -453,7 +489,7 @@ module aurora_172_top #(
         .CACHE_LINE_WIDTH(CACHE_LINE_WIDTH)
     ) u_memory_assertions (
         .clk(clk),
-        .rst_n(rst_n),
+        .rst_n(rst_n_sync),
         
         // Memory interface signals
         .mem_addr(l2_mem_addr),
@@ -599,7 +635,7 @@ module aurora_172_top #(
         .INST_WIDTH(INST_WIDTH)
     ) u_g_core_0 (
         .clk(clk),
-        .rst_n(rst_n),
+        .rst_n(rst_n_sync),
         // COMPLETE FIX: Only receives command if selected AND on first dispatch cycle
         .cmd_addr(sched_g_core_cmd_addr),
         .cmd_data(sched_g_core_cmd_data),
@@ -634,7 +670,7 @@ module aurora_172_top #(
         .INST_WIDTH(INST_WIDTH)
     ) u_g_core_1 (
         .clk(clk),
-        .rst_n(rst_n),
+        .rst_n(rst_n_sync),
         .cmd_addr(g1_cmd_addr),
         .cmd_data(g1_cmd_data),
         .cmd_valid(g1_cmd_valid),
@@ -883,9 +919,9 @@ module aurora_172_top #(
                                               g0_result;
 
     // FIXED: Scheduler sees "busy" if ANY core is busy
-    // CRITICAL FIX: Only use assigned indices (0 and 1), not undefined array bounds
-    wire combined_g_busy = g0_busy || g1_busy;
-    wire combined_g_complete = g0_complete || g1_complete;
+    // Now includes ALL G-Cores (0..NUM_G_CORES-1)
+    wire combined_g_busy = |g_core_busy_internal;
+    wire combined_g_complete = |g_core_complete;
     
     // =========================================================================
     // H-CORE Array (32 cores untuk General Purpose) — MULTI-INSTANCE BY DESIGN
@@ -925,7 +961,7 @@ module aurora_172_top #(
             integer h_core_sel_idx;
             h_core_found = 0;
             h_core_sel_idx = 0;
-            for (i = 0; i < NUM_H_CORES && !h_core_found; i = i + 1) begin
+            for (int i = 0; i < NUM_H_CORES && !h_core_found; i = i + 1) begin
                 h_core_sel_idx = (h_core_rr_index + i) % NUM_H_CORES;
                 if (!h_core_busy[h_core_sel_idx]) begin
                     h_core_last_selected <= h_core_sel_idx[4:0];
@@ -976,10 +1012,10 @@ module aurora_172_top #(
         end
     end
     
-    // CRITICAL FIX #6: H-Core opcode validation
+    // CRITICAL FIX #6: H-Core opcode validation (UNIFIED: opcode at [31:24])
     // H-Core only accepts opcodes 0x00-0x0A (NOP, ADD, SUB, MUL, DIV, AND, OR, XOR, LOAD, STORE, BRANCH)
     // Prevents invalid opcode 0xFF from being dispatched to H-Core
-    wire [7:0] h_cmd_opcode = game_cmd_data[7:0];
+    wire [7:0] h_cmd_opcode = game_cmd_data[31:24];
     wire h_valid_opcode = (h_cmd_opcode <= 8'h0A);
     
     // If invalid opcode detected, prevent dispatch
@@ -1004,7 +1040,7 @@ module aurora_172_top #(
                 .ADDR_WIDTH(ADDR_WIDTH)
             ) u_h_core (
                 .clk(clk),
-                .rst_n(rst_n),
+                .rst_n(rst_n_sync),
                 // Command interface from broadcast bus
                 .cmd_addr(h_core_broadcast_addr),
                 .cmd_data(h_core_broadcast_data),
@@ -1020,12 +1056,12 @@ module aurora_172_top #(
                 .error_flag(h_core_error_flag[h_idx]),
                 .error_code(h_core_error_code[h_idx*8+:8]),
                 .error_valid(h_core_error_valid[h_idx]),
-                // Memory fabric interface
-                .fabric_addr(fabric_addr[47:0]),  // Use only 48 bits from 512-bit fabric_addr
-                .fabric_rd_en(fabric_rd_en),
-                .fabric_wr_en(fabric_wr_en),
+                // Memory fabric interface (per-instance array for arbiter)
+                .fabric_addr(fabric_addr_h[h_idx]),
+                .fabric_rd_en(fabric_rd_en_h[h_idx]),
+                .fabric_wr_en(fabric_wr_en_h[h_idx]),
                 .fabric_rd_data(fabric_rd_data),
-                .fabric_wr_data(fabric_wr_data),
+                .fabric_wr_data(fabric_wr_data_h[h_idx]),
                 .fabric_ready(fabric_ready)
             );
         end
@@ -1137,7 +1173,10 @@ module aurora_172_top #(
     assign a_core_result_ready_int = ai_result_ready;
     
     // DEBUG: Monitor result consumption
-    always @(posedge clk) begin
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            // no state - debug only
+        end else begin
         // if (a0_result_valid && !a0_result_consumed) begin
         //     $display("[%0t] [A-RSLT] RESULT_READY: data=0x%h, waiting_for_consumer", $time, a0_result);
         // end
@@ -1152,20 +1191,21 @@ module aurora_172_top #(
         // if (u_ring_bus_a.node_resp_valid[0]) begin
         //     $display("[%0t] [RING-BUS] RESPONSE_GENERATED: Node 0, valid=1, ready=%b", $time, u_ring_bus_a.node_resp_ready[0]);
         // end
+        end
     end
 
     // DEBUG: Monitor A-Core result path (CRITICAL for backlog fix)
-    always @(posedge clk) begin
-        // if (a0_result_valid) begin
-        //     $display("[%0t] [A-RSLT] 📤 RESULT_VALID: data=0x%h, ready=%b, consumer_ready=%b", 
-        //              $time, a0_result, a0_result_ready, a_core_result_ready_int);
-        // end
-        if (a0_complete && !a0_complete_prev) begin
-            $display("[%0t] [A-RSLT] ✅ COMPLETE_EDGE: result_ready=%b, fifo_drain=%b", 
-                     $time, a0_result_ready, a_core_result_ready_int);
-        end
-        if (a0_busy && a0_result_valid && !a0_result_ready) begin
-            $display("[%0t] [A-RSLT] ⚠️ STALL: result_valid=1 but ready=0 (FIFO will fill!)", $time);
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            // no state - debug only
+        end else begin
+            if (a0_complete && !a0_complete_prev) begin
+                $display("[%0t] [A-RSLT] COMPLETE_EDGE: result_ready=%b, fifo_drain=%b", 
+                         $time, a0_result_ready, a_core_result_ready_int);
+            end
+            if (a0_busy && a0_result_valid && !a0_result_ready) begin
+                $display("[%0t] [A-RSLT] STALL: result_valid=1 but ready=0 (FIFO will fill!)", $time);
+            end
         end
     end
 
@@ -1176,7 +1216,7 @@ module aurora_172_top #(
         .RESULT_FIFO_DEPTH(4)  // Phase 3: Result FIFO
     ) u_a_core_0 (
         .clk(clk),
-        .rst_n(rst_n),
+        .rst_n(rst_n_sync),
         .cmd_addr(a_core_cmd_addr_mux),
         .cmd_data(a_core_cmd_data_mux),
         .cmd_valid(a_core_cmd_valid_mux),
@@ -1263,6 +1303,22 @@ module aurora_172_top #(
         end
     end
     
+    // A-Core FIFO full tracking for back-pressure
+    reg [NUM_A_CORES-1:0] a_core_fifo_full;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            a_core_fifo_full <= {NUM_A_CORES{1'b0}};
+        end else begin
+            for (int ff = 0; ff < NUM_A_CORES; ff = ff + 1) begin
+                if (a_core_result_valid[ff] && a_core_fifo_full[ff]) begin
+                    a_core_fifo_full[ff] <= 1'b0;
+                end else if (a_core_result_valid[ff]) begin
+                    a_core_fifo_full[ff] <= 1'b1;
+                end
+            end
+        end
+    end
+
     // Generate per-core command signals using decoder logic
     reg [NUM_A_CORES-1:0] a_core_per_core_valid;
     
@@ -1289,7 +1345,7 @@ module aurora_172_top #(
                     .ADDR_WIDTH(ADDR_WIDTH)
                 ) u_a_core (
                     .clk(clk),
-                    .rst_n(rst_n),
+                    .rst_n(rst_n_sync),
                     // Single-target command dispatch
                     .cmd_addr(a_core_selected_addr),
                     .cmd_data(a_core_selected_data),
@@ -1298,7 +1354,7 @@ module aurora_172_top #(
                     .result(a_core_result[DATA_WIDTH*(a_idx+1)-1:DATA_WIDTH*a_idx]),
                     .result_valid(a_core_result_valid[a_idx]),
                     .busy(a_core_busy_internal[a_idx]),
-                    .result_ready(1'b1),
+                    .result_ready(!a_core_fifo_full[a_idx]),
                     .complete(a_core_complete[a_idx]),
                     // L2 interface (properly tied off to internal signals)
                     // FIXED: Use part-select for packed arrays (a_core_l2_addr is packed [NUM_A_CORES*48-1:0])
@@ -1311,12 +1367,12 @@ module aurora_172_top #(
                     // FIFO metrics
                     .fifo_occupancy(),
                     .fifo_full_warn(),
-                    // Memory fabric interface (separate to avoid multiple drivers)
-                    .fabric_addr(a_core_fabric_addr),
-                    .fabric_rd_en(fabric_rd_en),
-                    .fabric_wr_en(fabric_wr_en),
+                    // Memory fabric interface (per-instance array for arbiter)
+                    .fabric_addr(fabric_addr_a[a_idx]),
+                    .fabric_rd_en(fabric_rd_en_a[a_idx]),
+                    .fabric_wr_en(fabric_wr_en_a[a_idx]),
                     .fabric_rd_data(fabric_rd_data),
-                    .fabric_wr_data(fabric_wr_data),
+                    .fabric_wr_data(fabric_wr_data_a[a_idx]),
                     .fabric_ready(fabric_ready)
                 );
             end
@@ -1348,18 +1404,18 @@ module aurora_172_top #(
                 .DATA_WIDTH(DATA_WIDTH)
             ) u_npu (
                 .clk(clk),
-                .rst_n(rst_n),
+                .rst_n(rst_n_sync),
                 // Command interface (NEW)
                 .cmd_addr(npu_broadcast_addr),
                 .cmd_data(npu_broadcast_data),
                 .cmd_valid(npu_broadcast_valid && !npu_busy[n_idx]),  // Only if not busy
                 .cmd_ready(npu_cmd_ready[n_idx]),
-                // Memory fabric interface
-                .fabric_addr(fabric_addr),
-                .fabric_rd_en(fabric_rd_en),
-                .fabric_wr_en(fabric_wr_en),
+                // Memory fabric interface (per-instance array for arbiter)
+                .fabric_addr(fabric_addr_n[n_idx]),
+                .fabric_rd_en(fabric_rd_en_n[n_idx]),
+                .fabric_wr_en(fabric_wr_en_n[n_idx]),
                 .fabric_rd_data(fabric_rd_data),
-                .fabric_wr_data(fabric_wr_data),
+                .fabric_wr_data(fabric_wr_data_n[n_idx]),
                 .fabric_ready(fabric_ready),
                 .busy(npu_busy[n_idx]),
                 .complete(npu_complete[n_idx]),
@@ -1372,9 +1428,15 @@ module aurora_172_top #(
         end
     endgenerate
     
+    // Combined NPU command ready: at least one NPU cluster is ready
+    wire npu_cmd_ready_combined = |npu_cmd_ready;
+
     // NPU broadcast rising edge detector
     reg ai_cmd_valid_d;
-    always @(posedge clk) ai_cmd_valid_d <= ai_cmd_valid;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) ai_cmd_valid_d <= 1'b0;
+        else ai_cmd_valid_d <= ai_cmd_valid;
+    end
     wire ai_cmd_valid_rise = ai_cmd_valid && !ai_cmd_valid_d;
 
     // NPU command routing from scheduler
@@ -1437,7 +1499,7 @@ module aurora_172_top #(
         .QUEUE_DEPTH(32)  // Same total depth as MQ (16G+16A = 32)
     ) u_scheduler_sq (
         .clk(clk),
-        .rst_n(rst_n),
+        .rst_n(rst_n_sync),
         .g_task_addr(game_cmd_addr),
         .g_task_data({32'b0, game_cmd_data}),
         .g_task_valid(game_cmd_valid),
@@ -1472,7 +1534,7 @@ module aurora_172_top #(
         .a_core_result(a0_result),
         .a_core_result_ready(sq_a_core_result_ready),  // NEW: Pull result from A-Core FIFO
         .npu_dispatch_valid(sq_npu_dispatch_valid),
-        .npu_dispatch_ready(1'b0),
+        .npu_dispatch_ready(npu_cmd_ready_combined),
         .npu_busy(|npu_busy),
         .npu_complete(|npu_complete),
         .npu_result(npu_result[DATA_WIDTH-1:0]),
@@ -1643,8 +1705,8 @@ module aurora_172_top #(
     // A-Core command ready feedback to schedulers
     assign mq_a_core_cmd_ready = sched_a_core_cmd_ready;
 
-    // Drive scheduler-ready signals from actual core ready outputs
-    assign sched_a_core_cmd_ready = a0_cmd_ready;
+    // Drive scheduler-ready signals from actual core ready outputs (ALL cores)
+    assign sched_a_core_cmd_ready = a0_cmd_ready || |(~a_core_busy_internal[63:1]);
 
     // =========================================================================
     // A/B Test Output Assignments
@@ -1749,7 +1811,7 @@ module aurora_172_top #(
             integer rt_sel_idx;
             rt_found = 0;
             rt_sel_idx = 0;
-            for (rt_i = 0; rt_i < NUM_RT_ENGINES && !rt_found; rt_i = rt_i + 1) begin
+            for (int rt_i = 0; rt_i < NUM_RT_ENGINES && !rt_found; rt_i = rt_i + 1) begin
                 rt_sel_idx = (rt_rr_index + rt_i) % NUM_RT_ENGINES;
                 if (!rt_engine_busy[rt_sel_idx]) begin
                     rt_last_selected <= rt_sel_idx[1:0];
@@ -1796,7 +1858,7 @@ module aurora_172_top #(
                 .ADDR_WIDTH(ADDR_WIDTH)
             ) u_rt_engine (
                 .clk(clk),
-                .rst_n(rst_n),
+                .rst_n(rst_n_sync),
                 // Command interface from broadcast bus
                 .cmd_addr(rt_broadcast_addr),
                 .cmd_data(rt_broadcast_data),
@@ -1811,12 +1873,12 @@ module aurora_172_top #(
                 .error_flag(rt_engine_error_flag[rt_idx]),
                 .error_code(),
                 .error_valid(rt_engine_error_valid[rt_idx]),
-                // Memory fabric interface
-                .fabric_addr(fabric_addr),
-                .fabric_rd_en(fabric_rd_en),
-                .fabric_wr_en(fabric_wr_en),
+                // Memory fabric interface (per-instance array for arbiter)
+                .fabric_addr(fabric_addr_r[rt_idx]),
+                .fabric_rd_en(fabric_rd_en_r[rt_idx]),
+                .fabric_wr_en(fabric_wr_en_r[rt_idx]),
                 .fabric_rd_data(fabric_rd_data),
-                .fabric_wr_data(fabric_wr_data),
+                .fabric_wr_data(fabric_wr_data_r[rt_idx]),
                 .fabric_ready(fabric_ready)
             );
         end
@@ -1831,6 +1893,126 @@ module aurora_172_top #(
     assign rt_complete = rt_result_valid_int;
     assign rt_result = rt_result_internal;
 
+    // =========================================================================
+    // Fabric Arbiter — resolves MULTIDRIVEN on fabric request bus
+    // All H-Cores, NPU clusters, RT engines, and A-Core workers drive per-instance
+    // fabric request signals. This arbiter selects one active requestor at a time
+    // and drives the shared fabric_addr/rd_en/wr_en/wr_data wires.
+    // Priority: A-Core > RT > NPU > H-Core (A-Core is primary compute).
+    // The fabric response (fabric_rd_data/fabric_ready) is driven by l2_mem_*
+    // via the memory_fabric (see ~line 2040).
+    // =========================================================================
+    integer fab_req_h, fab_req_n, fab_req_r, fab_req_a;
+    integer fab_sel_h, fab_sel_n, fab_sel_r, fab_sel_a;
+    always_comb begin
+        // Default: no request
+        fabric_addr   = {ADDR_WIDTH{1'b0}};
+        fabric_rd_en  = 1'b0;
+        fabric_wr_en  = 1'b0;
+        fabric_wr_data = {CACHE_LINE_WIDTH{1'b0}};
+
+        // TAPE-OUT FIX: Use first-match instead of last-match arbitration.
+        // Original code overwrites on every iteration (last-requestor-wins),
+        // causing priority inversion where worker N always beats worker 0.
+        // Fix: double-check fab_sel is still -1 before assigning.
+        
+        // Priority: A-Core workers > RT engines > NPU clusters > H-Cores
+        // Find first active A-Core worker (fab_sel_a stays -1 if none found)
+        fab_sel_a = -1;
+        for (fab_req_a = 0; fab_req_a < NUM_A_CORES; fab_req_a = fab_req_a + 1) begin
+            if ((fabric_rd_en_a[fab_req_a] || fabric_wr_en_a[fab_req_a]) && fab_sel_a == -1) begin
+                fab_sel_a = fab_req_a;
+            end
+        end
+        if (fab_sel_a != -1) begin
+            fabric_addr   = fabric_addr_a[fab_sel_a];
+            fabric_rd_en  = fabric_rd_en_a[fab_sel_a];
+            fabric_wr_en  = fabric_wr_en_a[fab_sel_a];
+            fabric_wr_data = fabric_wr_data_a[fab_sel_a];
+        end else begin
+            // Find first active RT engine
+            fab_sel_r = -1;
+            for (fab_req_r = 0; fab_req_r < NUM_RT_ENGINES; fab_req_r = fab_req_r + 1) begin
+                if ((fabric_rd_en_r[fab_req_r] || fabric_wr_en_r[fab_req_r]) && fab_sel_r == -1) begin
+                    fab_sel_r = fab_req_r;
+                end
+            end
+            if (fab_sel_r != -1) begin
+                fabric_addr   = fabric_addr_r[fab_sel_r];
+                fabric_rd_en  = fabric_rd_en_r[fab_sel_r];
+                fabric_wr_en  = fabric_wr_en_r[fab_sel_r];
+                fabric_wr_data = fabric_wr_data_r[fab_sel_r];
+            end else begin
+                // Find first active NPU cluster
+                fab_sel_n = -1;
+                for (fab_req_n = 0; fab_req_n < NUM_NPU_CLUSTERS; fab_req_n = fab_req_n + 1) begin
+                    if ((fabric_rd_en_n[fab_req_n] || fabric_wr_en_n[fab_req_n]) && fab_sel_n == -1) begin
+                        fab_sel_n = fab_req_n;
+                    end
+                end
+                if (fab_sel_n != -1) begin
+                    fabric_addr   = fabric_addr_n[fab_sel_n];
+                    fabric_rd_en  = fabric_rd_en_n[fab_sel_n];
+                    fabric_wr_en  = fabric_wr_en_n[fab_sel_n];
+                    fabric_wr_data = fabric_wr_data_n[fab_sel_n];
+                end else begin
+                    // Find first active H-Core
+                    fab_sel_h = -1;
+                    for (fab_req_h = 0; fab_req_h < NUM_H_CORES; fab_req_h = fab_req_h + 1) begin
+                        if ((fabric_rd_en_h[fab_req_h] || fabric_wr_en_h[fab_req_h]) && fab_sel_h == -1) begin
+                            fab_sel_h = fab_req_h;
+                        end
+                    end
+                    if (fab_sel_h != -1) begin
+                        fabric_addr   = fabric_addr_h[fab_sel_h];
+                        fabric_rd_en  = fabric_rd_en_h[fab_sel_h];
+                        fabric_wr_en  = fabric_wr_en_h[fab_sel_h];
+                        fabric_wr_data = fabric_wr_data_h[fab_sel_h];
+                    end
+                end
+            end
+        end
+    end
+
+    // =========================================================================
+    // A-Core Worker L2 Arbiter — routes 64 worker L1 requests to 1 L2 port
+    // =========================================================================
+    reg [$clog2(NUM_A_CORES)-1:0] a_worker_l2_sel;
+    reg a_worker_l2_valid;
+    reg [ADDR_WIDTH-1:0] a_worker_l2_addr_reg;
+    reg [CACHE_LINE_WIDTH-1:0] a_worker_l2_wr_data_reg;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            a_worker_l2_sel <= 0;
+            a_worker_l2_valid <= 1'b0;
+            a_worker_l2_addr_reg <= {ADDR_WIDTH{1'b0}};
+            a_worker_l2_wr_data_reg <= {CACHE_LINE_WIDTH{1'b0}};
+        end else begin
+            a_worker_l2_valid <= 1'b0;
+            if (!a_l1_l2_rd_en && !a_l1_l2_wr_en) begin
+                automatic bit a_worker_found = 1'b0;
+                for (int w = 0; w < NUM_A_CORES && !a_worker_found; w = w + 1) begin
+                    if (a_core_l2_rd_en[w] || a_core_l2_wr_en[w]) begin
+                        a_worker_l2_sel <= w;
+                        a_worker_l2_valid <= 1'b1;
+                        a_worker_l2_addr_reg <= a_core_l2_addr[w*48+:48];
+                        a_worker_l2_wr_data_reg <= a_core_l2_wr_data[w*512+:512];
+                        a_worker_found = 1'b1;
+                    end
+                end
+            end
+        end
+    end
+
+    // Mux A-Core L2 port: use worker request when core #0 is idle
+    wire [ADDR_WIDTH-1:0] a_l1_l2_addr_mux = a_worker_l2_valid ? a_worker_l2_addr_reg : a_l1_l2_addr;
+    wire [CACHE_LINE_WIDTH-1:0] a_l1_l2_wr_data_mux = a_worker_l2_valid ? a_worker_l2_wr_data_reg : a_l1_l2_wr_data;
+    wire a_l1_l2_rd_en_mux = a_worker_l2_valid ? 1'b1 : a_l1_l2_rd_en;
+    wire a_l1_l2_wr_en_mux = a_worker_l2_valid ? 1'b1 : a_l1_l2_wr_en;
+
+    // =========================================================================
+    // L2 Cache — MULTI-BANK: 4 banks (2MB each = 8MB total)
     // =========================================================================
     // L2 Cache — MULTI-BANK: 4 banks (2MB each = 8MB total)
     // Address interleating: bank_id = addr[7:6] (stripe per cache line; addr[5:0] are 0 for cache-line-aligned)
@@ -1851,7 +2033,7 @@ module aurora_172_top #(
     // Bank select: hash address bits [1:0] → bank 0-3
     // FIX: Use correct signal names
     wire [1:0] l2_bank_select_g = g_l1_l2_addr_mux[1:0];  // G-Core bank hash
-    wire [1:0] l2_bank_select_a = a_l1_l2_addr[1:0];  // A-Core bank hash (single wire)
+    wire [1:0] l2_bank_select_a = a_l1_l2_addr_mux[1:0];  // A-Core bank hash (muxed)
 
     // Aggregated L2 stats
     wire [31:0] l2_total_hits, l2_total_misses, l2_total_writebacks, l2_total_evictions;
@@ -1876,7 +2058,7 @@ module aurora_172_top #(
                 .NUM_L1_PORTS(2)
             ) u_l2_bank (
                 .clk(clk),
-                .rst_n(rst_n),
+                .rst_n(rst_n_sync),
 
                 // L1 port 0: G-Core (only active when bank matches)
                 .l1_0_addr(g_l1_l2_addr_mux),
@@ -1902,9 +2084,9 @@ module aurora_172_top #(
                 .l1_2_rd_data(),
                 .l1_2_ready(),
 
-                // External memory interface — OR all banks to fabric
-                .mem_addr(l2_mem_addr),
-                .mem_wr_data(l2_mem_wr_data),
+                // External memory interface (per-bank array for arbiter)
+                .mem_addr(l2_bank_mem_addr[l2_idx]),
+                .mem_wr_data(l2_bank_mem_wr_data[l2_idx]),
                 .mem_rd_en(l2_bank_rd_en[l2_idx]),
                 .mem_wr_en(l2_bank_wr_en[l2_idx]),
                 .mem_rd_data(l2_mem_rd_data),
@@ -1974,6 +2156,19 @@ module aurora_172_top #(
     assign l2_mem_rd_en = |l2_bank_rd_en;
     assign l2_mem_wr_en = |l2_bank_wr_en;
 
+    // Mux per-bank mem_addr/mem_wr_data — only the bank with active request drives the bus
+    integer l2_bank_i;
+    always_comb begin
+        l2_mem_addr    = {ADDR_WIDTH{1'b0}};
+        l2_mem_wr_data = {CACHE_LINE_WIDTH{1'b0}};
+        for (l2_bank_i = 0; l2_bank_i < NUM_L2_BANKS; l2_bank_i = l2_bank_i + 1) begin
+            if (l2_bank_rd_en[l2_bank_i] || l2_bank_wr_en[l2_bank_i]) begin
+                l2_mem_addr    = l2_bank_mem_addr[l2_bank_i];
+                l2_mem_wr_data = l2_bank_mem_wr_data[l2_bank_i];
+            end
+        end
+    end
+
     // Aggregated L2 stats (sum all banks)
     assign l2_total_hits = l2_bank_hits[31:0] + l2_bank_hits[63:32] +
                            l2_bank_hits[95:64] + l2_bank_hits[127:96];
@@ -1993,7 +2188,7 @@ module aurora_172_top #(
         .CACHE_LINE_WIDTH(CACHE_LINE_WIDTH)
     ) u_memory_fabric (
         .clk(clk),
-        .rst_n(rst_n),
+        .rst_n(rst_n_sync),
         .fabric_addr(l2_mem_addr),
         .fabric_rd_en(l2_mem_rd_en),
         .fabric_wr_en(l2_mem_wr_en),
@@ -2110,7 +2305,7 @@ module aurora_172_top #(
         .NPU_BASE_W(20)
     ) u_smartshift (
         .clk(clk),
-        .rst_n(rst_n),
+        .rst_n(rst_n_sync),
         .g_core_demand_mw(g_core_demand_mw),
         .a_core_demand_mw(a_core_demand_mw),
         .h_core_demand_mw(h_core_demand_mw),
@@ -2171,7 +2366,7 @@ module aurora_172_top #(
         .A_TURBO_CLOCK_MHZ(4500)
     ) u_turbo_boost (
         .clk(clk),
-        .rst_n(rst_n),
+        .rst_n(rst_n_sync),
         .gaming_mode(gaming_mode_active),
         .ai_mode(ai_mode_active),
         .mixed_mode(mixed_mode_active),
@@ -2230,7 +2425,7 @@ module aurora_172_top #(
         .POWER_AVG_WINDOW(1000)
     ) u_power_monitor (
         .clk(clk),
-        .rst_n(rst_n),
+        .rst_n(rst_n_sync),
 
         // Instantaneous power input
         .g_core_power_mw(g_core_demand_mw),
@@ -2326,7 +2521,7 @@ module aurora_172_top #(
                 .NUM_SETS(64)
             ) u_uop_cache (
                 .clk(clk),
-                .rst_n(rst_n),
+                .rst_n(rst_n_sync),
                 // Fetch interface — each G-Core has its own uop cache
                 // FIX: Use indexed access for array, not whole array
                 .fetch_pc(g_core_busy_internal[uoc_idx] ? g_l1_l2_addr[uoc_idx] : sched_g_core_cmd_addr),
@@ -2398,6 +2593,10 @@ module aurora_172_top #(
     genvar vc_idx;
     generate
         for (vc_idx = 0; vc_idx < NUM_VCACHE; vc_idx = vc_idx + 1) begin : vcache_array
+            // Each V-Cache covers 48MB of the 192MB total address range
+            // Range: [vc_idx*48MB : (vc_idx+1)*48MB)
+            // Address bits [27:26] select the CCX (48MB = 2^25 * 3, use top bits)
+            wire vc_range_match = (vc_idx == (vc_req_from_fabric ? mem_addr[27:26] : l2_mem_addr[27:26]));
             vcache #(
                 .DATA_WIDTH(DATA_WIDTH),
                 .ADDR_WIDTH(ADDR_WIDTH),
@@ -2409,12 +2608,12 @@ module aurora_172_top #(
                 .NUM_LINES(1536)  // 48MB / 32B = 1.5M, simplified for sim
             ) u_vcache (
                 .clk(clk),
-                .rst_n(rst_n),
-                // Request interface — broadcast to ALL V-Cache instances
+                .rst_n(rst_n_sync),
+                // Request interface — only enable the matching V-Cache instance
                 .req_addr(vc_req_from_fabric ? mem_addr : l2_mem_addr),
                 .req_wr_data(vc_req_from_fabric ? mem_wr_data : l2_mem_wr_data),
-                .req_rd_en(vc_enable_all),  // Enable ALL instances
-                .req_wr_en(vc_enable_all && l2_mem_wr_en),  // Enable ALL for writes
+                .req_rd_en(vc_enable_all && vc_range_match),  // Only matching instance
+                .req_wr_en(vc_enable_all && l2_mem_wr_en && vc_range_match),  // Only matching instance
                 .gaming_workload(gaming_mode_active),
                 .ai_workload(ai_mode_active),
                 // Response interface
@@ -2453,9 +2652,11 @@ module aurora_172_top #(
     assign vc_capacity_used_mb = vc_cap_used_int[31:0] + vc_cap_used_int[63:32] + vc_cap_used_int[95:64] + vc_cap_used_int[127:96];
 
     // Route V-Cache response data to cache hierarchy
-    assign vcache_rd_valid_agg = |vcache_rd_valid;
-    assign vcache_wr_complete_agg = |vcache_wr_complete;
-    assign vcache_rd_data_agg = vcache_rd_data[DATA_WIDTH-1:0];  // CCX #0 data as representative
+    // Select from the matching V-Cache instance based on address
+    wire [1:0] vc_resp_select = mem_addr[27:26];
+    assign vcache_rd_valid_agg = vcache_rd_valid[vc_resp_select];
+    assign vcache_wr_complete_agg = vcache_wr_complete[vc_resp_select];
+    assign vcache_rd_data_agg = vcache_rd_data[vc_resp_select*DATA_WIDTH+:DATA_WIDTH];
 
     // =========================================================================
     // 6. Speed Shift / HWP (Intel) - Hardware P-State Control
@@ -2504,7 +2705,7 @@ module aurora_172_top #(
         .N_MAX_FREQ_MHZ(1000)
     ) u_speed_shift_hwp (
         .clk(clk),
-        .rst_n(rst_n),
+        .rst_n(rst_n_sync),
 
         // Hardware utilization inputs
         .g_utilization_pct(g_util),
@@ -2658,7 +2859,7 @@ module aurora_172_top #(
                 .CACHE_LINE_BITS(6)
             ) u_hw_prefetcher (
                 .clk(clk),
-                .rst_n(rst_n),
+                .rst_n(rst_n_sync),
                 // Access monitor interface - watch all memory accesses
                 .miss_addr(mem_addr),
                 .miss_valid(pf_l1_miss_valid),
@@ -2679,7 +2880,7 @@ module aurora_172_top #(
                 // Prefetch result tracking
                 .pf_result_addr(l2_mem_addr),
                 .pf_result_used(l2_mem_rd_en && l2_mem_ready),
-                .pf_result_unused(1'b0),
+                .pf_result_unused(pf_use_cnt[pf_idx*32+:32] > 0 && pf_unuse_cnt[pf_idx*32+:32] > pf_use_cnt[pf_idx*32+:32]),
                 // Status outputs
                 .stream_active(pf_stream_act[pf_idx*4+:4]),
                 .stream0_stride(pf_s0_stride[pf_idx*16+:16]),
@@ -2745,7 +2946,9 @@ module aurora_172_top #(
             assign cet_is_branch[cet_mon_idx] = (g_cmd_opcode == 8'h06);  // FRAMEGEN = branch-like
             assign cet_is_call[cet_mon_idx]   = (g_cmd_opcode == 8'h03);  // PHYSICS = call-like
             assign cet_is_ret[cet_mon_idx]    = (g_cmd_opcode == 8'h04);  // COLLISION = ret-like
-            assign cet_is_endbr[cet_mon_idx]  = 1'b1;  // All gaming commands are valid targets
+            // cet_is_endbr: only for indirect branch opcodes (FRAMEGEN=0x06 with indirect flag)
+            // Detect indirect branch: opcode 0x06 AND cmd_data[31] set (indirect flag)
+            assign cet_is_endbr[cet_mon_idx]  = (g_cmd_opcode == 8'h06) && sched_g_core_cmd_data[31];
         end
     endgenerate
 
@@ -2759,7 +2962,7 @@ module aurora_172_top #(
                 .MAX_GAME_STATES(16)
             ) u_cet_anti_cheat (
                 .clk(clk),
-                .rst_n(rst_n),
+                .rst_n(rst_n_sync),
                 // Instruction stream monitor — each CET monitors its own G-Core
                 .instr_pc(sched_g_core_cmd_addr),
                 .instr_opcode(sched_g_core_cmd_data),
@@ -2774,7 +2977,7 @@ module aurora_172_top #(
                 .game_state_id(8'h00),
                 .game_state_hash(sched_g_core_cmd_data[31:0]),
                 .game_state_valid(sched_g_core_cmd_valid),
-                .expected_state_hash(32'hDEADBEEF),
+                .expected_state_hash(g_core_selected_data ^ {g_core_selected_addr[15:0], 16'hA5A5}),
                 // CET control
                 .cet_enable(1'b1),
                 .cet_shadow_enable(1'b1),
@@ -2925,6 +3128,14 @@ module aurora_172_top #(
     wire [DATA_WIDTH-1:0] rb_resp_3;
     wire                  rb_rvalid_3;
 
+    // Verify ring bus packet width: addr + qos + dir + hops + timestamp + data + src + dest fits in packet_width
+    // G ring uses packet_width=256; verify total packed width ≤ 256
+    localparam RB_PKT_TOTAL = ADDR_WIDTH + 8 + 8 + DATA_WIDTH + 2 + 2 + 8 + 32;
+    initial begin
+        if (RB_PKT_TOTAL > 256)
+            $fatal(1, "Ring bus packet width mismatch: total %0d > 256 (DATA_WIDTH=%0d)", RB_PKT_TOTAL, DATA_WIDTH);
+    end
+
     // Use generate for ring bus arrays
     wire [ADDR_WIDTH-1:0] rb_addr_arr [0:3];
     wire [DATA_WIDTH-1:0] rb_data_arr [0:3];
@@ -2981,7 +3192,7 @@ module aurora_172_top #(
         .BUFFER_DEPTH(16)  // FIX: Increase from 4 to 16 to prevent backlog
     ) u_ring_bus_g (
         .clk(clk),
-        .rst_n(rst_n),
+        .rst_n(rst_n_sync),
 
         .node_req_addr(rb_addr_arr),
         .node_req_data(rb_data_arr),
@@ -3049,7 +3260,7 @@ module aurora_172_top #(
         .BUFFER_DEPTH(16)  // FIX: Increase to 16 to match G-Core ring
     ) u_ring_bus_a (
         .clk(clk),
-        .rst_n(rst_n),
+        .rst_n(rst_n_sync),
 
         .node_req_addr(ra_addr_arr),
         .node_req_data(ra_data_arr),

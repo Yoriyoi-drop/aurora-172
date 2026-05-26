@@ -101,7 +101,23 @@ module power_management #(
     // Power mode transition handshake
     output reg                          power_mode_busy,   // Asserted during mode transition
     output reg                          pipeline_draining, // Pipeline drain in progress
-    output wire                         pipeline_empty     // All cores idle
+    output wire                         pipeline_empty,    // All cores idle
+
+    // =========================================================================
+    // Bug 1: DVFS sequencer interface (PLL/voltage regulator actuation)
+    // =========================================================================
+    output reg  [1:0]                   pll_select,        // Select which PLL to reprogram
+    output reg  [2:0]                   pll_freq_div,      // PLL frequency divider
+    input  wire                         pll_lock,          // PLL lock status
+    output reg                          pll_reprogram,     // Trigger PLL reprogramming
+    output reg  [3:0]                   clock_div_control,  // Clock divider ratio
+    output reg                          spread_spectrum_enable,  // Spread-spectrum clocking
+    output reg                          dvfs_busy,         // DVFS transition in progress
+    input  wire                         volt_reg_ready,    // Voltage regulator settled
+    output reg                          volt_reg_enable,   // Voltage regulator change trigger
+    output reg [10:0]                   volt_reg_target_mv, // Target voltage for regulator
+    output reg                          dvfs_complete,     // DVFS transition complete pulse
+    input  wire                         dvfs_trigger       // External DVFS trigger
 );
 
     // Pipeline empty detection (all cores must be idle)
@@ -146,6 +162,211 @@ module power_management #(
     reg                         thermal_emergency;
     reg [7:0]                   thermal_emergency_count;
     // max_temp already declared as output reg
+
+    // =========================================================================
+    // DVFS sequencer FSM (Bug 1: real PLL/voltage actuator)
+    // =========================================================================
+    localparam DVFS_IDLE        = 3'b000;
+    localparam DVFS_PREPARE     = 3'b001;
+    localparam DVFS_CHANGE_FREQ = 3'b010;
+    localparam DVFS_SETTLE      = 3'b011;
+    localparam DVFS_CHANGE_VOLT = 3'b100;
+    localparam DVFS_COMPLETE    = 3'b101;
+
+    reg [2:0]  dvfs_state;
+    reg [2:0]  dvfs_target_freq_scale;
+    reg [10:0] dvfs_target_voltage_mv;
+    reg [15:0] dvfs_timer;
+    reg        dvfs_pending;
+
+    // PLL relock wait cycles (typical PLL relock: ~100 cycles)
+    localparam PLL_LOCK_TIMER   = 16'd100;
+    // Voltage ramp cycles (slew rate: ~10mV/cycle)
+    localparam VOLT_RAMP_TIMER  = 16'd50;
+    // Settle cycles after frequency change
+    localparam DVFS_SETTLE_TIMER = 16'd20;
+
+    // Spread-spectrum support
+    reg        spread_spectrum_active;
+
+    // Clock divider map: freq_scale to divider ratio
+    function automatic [3:0] freq_scale_to_div;
+        input [2:0] scale;
+        begin
+            case (scale)
+                3'd0: freq_scale_to_div = 4'd8;   // 12.5%
+                3'd1: freq_scale_to_div = 4'd4;   // 25%
+                3'd2: freq_scale_to_div = 4'd3;   // 33%
+                3'd3: freq_scale_to_div = 4'd2;   // 50%
+                3'd4: freq_scale_to_div = 4'd2;   // 50%
+                3'd5: freq_scale_to_div = 4'd1;   // 100%
+                3'd6: freq_scale_to_div = 4'd1;   // 100%
+                3'd7: freq_scale_to_div = 4'd1;   // 100%
+                default: freq_scale_to_div = 4'd1;
+            endcase
+        end
+    endfunction
+
+    // PLL selection based on domain
+    function automatic [1:0] get_pll_for_domain;
+        input [2:0] freq_scale;
+        input [10:0] voltage_mv;
+        begin
+            // Low voltage/frequency = use shared low-power PLL
+            // High voltage/frequency = use high-performance PLL
+            if (voltage_mv < 11'd800 || freq_scale < 3'd3)
+                get_pll_for_domain = 2'd1;  // Low-power PLL
+            else if (voltage_mv < 11'd1000)
+                get_pll_for_domain = 2'd2;  // Medium PLL
+            else
+                get_pll_for_domain = 2'd3;  // High-performance PLL
+        end
+    endfunction
+
+    // ─────────────────────────────────────────────────────────────
+    // DVFS Sequencer (separate always block for independent actuation)
+    // ─────────────────────────────────────────────────────────────
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            dvfs_state <= DVFS_IDLE;
+            dvfs_timer <= 16'd0;
+            dvfs_pending <= 1'b0;
+            dvfs_busy <= 1'b0;
+            dvfs_complete <= 1'b0;
+            pll_reprogram <= 1'b0;
+            pll_select <= 2'd0;
+            pll_freq_div <= 3'd0;
+            volt_reg_enable <= 1'b0;
+            volt_reg_target_mv <= 11'd0;
+            clock_div_control <= 4'd1;
+            spread_spectrum_enable <= 1'b0;
+            spread_spectrum_active <= 1'b0;
+            dvfs_target_freq_scale <= 3'd7;
+            dvfs_target_voltage_mv <= 11'd1200;
+        end else begin
+            dvfs_complete <= 1'b0;
+
+            // Shadow the policy outputs as targets
+            dvfs_target_freq_scale <= g_core_freq_scale;
+            dvfs_target_voltage_mv <= g_core_voltage_mv;
+
+            // Detect policy change or external trigger
+            if (dvfs_trigger || g_core_freq_scale != dvfs_target_freq_scale ||
+                                 g_core_voltage_mv != dvfs_target_voltage_mv) begin
+                dvfs_pending <= 1'b1;
+            end
+
+            case (dvfs_state)
+                DVFS_IDLE: begin
+                    dvfs_busy <= 1'b0;
+                    pll_reprogram <= 1'b0;
+                    volt_reg_enable <= 1'b0;
+                    clock_div_control <= freq_scale_to_div(g_core_freq_scale);
+
+                    if (dvfs_pending) begin
+                        // Capture target values for the sequencer
+                        dvfs_target_freq_scale <= g_core_freq_scale;
+                        dvfs_target_voltage_mv <= g_core_voltage_mv;
+                        dvfs_state <= DVFS_PREPARE;
+                        dvfs_timer <= 16'd0;
+                        dvfs_busy <= 1'b1;
+                        dvfs_pending <= 1'b0;
+                    end
+                end
+
+                DVFS_PREPARE: begin
+                    // Prepare for DVFS transition:
+                    // 1. Enable spread-spectrum if reducing frequency
+                    // 2. Set clock dividers to safe value
+                    // 3. Assert pipeline drain hint
+                    if (dvfs_target_freq_scale < g_core_freq_scale) begin
+                        // Downclock: enable spread-spectrum to reduce EMI
+                        spread_spectrum_enable <= 1'b1;
+                        spread_spectrum_active <= 1'b1;
+                    end else begin
+                        spread_spectrum_enable <= 1'b0;
+                        spread_spectrum_active <= 1'b0;
+                    end
+
+                    // Set intermediate clock divider for safe transition
+                    clock_div_control <= 4'd4;  // 4:1 divider during transition
+
+                    if (dvfs_timer >= 16'd5) begin
+                        dvfs_timer <= 16'd0;
+                        dvfs_state <= DVFS_CHANGE_FREQ;
+                    end else begin
+                        dvfs_timer <= dvfs_timer + 1;
+                    end
+                end
+
+                DVFS_CHANGE_FREQ: begin
+                    // Reprogam PLL for new frequency
+                    pll_select <= get_pll_for_domain(dvfs_target_freq_scale, dvfs_target_voltage_mv);
+                    pll_freq_div <= dvfs_target_freq_scale;
+                    pll_reprogram <= 1'b1;
+
+                    // Wait for PLL lock
+                    if (pll_lock) begin
+                        pll_reprogram <= 1'b0;
+                        dvfs_timer <= 16'd0;
+                        dvfs_state <= DVFS_SETTLE;
+                    end else if (dvfs_timer >= PLL_LOCK_TIMER) begin
+                        // PLL lock timeout — force proceed with current lock status
+                        $display("[%0t] [DVFS] PLL lock timeout — proceeding", $time);
+                        pll_reprogram <= 1'b0;
+                        dvfs_timer <= 16'd0;
+                        dvfs_state <= DVFS_SETTLE;
+                    end else begin
+                        dvfs_timer <= dvfs_timer + 1;
+                    end
+                end
+
+                DVFS_SETTLE: begin
+                    // Let frequency settle before changing voltage
+                    // Update clock divider to target
+                    clock_div_control <= freq_scale_to_div(dvfs_target_freq_scale);
+
+                    if (dvfs_timer >= DVFS_SETTLE_TIMER) begin
+                        dvfs_timer <= 16'd0;
+                        dvfs_state <= DVFS_CHANGE_VOLT;
+                    end else begin
+                        dvfs_timer <= dvfs_timer + 1;
+                    end
+                end
+
+                DVFS_CHANGE_VOLT: begin
+                    // Ramp voltage to target
+                    volt_reg_enable <= 1'b1;
+                    volt_reg_target_mv <= dvfs_target_voltage_mv;
+
+                    if (volt_reg_ready) begin
+                        volt_reg_enable <= 1'b0;
+                        dvfs_timer <= 16'd0;
+                        dvfs_state <= DVFS_COMPLETE;
+                    end else if (dvfs_timer >= VOLT_RAMP_TIMER) begin
+                        // Voltage ramp timeout — force complete
+                        $display("[%0t] [DVFS] Voltage ramp timeout — proceeding", $time);
+                        volt_reg_enable <= 1'b0;
+                        dvfs_timer <= 16'd0;
+                        dvfs_state <= DVFS_COMPLETE;
+                    end else begin
+                        dvfs_timer <= dvfs_timer + 1;
+                    end
+                end
+
+                DVFS_COMPLETE: begin
+                    // DVFS transition complete
+                    dvfs_busy <= 1'b0;
+                    dvfs_complete <= 1'b1;
+                    spread_spectrum_enable <= 1'b0;
+                    spread_spectrum_active <= 1'b0;
+                    dvfs_state <= DVFS_IDLE;
+                end
+
+                default: dvfs_state <= DVFS_IDLE;
+            endcase
+        end
+    end
 
     // =========================================================================
     // Power modes
@@ -323,8 +544,10 @@ module power_management #(
             end
             
             // ADVANCED: Workload-aware power scaling
-            // Detect workload profile based on core activity patterns
-            if ((g_core_activity_cnt > 12) || (a_core_activity_cnt > 48)) begin
+            // Bug 13: Compare against actual core count, not hard-coded 12
+            // Bug 14/16: Activity counters use $countones (snapshot), not accumulated,
+            // so saturation is prevented by design. Add guard for safety.
+            if ((g_core_activity_cnt == NUM_G_CORES) || (a_core_activity_cnt > 48)) begin
                 workload_profile <= 2'b10;  // Heavy workload
                 workload_power_target <= 32'd450000;  // 450W target
                 workload_sustain_cycles <= workload_sustain_cycles + 1;

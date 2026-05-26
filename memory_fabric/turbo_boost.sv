@@ -47,6 +47,16 @@ module turbo_boost #(
     parameter A_TURBO_CLOCK_MHZ     = 3300,  // +10% boost over base
     parameter A_TAU_UNLIMITED       = 1'b0,  // Limited turbo for thermal safety
 
+    // H-Core turbo parameters
+    parameter H_BASE_CLOCK_MHZ      = 2000,
+    parameter H_TURBO_CLOCK_MHZ     = 2400,  // +20% boost for H-Core (gaming workloads)
+    parameter H_TAU_CYCLES          = 14000,
+
+    // NPU turbo parameters
+    parameter N_BASE_CLOCK_MHZ      = 2500,
+    parameter N_TURBO_CLOCK_MHZ     = 3000,  // +20% boost for NPU (AI workloads)
+    parameter N_TAU_CYCLES          = 14000,
+
     // Thermal parameters
     parameter TEMP_MAX_C            = 80,    // Maximum safe operating temperature
     parameter TEMP_THROTTLE_C       = 90,    // Thermal throttling threshold
@@ -232,8 +242,8 @@ module turbo_boost #(
                     // Base frequencies
                     g_core_freq_mhz <= G_BASE_CLOCK_MHZ;
                     a_core_freq_mhz <= A_BASE_CLOCK_MHZ;
-                    h_core_freq_mhz <= G_BASE_CLOCK_MHZ / 2;
-                    npu_freq_mhz    <= A_BASE_CLOCK_MHZ / 4;
+                    h_core_freq_mhz <= H_BASE_CLOCK_MHZ;
+                    npu_freq_mhz    <= N_BASE_CLOCK_MHZ;
 
                     turbo_active <= 1'b0;
                     turbo_gaming <= 1'b0;
@@ -266,11 +276,11 @@ module turbo_boost #(
                     turbo_gaming <= 1'b1;
                     turbo_ai <= 1'b0;
 
-                    // Boost G-Core frequency
+                    // Boost G-Core and H-Core frequency for gaming workloads
                     g_core_freq_mhz <= G_TURBO_CLOCK_MHZ;
-                    a_core_freq_mhz <= A_BASE_CLOCK_MHZ;  // A-Core tetap
-                    h_core_freq_mhz <= G_BASE_CLOCK_MHZ / 2;
-                    npu_freq_mhz    <= A_BASE_CLOCK_MHZ / 4;
+                    a_core_freq_mhz <= A_BASE_CLOCK_MHZ;  // A-Core stays at base
+                    h_core_freq_mhz <= H_TURBO_CLOCK_MHZ; // Boost H-Core for gaming
+                    npu_freq_mhz    <= N_BASE_CLOCK_MHZ;
 
                     // Countdown timer
                     if (turbo_time_remaining > 0) begin
@@ -290,11 +300,11 @@ module turbo_boost #(
                     turbo_gaming <= 1'b0;
                     turbo_ai <= 1'b1;
 
-                    // Boost A-Core frequency (sustained)
+                    // Boost A-Core and NPU frequency (sustained AI workloads)
                     g_core_freq_mhz <= G_BASE_CLOCK_MHZ;
                     a_core_freq_mhz <= A_TURBO_CLOCK_MHZ;
-                    h_core_freq_mhz <= G_BASE_CLOCK_MHZ / 2;
-                    npu_freq_mhz    <= A_BASE_CLOCK_MHZ / 4;
+                    h_core_freq_mhz <= H_BASE_CLOCK_MHZ;
+                    npu_freq_mhz    <= N_TURBO_CLOCK_MHZ;  // Boost NPU for AI
 
                     // No timer countdown!
                     turbo_time_remaining <= G_TAU_CYCLES;  // Keep reset
@@ -309,8 +319,8 @@ module turbo_boost #(
                     // Moderate boost (halfway)
                     g_core_freq_mhz <= (G_BASE_CLOCK_MHZ + G_TURBO_CLOCK_MHZ) >> 1;
                     a_core_freq_mhz <= (A_BASE_CLOCK_MHZ + A_TURBO_CLOCK_MHZ) >> 1;
-                    h_core_freq_mhz <= G_BASE_CLOCK_MHZ / 2;
-                    npu_freq_mhz    <= A_BASE_CLOCK_MHZ / 4;
+                    h_core_freq_mhz <= (H_BASE_CLOCK_MHZ + H_TURBO_CLOCK_MHZ) >> 1;
+                    npu_freq_mhz    <= (N_BASE_CLOCK_MHZ + N_TURBO_CLOCK_MHZ) >> 1;
 
                     // Countdown timer
                     if (turbo_time_remaining > 0) begin
@@ -327,8 +337,8 @@ module turbo_boost #(
                     // Prevent unsigned underflow
                     g_core_freq_mhz <= (G_BASE_CLOCK_MHZ > 500) ? (G_BASE_CLOCK_MHZ - 500) : 100;
                     a_core_freq_mhz <= (A_BASE_CLOCK_MHZ > 500) ? (A_BASE_CLOCK_MHZ - 500) : 100;
-                    h_core_freq_mhz <= (G_BASE_CLOCK_MHZ > 750) ? (G_BASE_CLOCK_MHZ / 2 - 250) : 100;
-                    npu_freq_mhz    <= A_BASE_CLOCK_MHZ / 4;
+                    h_core_freq_mhz <= (H_BASE_CLOCK_MHZ > 500) ? (H_BASE_CLOCK_MHZ - 500) : 100;
+                    npu_freq_mhz    <= (N_BASE_CLOCK_MHZ > 500) ? (N_BASE_CLOCK_MHZ - 500) : 100;
 
                     cooldown_counter <= cooldown_counter + 32'd1;
 
@@ -350,10 +360,10 @@ module turbo_boost #(
                     thermal_throttle_count <= thermal_throttle_count + 32'd1;
 
                     // Minimal frequencies
-                    g_core_freq_mhz <= G_BASE_CLOCK_MHZ >> 1;  // 3 GHz → 1.5 GHz
-                    a_core_freq_mhz <= A_BASE_CLOCK_MHZ >> 1;  // 4 GHz → 2 GHz
-                    h_core_freq_mhz <= G_BASE_CLOCK_MHZ / 4;
-                    npu_freq_mhz    <= A_BASE_CLOCK_MHZ / 8;
+                    g_core_freq_mhz <= G_BASE_CLOCK_MHZ >> 1;
+                    a_core_freq_mhz <= A_BASE_CLOCK_MHZ >> 1;
+                    h_core_freq_mhz <= H_BASE_CLOCK_MHZ >> 1;
+                    npu_freq_mhz    <= N_BASE_CLOCK_MHZ >> 1;
                 end
 
                 default: begin

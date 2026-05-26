@@ -1,9 +1,5 @@
 `timescale 1ns / 1ps
 
-// verilator lint_off WIDTHEXPAND
-// verilator lint_off WIDTHTRUNC
-// verilator lint_off PINCONNECTEMPTY
-
 // Include parameters (Icarus compatibility)
 `include "interfaces/aurora_params.svh"
 `include "interfaces/aurora_error_codes.svh"
@@ -90,6 +86,7 @@ module g_core #(
     assign fabric_wr_data = fabric_wr_en ? result : {DATA_WIDTH{1'b0}};
 
     // Register fabric_addr from cmd_addr on command capture
+    // Bug 6: Hold last valid address instead of defaulting to zero
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n)
             fabric_addr_reg <= {ADDR_WIDTH{1'b0}};
@@ -97,8 +94,6 @@ module g_core #(
             fabric_addr_reg <= cmd_addr;
         else if (fabric_rd_en)
             fabric_addr_reg <= cmd_addr;
-        else
-            fabric_addr_reg <= {ADDR_WIDTH{1'b0}};
     end
 
     // =========================================================================
@@ -106,9 +101,7 @@ module g_core #(
     // =========================================================================
     reg [INST_WIDTH-1:0]    instruction_reg;
     reg [ADDR_WIDTH-1:0]    pc_reg;
-    reg [31:0]              pipeline_stage_1;
     reg [31:0]              pipeline_stage_2;
-    reg [31:0]              pipeline_stage_3;
     
     // FIX: Track cmd_valid edge to prevent duplicate logging
     reg                     cmd_valid_prev;
@@ -133,7 +126,7 @@ module g_core #(
     
     // Basic snoop logic: invalidate on write operations, update on read-modify-write
     assign snoop_invalidate = l1_wr_en && (pipeline_state == OP_STORE);
-    assign snoop_update = l1_wr_en && (pipeline_state == OP_LOAD && l1_ready);
+    assign snoop_update = l1_wr_en && (pipeline_state == OP_LOAD && l1_request_accepted);
 
     // L1 Cache performance counters
     wire [31:0]                  l1_hits;
@@ -168,28 +161,39 @@ module g_core #(
     // L1 request handshake tracking
     reg                     l1_request_accepted;
     
-    // DEADLOCK FIX: Resource contention management
-    reg [15:0]              resource_timeout;
-    reg [7:0]               retry_count;
-    reg                     resource_locked;
-    reg                     arbitration_won;
-    reg [31:0]              last_access_time;
-    reg [31:0]              global_cycle_count;
+    // Bug 4: L1 handshake - separate accept and complete tracking
+    reg                     l1_rd_data_valid;
+    reg                     l1_accept_phase;  // 0=wait accept, 1=wait complete
     
-    // Resource contention thresholds
-    localparam RESOURCE_TIMEOUT = 16'd200;    // 200 cycles max wait for resource
-    localparam MAX_RETRIES = 8'd3;             // 3 retries before giving up
-    localparam ARBITRATION_WINDOW = 32'd50;    // 50 cycles arbitration window
+    // Bug 3: Resource contention management
+    reg                     resource_locked;
+    reg [31:0]              global_cycle_count;
+
+    // Bug 2: 3-stage pipeline with valid/ready handshake
+    reg                     stage1_valid;  // FETCH output valid
+    reg                     stage2_valid;  // DECODE output valid
+    reg                     stage2_ready;  // EXECUTE ready for new input
+    reg [31:0]              stage1_data;   // FETCH → DECODE data
+    reg [31:0]              stage2_data;   // DECODE → EXECUTE data (opcode+payload)
+    reg [47:0]              stage1_addr;   // FETCH → DECODE address
+    reg [47:0]              stage2_addr;   // DECODE → EXECUTE address
+    reg [7:0]               stage1_opcode; // Opcode being fetched
+    reg [7:0]               stage2_opcode; // Opcode being decoded
+    reg                     stage2_branch; // DECODE output for branch
+    
+    // Bug 3: Resource lock timeout counter
+    reg [15:0]              lock_timeout_counter;
 
     localparam IDLE         = 4'b0000;
     localparam FETCH        = 4'b0001;
     localparam DECODE       = 4'b0010;
     localparam EXECUTE      = 4'b0011;
     localparam MEMORY       = 4'b0100;
-    localparam WAIT_L1      = 4'b0101;  // Wait for L1 to accept request
-    localparam WRITEBACK    = 4'b0110;
-    localparam CLEANUP      = 4'b0111;  // One-cycle cleanup before IDLE
-    localparam ERROR_STATE  = 4'b1000;  // Error trap state — FIXED: was 3'b010 (collided with DECODE)
+    localparam WAIT_ACCEPT  = 4'b0101;  // Bug 4: Wait for L1 to accept request
+    localparam WAIT_COMPLETE= 4'b0110;  // Bug 4: Wait for L1 completion
+    localparam WRITEBACK    = 4'b0111;
+    localparam CLEANUP      = 4'b1000;  // One-cycle cleanup before IDLE
+    localparam ERROR_STATE  = 4'b1001;  // Error trap state
 
     // =========================================================================
     // Instruction opcodes (ISA-172 Gaming Extension)
@@ -217,27 +221,21 @@ module g_core #(
     // reg [31:0] debug_counter;
     
     // =========================================================================
-    // High-Performance Gaming Pipeline - Optimized for 6GHz Operation
-    // Features:
-    // - Zero-latency design for critical path
-    // - Advanced branch prediction with AI assistance
-    // - Hardware frame generation support
-    // - CET anti-cheat integration
-    // - UOP cache for decoded instruction reuse
+    // 3-Stage Pipeline with Valid/Ready Handshake - Bug 2
+    // Stage 1 (FETCH): accept new cmd while stage 2 decodes
+    // Stage 2 (DECODE): decode while stage 3 executes
+    // Stage 3 (EXECUTE): execute while writing back
     // =========================================================================
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            // debug_counter <= 32'h0;  // REMOVED
             pipeline_state  <= IDLE;
             pc_reg          <= {ADDR_WIDTH{1'b0}};
             result          <= {DATA_WIDTH{1'b0}};
             result_valid    <= 1'b0;
             busy            <= 1'b0;
-            
-            // DEADLOCK FIX: Initialize resource contention state
             mem_wait_counter <= 16'd0;
             resource_locked <= 1'b0;
-            last_access_time <= 32'd0;
+            lock_timeout_counter <= 16'd0;
             global_cycle_count <= 32'd0;
             cmd_ready       <= 1'b1;
             fabric_rd_en    <= 1'b0;
@@ -245,263 +243,358 @@ module g_core #(
             branch_history  <= 16'h0000;
             l1_rd_en        <= 1'b0;
             l1_wr_en        <= 1'b0;
-            mem_wait_counter <= 16'h0;
             mem_is_write    <= 1'b0;
             l1_request_accepted <= 1'b0;
+            l1_rd_data_valid <= 1'b0;
+            l1_accept_phase <= 1'b0;
             error_flag      <= 1'b0;
             error_code      <= 8'h00;
             error_valid     <= 1'b0;
-            // REMOVED: cmd_valid_prev - using proper handshake instead
             exec_counter    <= 16'h0;
             exec_target_cycles <= 16'h0;
             pipeline_stage_detail <= 4'h0;
-            cache_miss_occurred <= 1'b0;
-            cache_miss_penalty_cycles <= 8'h0;
             cmd_valid_prev <= 1'b0;
+            stage1_valid <= 1'b0;
+            stage2_valid <= 1'b0;
+            stage2_ready <= 1'b0;
         end else begin
-            // Global cycle counter for timeout detection
-            // debug_counter <= debug_counter + 1;  // REMOVED
             global_cycle_count <= global_cycle_count + 1;
-            
             cmd_valid_prev <= cmd_valid;
-            
-            // SIMPLIFIED: Basic resource management without complex timeout
-            // Unsigned wrapping subtraction is correct for power-of-2 overflow
-            if (resource_locked && ((global_cycle_count - last_access_time) > 100)) begin
-                // Simple timeout recovery
-                resource_locked <= 1'b0;
-                if (pipeline_state == MEMORY || pipeline_state == WAIT_L1) begin
-                    pipeline_state <= ERROR_STATE;
+            error_valid <= 1'b0;
+            l1_rd_data_valid <= 1'b0;
+
+            // Bug 3: Resource lock timeout - 1000 cycles max
+            if (resource_locked) begin
+                if (lock_timeout_counter >= 16'd1000) begin
+                    resource_locked <= 1'b0;
+                    lock_timeout_counter <= 16'd0;
                     error_flag <= 1'b1;
                     error_code <= `AURORA_ERR_TIMEOUT;
                     error_valid <= 1'b1;
+                    pipeline_state <= ERROR_STATE;
+                end else begin
+                    lock_timeout_counter <= lock_timeout_counter + 1;
                 end
             end
-            
-            error_valid <= 1'b0;  // Clear error valid pulse each cycle
+
             case (pipeline_state)
                 IDLE: begin
-                    // REMOVED: Delta cycle spam fix - $display completely removed
-                    cmd_ready <= 1'b1;  // Always ready in IDLE state
-                    // FIX #1: Always clear result_valid in IDLE to prevent stale signal
+                    cmd_ready <= 1'b1;
                     result_valid <= 1'b0;
-                    // Only log errors, not normal operations
-                    
-                    if (cmd_valid && !cmd_valid_prev && cmd_ready && !busy) begin
-                        // Command received - process it silently for performance
-                        // VALIDATE OPCODE FIRST
+                    busy <= 1'b0;
+
+                    // Bug 2: Accept new cmd into stage 1 (FETCH)
+                    if (cmd_valid && cmd_ready && !busy) begin
                         case (cmd_data[31:24])
                             OP_NOP, OP_RESERVED: begin
-                                // NOP/RESERVED - No Operation, but consume the command properly
-                                // Digunakan saat scheduler tidak ada task untuk dikirim
-                                // OP_RESERVED (0x42) treated as NOP for compatibility
-                                result_valid <= 1'b1;  // Signal NOP completion
-                                result <= {DATA_WIDTH{1'b0}};  // NOP result
-                                busy <= 1'b0;  // Return to IDLE but signal completion
+                                // Bug 7: NOP does NOT assert result_valid
+                                result_valid <= 1'b0;
+                                busy <= 1'b0;
                                 pipeline_state <= IDLE;
                             end
                             OP_DRAW, OP_TEXTURE, OP_PHYSICS, OP_COLLISION,
                             OP_RAYTRACE, OP_FRAMEGEN, OP_SHADING, OP_BRANCH,
                             OP_LOAD, OP_STORE: begin
-                                // Simplified command acceptance
-                                result_valid <= 1'b0;  // Clear old result
                                 cmd_ready <= 1'b0;
                                 busy <= 1'b1;
                                 instruction_reg <= cmd_data;
                                 pc_reg <= cmd_addr;
-                                pipeline_state <= FETCH;
-                                error_flag <= 1'b0;
-                                error_code <= 8'h00;
+                                // Stage 1 (FETCH) captures the instruction
+                                stage1_data <= cmd_data;
+                                stage1_addr <= cmd_addr;
+                                stage1_opcode <= cmd_data[31:24];
+                                stage1_valid <= 1'b1;
+                                pipeline_state <= DECODE;
                             end
                             default: begin
-                                // FIXED: INVALID OPCODE - generate error result instead of trap
-                                // Generate proper error result with error code in data
-                                if (error_flag == 1'b0) begin
-                                    $display("[%0t] [G-CORE#%0d] ❌ ERROR: Invalid opcode 0x%02x at addr=0x%h",
-                                             $time, CORE_ID, cmd_data[31:24], cmd_addr);
-                                end
                                 error_flag <= 1'b1;
                                 error_code <= `AURORA_ERR_ILLEGAL_OPCODE;
                                 error_valid <= 1'b1;
-                                // FIXED: Generate error result instead of hanging
-                                result <= {DATA_WIDTH{1'b1}};  // All ones = error indicator
-                                result_valid <= 1'b1;  // Signal result ready with error
-                                cmd_ready <= 1'b1;      // Accept next command
-                                busy <= 1'b0;           // Not busy after error result
-                                pipeline_state <= IDLE;  // Return to IDLE immediately
+                                result <= {DATA_WIDTH{1'b1}};
+                                result_valid <= 1'b1;
+                                cmd_ready <= 1'b1;
+                                busy <= 1'b0;
+                                pipeline_state <= IDLE;
                             end
                         endcase
                     end
-                    // REMOVED: cmd_valid_prev update - using proper handshake
-                end
-                
-                FETCH: begin
-                    $display("[%0t] [G-CORE#%0d] STATE: FETCH | PC=0x%h | INST=0x%h | FETCH_EN=%b", $time, CORE_ID, pc_reg, cmd_data, 1'b1);
-                    busy <= 1'b1;  // FIXED: Keep busy during fetch
-                    // Fetch instruction - simplified: use cmd_data directly
-                    fabric_rd_en <= 1'b0;
-                    fabric_wr_en <= 1'b0;
-                    pipeline_stage_1 <= cmd_data;  // Use command data as instruction
-                    pipeline_state <= DECODE;
                 end
 
+                // ─────────────────────────────────────────────────
+                // DECODE (Stage 2): Decode while stage 3 executes
+                // ─────────────────────────────────────────────────
                 DECODE: begin
-                    $display("[%0t] [G-CORE#%0d] STATE: DECODE", $time, CORE_ID);
-                    busy <= 1'b1;  // FIXED: Keep busy during decode
-                    // Decode instruction dan setup pipeline depth
+                    busy <= 1'b1;
                     l1_rd_en <= 1'b0;
                     l1_wr_en <= 1'b0;
-                    
-                    pipeline_stage_detail <= 4'd2;  // DECODE stage
+                    pipeline_stage_detail <= 4'd2;
 
-                    case (pipeline_stage_1[31:24])
-                        OP_BRANCH: begin
-                            branch_predicted <= ai_branch_predict(pipeline_stage_1);
-                            branch_history <= {branch_history[14:0], branch_predicted};
-                            // Set realistic pipeline depth
-                            exec_counter <= 16'h0;
-                            exec_target_cycles <= G_PIPE_BRANCH;
-                            pipeline_state <= EXECUTE;
-                        end
-                        OP_DRAW: begin
-                            exec_counter <= 16'h0;
-                            exec_target_cycles <= G_PIPE_DRAW;
-                            pipeline_state <= EXECUTE;
-                        end
-                        OP_TEXTURE: begin
-                            exec_counter <= 16'h0;
-                            exec_target_cycles <= G_PIPE_TEXTURE;
-                            pipeline_state <= EXECUTE;
-                        end
-                        OP_PHYSICS: begin
-                            exec_counter <= 16'h0;
-                            exec_target_cycles <= G_PIPE_PHYSICS;
-                            pipeline_state <= EXECUTE;
-                        end
-                        OP_COLLISION: begin
-                            exec_counter <= 16'h0;
-                            exec_target_cycles <= G_PIPE_COLLISION;
-                            pipeline_state <= EXECUTE;
-                        end
-                        OP_RAYTRACE: begin
-                            exec_counter <= 16'h0;
-                            exec_target_cycles <= G_PIPE_RAYTRACE;
-                            pipeline_state <= EXECUTE;
-                        end
-                        OP_FRAMEGEN: begin
-                            exec_counter <= 16'h0;
-                            exec_target_cycles <= G_PIPE_FRAMEGEN;
-                            pipeline_state <= EXECUTE;
-                        end
-                        OP_SHADING: begin
-                            exec_counter <= 16'h0;
-                            exec_target_cycles <= G_PIPE_SHADING;
-                            pipeline_state <= EXECUTE;
-                        end
-                        OP_LOAD: begin
-                            // VALIDATE ADDRESS - Check bounds
-                            if (pipeline_stage_1[23:0] > MAX_ADDR[23:0]) begin
-                                // OOB ADDRESS - trap
-                                if (error_flag == 1'b0) begin
-                                    $display("[%0t] [G-CORE] ❌ ERROR: OOB address 0x%h (max=0x%h)",
-                                             $time, pipeline_stage_1[23:0], MAX_ADDR[23:0]);
+                    // Forward stage1 → stage2 (DECODE → EXECUTE data)
+                    if (stage1_valid) begin
+                            stage2_data <= stage1_data;
+                            stage2_addr <= stage1_addr;
+                            stage2_opcode <= stage1_opcode;
+                            stage2_valid <= 1'b1;
+                            stage1_valid <= 1'b0;
+                            // Stage 2 decoded opcode for EXECUTE
+                            case (stage1_opcode)
+                                OP_BRANCH: begin
+                                    stage2_branch <= branch_predicted;
+                                    branch_history <= {branch_history[14:0], branch_predicted};
+                                    exec_counter <= 16'h0;
+                                    exec_target_cycles <= G_PIPE_BRANCH;
                                 end
-                                error_flag <= 1'b1;
-                                error_code <= `AURORA_ERR_OOB_ADDRESS;
-                                error_valid <= 1'b1;
-                                result_valid <= 1'b0;
-                                busy <= 1'b0;
-                                pipeline_state <= ERROR_STATE;
-                            end else begin
-                                // Valid address - Access L1 cache (FIXED: SKIP_L1 removed)
-                                l1_addr <= pipeline_stage_1[23:0];
-                                l1_rd_en <= 1'b1;
-                                mem_wait_counter <= 16'h0;
-                                mem_is_write <= 1'b0;
-                                l1_request_accepted <= 1'b0;
-                                pipeline_state <= WAIT_L1;
-                            end
-                        end
-                        OP_STORE: begin
-                            // VALIDATE ADDRESS - Check bounds
-                            if (pipeline_stage_1[23:0] > MAX_ADDR[23:0]) begin
-                                // OOB ADDRESS - trap
-                                if (error_flag == 1'b0) begin
-                                    $display("[%0t] [G-CORE] ❌ ERROR: OOB address 0x%h (max=0x%h)",
-                                             $time, pipeline_stage_1[23:0], MAX_ADDR[23:0]);
+                                OP_DRAW: begin
+                                    exec_counter <= 16'h0;
+                                    exec_target_cycles <= G_PIPE_DRAW;
                                 end
-                                error_flag <= 1'b1;
-                                error_code <= `AURORA_ERR_OOB_ADDRESS;
-                                error_valid <= 1'b1;
-                                result_valid <= 1'b0;
-                                busy <= 1'b0;
-                                pipeline_state <= ERROR_STATE;
-                            end else begin
-                                // Valid address - Write to L1 cache (FIXED: SKIP_L1 removed)
-                                // Store 64-bit result into lower bits of 512-bit cache line
-                                l1_addr <= pipeline_stage_1[23:0];
-                                l1_wr_data <= { {(LINE_SIZE*8-32){1'b0}}, pipeline_stage_1[31:0] };
-                                l1_wr_en <= 1'b1;
-                                mem_wait_counter <= 16'h0;
-                                mem_is_write <= 1'b1;
-                                l1_request_accepted <= 1'b0;
-                                pipeline_state <= WAIT_L1;
-                            end
-                        end
-                        default: begin
-                            // Default ops: set moderate pipeline depth
-                            exec_counter <= 16'h0;
-                            exec_target_cycles <= 15;  // Default 15 cycles
+                                OP_TEXTURE: begin
+                                    exec_counter <= 16'h0;
+                                    exec_target_cycles <= G_PIPE_TEXTURE;
+                                end
+                                OP_PHYSICS: begin
+                                    exec_counter <= 16'h0;
+                                    exec_target_cycles <= G_PIPE_PHYSICS;
+                                end
+                                OP_COLLISION: begin
+                                    exec_counter <= 16'h0;
+                                    exec_target_cycles <= G_PIPE_COLLISION;
+                                end
+                                OP_RAYTRACE: begin
+                                    exec_counter <= 16'h0;
+                                    exec_target_cycles <= G_PIPE_RAYTRACE;
+                                end
+                                OP_FRAMEGEN: begin
+                                    exec_counter <= 16'h0;
+                                    exec_target_cycles <= G_PIPE_FRAMEGEN;
+                                end
+                                OP_SHADING: begin
+                                    exec_counter <= 16'h0;
+                                    exec_target_cycles <= G_PIPE_SHADING;
+                                end
+                                OP_LOAD: begin
+                                    if (stage1_data[23:0] > MAX_ADDR[23:0]) begin
+                                        error_flag <= 1'b1;
+                                        error_code <= `AURORA_ERR_OOB_ADDRESS;
+                                        error_valid <= 1'b1;
+                                        pipeline_state <= ERROR_STATE;
+                                    end else begin
+                                        l1_addr <= stage1_data[23:0];
+                                        l1_rd_en <= 1'b1;
+                                        mem_wait_counter <= 16'h0;
+                                        mem_is_write <= 1'b0;
+                                        l1_request_accepted <= 1'b0;
+                                        l1_accept_phase <= 1'b0;
+                                        pipeline_state <= WAIT_ACCEPT;
+                                    end
+                                end
+                                OP_STORE: begin
+                                    if (stage1_data[23:0] > MAX_ADDR[23:0]) begin
+                                        error_flag <= 1'b1;
+                                        error_code <= `AURORA_ERR_OOB_ADDRESS;
+                                        error_valid <= 1'b1;
+                                        pipeline_state <= ERROR_STATE;
+                                    end else begin
+                                        l1_addr <= stage1_data[23:0];
+                                        l1_wr_data <= { {(LINE_SIZE*8-32){1'b0}}, stage1_data[31:0] };
+                                        l1_wr_en <= 1'b1;
+                                        mem_wait_counter <= 16'h0;
+                                        mem_is_write <= 1'b1;
+                                        l1_request_accepted <= 1'b0;
+                                        l1_accept_phase <= 1'b0;
+                                        pipeline_state <= WAIT_ACCEPT;
+                                    end
+                                end
+                                default: begin
+                                    exec_counter <= 16'h0;
+                                    exec_target_cycles <= 15;
+                                end
+                            endcase
                             pipeline_state <= EXECUTE;
                         end
-                    endcase
+                    end
                 end
-                
+
+                // ─────────────────────────────────────────────────
+                // EXECUTE (Stage 3): Execute while writing back.
+                // Bug 2: 3-stage pipeline overlap — while counting,
+                // cmd_ready=1 to fetch next instruction into stage1.
+                // When counter expires, if stage1 has data, auto-reload
+                // stage2 with new instruction (skip IDLE round-trip).
+                // Bug 3: resource_locked set on entry, cleared in WRITEBACK
+                // ─────────────────────────────────────────────────
                 EXECUTE: begin
-                    busy <= 1'b1;  // FIXED: Keep busy during execute
+                    busy <= 1'b1;
                     fabric_rd_en <= 1'b0;
                     fabric_wr_en <= 1'b0;
-                    pipeline_stage_detail <= 4'd3;  // EXECUTE stage
-                    
-                    // CRITICAL FIX: Wait until execution counter reaches target
-                    // Ini enforce latency yang sebenarnya - compute TIDAK boleh mulai sebelum counter selesai
+                    pipeline_stage_detail <= 4'd3;
+
+                    // Bug 3: Set resource lock on entry to EXECUTE
+                    if (!resource_locked) begin
+                        resource_locked <= 1'b1;
+                        lock_timeout_counter <= 16'd0;
+                    end
+
+                    // ── 3-stage pipeline overlap (Bug 2) ──
+                    // While counting, accept next cmd into stage1
+                    cmd_ready <= !stage1_valid;
+
+                    // Stage 1 (FETCH): accept new command while stage3 executes
+                    if (cmd_valid && cmd_ready && !stage1_valid) begin
+                        stage1_data <= cmd_data;
+                        stage1_addr <= cmd_addr;
+                        stage1_opcode <= cmd_data[31:24];
+                        stage1_valid <= 1'b1;
+                    end
+
+                    // ── Stage 3 execution ──
                     if (exec_counter < exec_target_cycles) begin
-                        // Still executing - increment counter, DO NOT compute yet
                         exec_counter <= exec_counter + 1;
-                        // Stay in EXECUTE state
                     end else begin
-                        // Execution counter complete - NOW compute
-                        // FIX: Clear mem_is_write for non-memory ops to prevent stale flag
-                        // from previous STORE operation causing WRITEBACK to skip result update
                         mem_is_write <= 1'b0;
-                        case (pipeline_stage_1[31:24])
-                            OP_DRAW,
-                            OP_TEXTURE,
-                            OP_SHADING: begin
-                                pipeline_stage_2 <= compute_output(pipeline_stage_1, pipeline_stage_1[31:24], pc_reg);
+
+                        // Bug 1: Real compute per opcode
+                        case (stage2_opcode)
+                            OP_DRAW: begin
+                                reg signed [31:0] ax, ay, bx, by, cx, cy;
+                                reg signed [31:0] area2, u, v, w;
+                                reg signed [63:0] mul;
+                                ax = stage2_data[7:0];
+                                ay = stage2_data[15:8];
+                                bx = stage2_data[23:16];
+                                by = stage2_data[31:24];
+                                cx = (pc_reg[7:0] + 8'd10);
+                                cy = (pc_reg[15:8] + 8'd5);
+                                mul = ax * (by - cy) + bx * (cy - ay) + cx * (ay - by);
+                                area2 = mul[31:0];
+                                u = (bx * (cy - ay) + cx * (ay - by) + ax * (by - cy)) / (area2 | 1);
+                                v = (cx * (ay - by) + ax * (by - cy) + bx * (cy - ay)) / (area2 | 1);
+                                w = 16'sd1 - u - v;
+                                pipeline_stage_2 <= {w[15:0], v[15:0], u[15:0], area2[15:0]};
                                 pipeline_state <= WRITEBACK;
                             end
-                            OP_PHYSICS,
+                            OP_TEXTURE: begin
+                                reg [7:0] tex00, tex01, tex10, tex11;
+                                reg [15:0] frac_x, frac_y;
+                                reg signed [31:0] top, bot, result_val;
+                                tex00 = stage2_data[7:0];
+                                tex01 = stage2_data[15:8];
+                                tex10 = stage2_data[23:16];
+                                tex11 = stage2_data[31:24];
+                                frac_x = {pc_reg[7:0], 8'h80};
+                                frac_y = {pc_reg[15:8], 8'h80};
+                                top = tex00 * (256 - frac_x[7:0]) + tex01 * frac_x[7:0];
+                                bot = tex10 * (256 - frac_x[7:0]) + tex11 * frac_x[7:0];
+                                result_val = top * (256 - frac_y[7:0]) + bot * frac_y[7:0];
+                                pipeline_stage_2 <= result_val[31:0];
+                                pipeline_state <= WRITEBACK;
+                            end
+                            OP_PHYSICS: begin
+                                reg signed [31:0] pos, prev_pos, accel;
+                                reg signed [63:0] verlet;
+                                pos = stage2_data[15:0];
+                                prev_pos = stage2_data[31:16];
+                                accel = {stage2_data[31], stage2_data[31:16]};
+                                verlet = 2 * pos - prev_pos + (accel * 16'sd100) / 16'sd100;
+                                pipeline_stage_2 <= verlet[31:0];
+                                pipeline_state <= WRITEBACK;
+                            end
                             OP_COLLISION: begin
-                                pipeline_stage_2 <= compute_output(pipeline_stage_1, pipeline_stage_1[31:24], pc_reg);
+                                reg [15:0] a_min_x, a_min_y, a_max_x, a_max_y;
+                                reg [15:0] b_min_x, b_min_y, b_max_x, b_max_y;
+                                reg overlap;
+                                a_min_x = stage2_data[7:0];
+                                a_max_x = stage2_data[15:8];
+                                a_min_y = stage2_data[23:16];
+                                a_max_y = stage2_data[31:24];
+                                b_min_x = pc_reg[7:0];
+                                b_max_x = pc_reg[15:8];
+                                b_min_y = pc_reg[23:16];
+                                b_max_y = pc_reg[31:24];
+                                overlap = (a_min_x <= b_max_x) && (a_max_x >= b_min_x) &&
+                                          (a_min_y <= b_max_y) && (a_max_y >= b_min_y);
+                                pipeline_stage_2 <= {31'b0, overlap};
                                 pipeline_state <= WRITEBACK;
                             end
                             OP_RAYTRACE: begin
-                                pipeline_stage_2 <= compute_output(pipeline_stage_1, pipeline_stage_1[31:24], pc_reg);
+                                reg signed [31:0] ox, oy, oz, dx, dy, dz;
+                                reg signed [31:0] cx_s, cy_s, cz_s, r_s;
+                                reg signed [63:0] ocx, ocy, ocz;
+                                reg signed [63:0] a, b, c, disc, sqrt_disc;
+                                reg signed [63:0] t0, t1;
+                                reg hit;
+                                ox = stage2_data[7:0];
+                                oy = stage2_data[15:8];
+                                oz = stage2_data[23:16];
+                                dx = stage2_data[31:24];
+                                cx_s = pc_reg[7:0];
+                                cy_s = pc_reg[15:8];
+                                cz_s = pc_reg[23:16];
+                                r_s = 16'sd50;
+                                ocx = ox - cx_s;
+                                ocy = oy - cy_s;
+                                ocz = oz - cz_s;
+                                a = dx * dx + dy * dy + dz * dz;
+                                b = 2 * (ocx * dx + ocy * dy + ocz * dz);
+                                c = ocx * ocx + ocy * ocy + ocz * ocz - r_s * r_s;
+                                disc = b * b - 4 * a * c;
+                                hit = (disc >= 0);
+                                if (hit) begin
+                                    sqrt_disc = 0;
+                                    for (int bit = 30; bit >= 0; bit--) begin
+                                        if ((sqrt_disc + (1 << bit)) * (sqrt_disc + (1 << bit)) <= disc) begin
+                                            sqrt_disc = sqrt_disc + (1 << bit);
+                                        end
+                                    end
+                                    t0 = (-b - sqrt_disc) / (2 * a | 1);
+                                    t1 = (-b + sqrt_disc) / (2 * a | 1);
+                                    pipeline_stage_2 <= {t1[15:0], t0[15:0], 15'b0, hit};
+                                end else begin
+                                    pipeline_stage_2 <= 32'h0;
+                                end
                                 pipeline_state <= WRITEBACK;
                             end
                             OP_FRAMEGEN: begin
-                                pipeline_stage_2 <= compute_output(pipeline_stage_1, pipeline_stage_1[31:24], pc_reg);
+                                reg signed [31:0] mv_x, mv_y, t, interp_x, interp_y;
+                                mv_x = stage2_data[15:0];
+                                mv_y = stage2_data[31:16];
+                                t = pc_reg[7:0];
+                                interp_x = mv_x * t / 256;
+                                interp_y = mv_y * t / 256;
+                                pipeline_stage_2 <= {interp_y[15:0], interp_x[15:0]};
+                                pipeline_state <= WRITEBACK;
+                            end
+                            OP_SHADING: begin
+                                reg signed [31:0] nx, ny, nz, lx, ly, lz;
+                                reg signed [31:0] vx, vy, vz;
+                                reg signed [63:0] dot_nl, dot_nv;
+                                reg signed [63:0] diffuse, specular;
+                                reg [31:0] color;
+                                nx = stage2_data[7:0];
+                                ny = stage2_data[15:8];
+                                nz = stage2_data[23:16];
+                                lx = 16'sd50;
+                                ly = 16'sd100;
+                                lz = 16'sd75;
+                                vx = pc_reg[7:0];
+                                vy = pc_reg[15:8];
+                                vz = pc_reg[23:16];
+                                dot_nl = nx * lx + ny * ly + nz * lz;
+                                dot_nv = nx * vx + ny * vy + nz * vz;
+                                diffuse = (dot_nl > 0) ? dot_nl : 0;
+                                specular = (dot_nv > 0) ? (dot_nv * dot_nv) / 256 : 0;
+                                color = {8'd50, diffuse[7:0] + 8'd100, specular[7:0] + 8'd50, 8'd255};
+                                pipeline_stage_2 <= color;
                                 pipeline_state <= WRITEBACK;
                             end
                             OP_BRANCH: begin
-                                if (branch_predicted) begin
-                                    pc_reg <= pc_reg + pipeline_stage_1[23:0];
+                                if (stage2_branch) begin
+                                    pc_reg <= stage2_addr + stage2_data[23:0];
                                 end
                                 pipeline_state <= IDLE;
                             end
                             default: begin
-                                pipeline_stage_2 <= compute_output(pipeline_stage_1, pipeline_stage_1[31:24], pc_reg);
+                                pipeline_stage_2 <= stage2_data;
                                 pipeline_state <= WRITEBACK;
                             end
                         endcase
@@ -509,155 +602,176 @@ module g_core #(
                 end
 
                 // ─────────────────────────────────────────────────
-                // WAIT_L1: Wait for L1 to accept and process request
+                // Bug 4: Proper L1 handshake FSM
+                // WAIT_ACCEPT: wait for l1_ready to assert request accepted
+                // WAIT_COMPLETE: wait for l1_valid/l1_rd_data valid
                 // ─────────────────────────────────────────────────
-                WAIT_L1: begin
-                    busy <= 1'b1;  // FIXED: Keep busy while waiting for L1
-                    // Clear request signals (already sent to L1)
-                    l1_rd_en <= 1'b0;
-                    l1_wr_en <= 1'b0;
-                    
-                    // Performance-optimized: Mark request as accepted only when L1 is ready
-                    // This prevents unnecessary pipeline stalls and ensures efficient cache access
+                WAIT_ACCEPT: begin
+                    busy <= 1'b1;
                     if (!l1_request_accepted && l1_ready) begin
                         l1_request_accepted <= 1'b1;
-                        `ifdef AURORA_DEBUG_CORE
-                        if (mem_is_write) begin
-                            $display("[%0t] [G-CORE] 📤 L1 WRITE REQUEST addr=0x%h", $time, l1_addr);
-                        end else begin
-                            $display("[%0t] [G-CORE] 📤 L1 READ REQUEST addr=0x%h", $time, l1_addr);
-                        end
-                        `endif
-                        // Stay in this state for at least 1 cycle to let L1 process
+                        l1_accept_phase <= 1'b1;
+                        l1_rd_en <= 1'b0;
+                        l1_wr_en <= 1'b0;
+                        pipeline_state <= WAIT_COMPLETE;
+                    end else if (mem_wait_counter >= 16'hFF) begin
+                        error_flag <= 1'b1;
+                        error_code <= `AURORA_ERR_CACHE_TIMEOUT;
+                        error_valid <= 1'b1;
+                        l1_rd_en <= 1'b0;
+                        l1_wr_en <= 1'b0;
+                        mem_wait_counter <= 16'h0;
+                        pipeline_state <= ERROR_STATE;
                     end else begin
-                        // Now check if L1 has completed
-                        if (l1_ready) begin
-                            // L1 response received
-                            if (mem_is_write) begin
-                                pipeline_stage_2 <= result;  // Keep result for write
-                                $display("[%0t] [G-CORE] ✅ L1 WRITE COMPLETE", $time);
-                            end else begin
-                                pipeline_stage_2 <= l1_rd_data[31:0];  // Read data
-                                $display("[%0t] [G-CORE] ✅ L1 READ COMPLETE data=0x%h", $time, l1_rd_data[31:0]);
-                            end
-                            mem_wait_counter <= 16'h0;
-                            l1_request_accepted <= 1'b0;
-                            pipeline_state <= WRITEBACK;
-                        end else if (mem_wait_counter >= 16'hFF) begin
-                            // Timeout after 256 cycles - set proper error
-                            $display("[%0t] [G-CORE] ⚠️ L1 CACHE TIMEOUT after %0d cycles", $time, mem_wait_counter);
-                            error_flag <= 1'b1;
-                            error_code <= `AURORA_ERR_CACHE_TIMEOUT;
-                            error_valid <= 1'b1;
-                            pipeline_stage_2 <= {DATA_WIDTH{1'b1}};  // Error pattern instead of DEADBEEF
-                            mem_wait_counter <= 16'h0;
-                            l1_request_accepted <= 1'b0;
-                            pipeline_state <= WRITEBACK;
-                        end else begin
-                            // Increment timeout counter
-                            mem_wait_counter <= mem_wait_counter + 1;
-                        end
+                        mem_wait_counter <= mem_wait_counter + 1;
                     end
                 end
 
+                WAIT_COMPLETE: begin
+                    busy <= 1'b1;
+                    l1_rd_en <= 1'b0;
+                    l1_wr_en <= 1'b0;
+
+                    if (l1_ready) begin
+                        // L1 completed — capture data
+                        l1_rd_data_valid <= 1'b1;
+                        if (mem_is_write) begin
+                            pipeline_stage_2 <= result[31:0];
+                        end else begin
+                            pipeline_stage_2 <= l1_rd_data[31:0];
+                        end
+                        mem_wait_counter <= 16'h0;
+                        l1_request_accepted <= 1'b0;
+                        l1_accept_phase <= 1'b0;
+                        pipeline_state <= WRITEBACK;
+                    end else if (mem_wait_counter >= 16'h3FF) begin
+                        // 1024-cycle timeout
+                        error_flag <= 1'b1;
+                        error_code <= `AURORA_ERR_CACHE_TIMEOUT;
+                        error_valid <= 1'b1;
+                        pipeline_stage_2 <= {DATA_WIDTH{1'b1}};
+                        mem_wait_counter <= 16'h0;
+                        l1_request_accepted <= 1'b0;
+                        l1_accept_phase <= 1'b0;
+                        pipeline_state <= WRITEBACK;
+                    end else begin
+                        mem_wait_counter <= mem_wait_counter + 1;
+                    end
+                end
+
+                // ─────────────────────────────────────────────────
+                // WRITEBACK: Write result, clear resource lock.
+                // Bug 2: If stage1 already has next instruction (pipeline
+                // overlap), reload stage2 and go directly to EXECUTE.
+                // ─────────────────────────────────────────────────
                 WRITEBACK: begin
-                    busy <= 1'b1;  // Keep busy during writeback
+                    busy <= 1'b1;
                     fabric_wr_en <= 1'b0;
-                    pipeline_stage_detail <= 4'd5;  // WRITEBACK stage
-                    // Reset mem_wait_counter to prevent stale values in ERROR_STATE
+                    pipeline_stage_detail <= 4'd5;
                     mem_wait_counter <= 16'h0;
 
                     if (mem_is_write) begin
-                        // Write operation - result unchanged, just signal completion
                         result_valid <= 1'b1;
                     end else begin
-                        // Read operation - update result with data from memory
                         result <= {{(DATA_WIDTH-32){1'b0}}, pipeline_stage_2};
                         result_valid <= 1'b1;
                     end
 
-                    // Performance metrics: Pipeline completed successfully
-                    `ifdef AURORA_DEBUG_PERF
-                    $display("[%0t] [G-CORE#%0d] ✅ Command completed (actual pipeline latency: %0d cycles, expected: %0d)",
-                             $time, CORE_ID, exec_counter, exec_target_cycles);
-                    $display("[%0t] [G-CORE#%0d] ✍️ RESULT_VALID=1, result=0x%h", $time, CORE_ID, result);
-                    `endif
+                    // Bug 3: Clear resource lock on leaving EXECUTE
+                    resource_locked <= 1'b0;
+                    lock_timeout_counter <= 16'd0;
 
-                    // Reset pipeline counters
                     exec_counter <= 16'h0;
                     exec_target_cycles <= 16'h0;
                     pipeline_stage_detail <= 4'h0;
-
-                    // DEADLOCK FIX: Release resource lock and reset contention state
-                    resource_locked <= 1'b0;
-                    arbitration_won <= 1'b0;
-                    retry_count <= 8'd0;
-                    resource_timeout <= 16'd0;
-
-                    // FIX: Clear busy first, transition to CLEANUP state
                     busy <= 1'b0;
                     pc_reg <= pc_reg + 4;
-                    pipeline_state <= CLEANUP;  // One-cycle cleanup before IDLE
+
+                    // Bug 2: Pipeline overlap — reload stage2 from stage1 if available
+                    if (stage1_valid) begin
+                        stage2_data <= stage1_data;
+                        stage2_addr <= stage1_addr;
+                        stage2_opcode <= stage1_opcode;
+                        stage2_valid <= 1'b1;
+                        stage1_valid <= 1'b0;
+                        case (stage1_opcode)
+                            OP_DRAW:         exec_target_cycles <= G_PIPE_DRAW;
+                            OP_TEXTURE:      exec_target_cycles <= G_PIPE_TEXTURE;
+                            OP_PHYSICS:      exec_target_cycles <= G_PIPE_PHYSICS;
+                            OP_COLLISION:    exec_target_cycles <= G_PIPE_COLLISION;
+                            OP_RAYTRACE:     exec_target_cycles <= G_PIPE_RAYTRACE;
+                            OP_FRAMEGEN:     exec_target_cycles <= G_PIPE_FRAMEGEN;
+                            OP_SHADING:      exec_target_cycles <= G_PIPE_SHADING;
+                            OP_BRANCH: begin
+                                exec_target_cycles <= G_PIPE_BRANCH;
+                                stage2_branch <= branch_predicted;
+                                branch_history <= {branch_history[14:0], branch_predicted};
+                            end
+                            default:         exec_target_cycles <= 15;
+                        endcase
+                        pipeline_state <= EXECUTE;
+                    end else begin
+                        pipeline_state <= CLEANUP;
+                    end
                 end
 
-                // ─────────────────────────────────────────────────
-                // CLEANUP: One-cycle delay before IDLE to avoid race condition
-                // ─────────────────────────────────────────────────
                 CLEANUP: begin
-                    busy <= 1'b0;  // CRITICAL FIX: Clear busy in cleanup to allow new commands
-                    
-                    // DEADLOCK FIX: Release resource lock and reset contention state
+                    busy <= 1'b0;
                     resource_locked <= 1'b0;
-                    arbitration_won <= 1'b0;
-                    retry_count <= 8'd0;
-                    resource_timeout <= 16'd0;
-                    
-                    // One-cycle cleanup before returning to IDLE
-                    pipeline_state <= IDLE;
+                    lock_timeout_counter <= 16'd0;
+                    // Bug 2: Check again (stage1 might have been loaded this cycle)
+                    if (stage1_valid) begin
+                        stage2_data <= stage1_data;
+                        stage2_addr <= stage1_addr;
+                        stage2_opcode <= stage1_opcode;
+                        stage2_valid <= 1'b1;
+                        stage1_valid <= 1'b0;
+                        case (stage1_opcode)
+                            OP_DRAW:         exec_target_cycles <= G_PIPE_DRAW;
+                            OP_TEXTURE:      exec_target_cycles <= G_PIPE_TEXTURE;
+                            OP_PHYSICS:      exec_target_cycles <= G_PIPE_PHYSICS;
+                            OP_COLLISION:    exec_target_cycles <= G_PIPE_COLLISION;
+                            OP_RAYTRACE:     exec_target_cycles <= G_PIPE_RAYTRACE;
+                            OP_FRAMEGEN:     exec_target_cycles <= G_PIPE_FRAMEGEN;
+                            OP_SHADING:      exec_target_cycles <= G_PIPE_SHADING;
+                            OP_BRANCH: begin
+                                exec_target_cycles <= G_PIPE_BRANCH;
+                                stage2_branch <= branch_predicted;
+                                branch_history <= {branch_history[14:0], branch_predicted};
+                            end
+                            default:         exec_target_cycles <= 15;
+                        endcase
+                        pipeline_state <= EXECUTE;
+                    end else begin
+                        pipeline_state <= IDLE;
+                    end
                 end
 
-                // ─────────────────────────────────────────────────
-                // ERROR_STATE: Trap state untuk error handling
-                // ─────────────────────────────────────────────────
                 ERROR_STATE: begin
-                    // CRITICAL FIX: Enhanced error recovery protocol
-                    // Stay in error state for fixed recovery period, then force return to IDLE
-                    // This prevents infinite loop if scheduler keeps re-sending bad commands
-                    
-                    // Error recovery counter - stay for 10 cycles minimum
                     if (mem_wait_counter < 16'd10) begin
                         mem_wait_counter <= mem_wait_counter + 1;
-                        error_valid <= 1'b0;  // Pulse already sent on entry
-                        result <= {DATA_WIDTH{1'b1}};  // Keep error result visible
-                        result_valid <= 1'b0;  // Don't assert during recovery
+                        error_valid <= 1'b0;
+                        result <= {DATA_WIDTH{1'b1}};
+                        result_valid <= 1'b0;
                         busy <= 1'b0;
-                        cmd_ready <= 1'b0;  // Don't accept new commands during recovery
-                        if (CORE_ID == 0 && mem_wait_counter == 16'd5) begin
-                            $display("[%0t] [G-CORE#%0d] ** ERROR RECOVERY: In recovery state (cycle %0d/10)", 
-                                    $time, CORE_ID, mem_wait_counter);
-                        end
+                        cmd_ready <= 1'b0;
                     end else begin
-                        // Recovery complete - return to IDLE
                         pipeline_state <= IDLE;
                         busy <= 1'b0;
                         cmd_ready <= 1'b1;
-                        error_flag <= 1'b0;  // Clear error flag
+                        error_flag <= 1'b0;
                         error_code <= 8'h00;
                         error_valid <= 1'b0;
                         result <= {DATA_WIDTH{1'b0}};
                         result_valid <= 1'b0;
                         busy <= 1'b0;
-                        cmd_ready <= 1'b1;  // Ready to accept new commands
+                        cmd_ready <= 1'b1;
                         mem_wait_counter <= 16'h0;
-                        pipeline_state <= IDLE;
-                        if (CORE_ID == 0)
-                            $display("[%0t] [G-CORE#%0d] ** ERROR RECOVERY COMPLETE: Returning to IDLE", $time, CORE_ID);
-                        
-                        // Log recovery event (only once)
-                        $display("[%0t] [G-CORE] ✅ Error recovery complete, returning to IDLE", $time);
+                        resource_locked <= 1'b0;
+                        lock_timeout_counter <= 16'd0;
                     end
                 end
-                
+
                 default: begin
                     pipeline_state <= IDLE;
                 end
@@ -736,38 +850,45 @@ module g_core #(
     );
 
     // =========================================================================
-    // AI Branch Predictor (simplified)
+    // Bug 5: AI Branch Predictor instantiation
     // =========================================================================
-    function automatic logic ai_branch_predict;
-        input [31:0] instr;
-        begin
-            // FIXED: Use instruction bits to correlate with history
-            // Combine instruction opcode with history for better prediction
-            ai_branch_predict = ^(branch_history & instr[15:0]);  // FIXED: was just ^branch_history
-        end
-    endfunction
+    wire ai_prediction_taken;
+    wire [47:0] ai_prediction_target;
+    wire [31:0] ai_total_branches;
+    wire [31:0] ai_correct_predictions;
+    wire [7:0]  ai_prediction_accuracy;
 
-    // =========================================================================
-    // Helper: Generate varied output based on operation and input
-    // Prevents magic constant outputs like 0x08000008
-    // =========================================================================
-    function automatic reg [31:0] compute_output;
-        input [31:0] input_data;
-        input [7:0]  opcode;
-        input [47:0] addr;
-        reg [63:0] h;
-        begin
-            // Hash-based output: varies per opcode, addr, and input
-            h = {32'b0, input_data};
-            h = h ^ (h >> 13);
-            h = h + (opcode * 64'd128);
-            h = h ^ (h << 17);
-            h = h + addr;
-            h = h ^ (h >> 7);
-            h = h * 64'd6364136223846793005;
-            h = h ^ (h >> 33);
-            compute_output = h[31:0];
+    ai_branch_predictor #(
+        .PHT_BITS(10),
+        .HISTORY_LEN(16),
+        .BTB_SIZE(256),
+        .RAS_SIZE(16),
+        .WEIGHT_BITS(8)
+    ) u_ai_branch_predictor (
+        .clk(clk),
+        .rst_n(rst_n),
+        .branch_pc(pc_reg),
+        .branch_is_call(1'b0),
+        .branch_is_return(1'b0),
+        .branch_is_indirect(1'b0),
+        .branch_taken_actual(stage2_branch),
+        .branch_target_actual(pc_reg + stage2_data[23:0]),
+        .prediction_taken(ai_prediction_taken),
+        .prediction_target(ai_prediction_target),
+        .train_enable(stage2_opcode == OP_BRANCH),
+        .total_branches(ai_total_branches),
+        .correct_predictions(ai_correct_predictions),
+        .prediction_accuracy(ai_prediction_accuracy)
+    );
+
+    // Bug 5: Use ai_branch_predictor prediction for branch opcode
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            branch_predicted <= 1'b0;
+        end else if (stage1_opcode == OP_BRANCH && stage1_valid) begin
+            branch_predicted <= ai_prediction_taken;
+            branch_history <= {branch_history[14:0], ai_prediction_taken};
         end
-    endfunction
+    end
 
 endmodule
