@@ -615,11 +615,6 @@ module a_core #(
                     // Reset completion signal
                     complete_reg <= 1'b0;
                     
-                    // TOXIC BUG DETECTION: Check invariants in IDLE state (TEMPORAL VERSION)
-                `CHECK_NO_WAIT_WITHOUT_PROGRESS("A-CORE", IDLE, state_stuck_counter, DEADLOCK_TIMEOUT_CYCLES);
-                `CHECK_RESOURCE_CONSERVATION("A-CORE", "FIFO_COUNT", result_fifo_count, RESULT_FIFO_DEPTH);
-                `CHECK_CREDIT_FLOW_BALANCE("A-CORE", 0, 0, 0);  // A-Core doesn't issue credits
-
                     // Phase 3: Enhanced backpressure dengan timeout protection
                     // Ini prevent FIFO overflow saat scheduler lambat consume
                     if (fifo_full_warn && result_fifo_count > (RESULT_FIFO_DEPTH * 3 / 4)) begin
@@ -1741,5 +1736,10 @@ module a_core #(
             endcase
         end
     end
+
+    // TOXIC BUG DETECTION: Check invariants (module-level, outside always blocks)
+    `CHECK_NO_WAIT_WITHOUT_PROGRESS("A-CORE", IDLE, state_stuck_counter, DEADLOCK_TIMEOUT_CYCLES);
+    `CHECK_RESOURCE_CONSERVATION("A-CORE", "FIFO_COUNT", result_fifo_count, RESULT_FIFO_DEPTH);
+    `CHECK_CREDIT_FLOW_BALANCE("A-CORE", 0, 0, 0);  // A-Core doesn't issue credits
 
 endmodule

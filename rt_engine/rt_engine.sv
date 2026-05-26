@@ -144,6 +144,12 @@ module rt_engine #(
     reg [31:0]              traverse_hit_dist;
     reg                     traverse_hit_found;
 
+    // C-6: Multi-cycle BVH traversal state
+    reg [7:0]               bvh_node_idx;
+    reg [7:0]               bvh_stack_ptr;
+    reg [7:0]               bvh_iter_count;
+    reg                     bvh_init_done;
+
     localparam OP_NOP       = 8'h60;
     localparam OP_TRACE     = 8'h61;
     localparam OP_CLOSEST   = 8'h62;
@@ -588,15 +594,76 @@ module rt_engine #(
                 end
 
             BVH_TRAVERSE: begin
-                    bvh_traverse(traverse_found, traverse_hit_t, traverse_hit_dist, traverse_hit_found);
-
-                    if (traverse_found) begin
-                        hit_distance <= traverse_hit_t;
-                        hit_found <= 1'b1;
-                        state <= CLOSEST_HIT;
+                    // C-6: Multi-cycle BVH traversal (was 48-iteration combinational task)
+                    // Each cycle: pop node, test ray-box, handle result, push children if internal
+                    // Uses combinational helpers to compute net stack pointer change
+                    if (!bvh_init_done) begin
+                        bvh_stack_ptr <= 8'd0;
+                        bvh_stack[0] <= 8'd0;
+                        bvh_iter_count <= 8'd0;
+                        traverse_found <= 1'b0;
+                        traverse_hit_t <= ray_t_max;
+                        bvh_init_done <= 1'b1;
+                        bvh_node_idx <= 8'd0;
+                    end else if (bvh_iter_count < BVH_DEPTH * 2) begin
+                        if (bvh_stack_ptr >= 0) begin
+                            reg signed [31:0] idx;
+                            reg intersects;
+                            reg [7:0] push_count;
+                            idx = bvh_stack[bvh_stack_ptr];
+                            push_count = 0;
+                            intersects = ray_box_intersect(
+                                bvh_min_x[idx], bvh_min_y[idx], bvh_min_z[idx],
+                                bvh_max_x[idx], bvh_max_y[idx], bvh_max_z[idx],
+                                ray_origin_x, ray_origin_y, ray_origin_z,
+                                ray_dir_x, ray_dir_y, ray_dir_z,
+                                ray_t_min, traverse_hit_t
+                            );
+                            if (intersects) begin
+                                if (bvh_is_leaf[idx]) begin
+                                    reg tri_hit;
+                                    reg [31:0] tri_t;
+                                    reg signed [31:0] tri_u, tri_v;
+                                    ray_triangle_intersect(
+                                        tri_v0_x, tri_v0_y, tri_v0_z,
+                                        tri_v1_x, tri_v1_y, tri_v1_z,
+                                        tri_v2_x, tri_v2_y, tri_v2_z,
+                                        ray_origin_x, ray_origin_y, ray_origin_z,
+                                        ray_dir_x, ray_dir_y, ray_dir_z,
+                                        tri_hit, tri_t, tri_u, tri_v
+                                    );
+                                    if (tri_hit && tri_t < traverse_hit_t) begin
+                                        traverse_found <= 1'b1;
+                                        traverse_hit_t <= tri_t;
+                                        traverse_hit_dist <= tri_t;
+                                        traverse_hit_found <= 1'b1;
+                                    end
+                                end else begin
+                                    if (bvh_right[idx] < BVH_DEPTH && bvh_valid[bvh_right[idx]]) begin
+                                        bvh_stack[(bvh_stack_ptr - 1) + push_count + 1] <= bvh_right[idx];
+                                        push_count = push_count + 1;
+                                    end
+                                    if (bvh_left[idx] < BVH_DEPTH && bvh_valid[bvh_left[idx]]) begin
+                                        bvh_stack[(bvh_stack_ptr - 1) + push_count + 1] <= bvh_left[idx];
+                                        push_count = push_count + 1;
+                                    end
+                                end
+                            end
+                            bvh_stack_ptr <= bvh_stack_ptr - 1 + push_count;
+                            bvh_iter_count <= bvh_iter_count + 1;
+                        end else begin
+                            bvh_iter_count <= BVH_DEPTH * 2;  // Force exit
+                        end
                     end else begin
-                        hit_found <= 1'b0;
-                        state <= OUTPUT;
+                        bvh_init_done <= 1'b0;
+                        if (traverse_found) begin
+                            hit_distance <= traverse_hit_t;
+                            hit_found <= 1'b1;
+                            state <= CLOSEST_HIT;
+                        end else begin
+                            hit_found <= 1'b0;
+                            state <= OUTPUT;
+                        end
                     end
                 end
 

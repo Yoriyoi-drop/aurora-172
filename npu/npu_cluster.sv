@@ -414,18 +414,26 @@ module npu_cluster #(
                 end
 
                 // ─────────────────────────────────────────────────
-                // ACCUMULATE: Single-cycle reduction
-                // FIXED: Multi-level tree had NBA race — only last level took effect
+                // ACCUMULATE: Pipelined multi-cycle reduction
+                // C-6: Split 32-input adder across 4 cycles (8 inputs/cycle)
                 // ─────────────────────────────────────────────────
                 ACCUMULATE: begin
                     if (reduce_level == 0) begin
-                        integer total;
-                        total = 0;
-                        for (int p = 0; p < NUM_PE; p++) begin
-                            total = total + pe_acc[p];
-                        end
-                        pe_acc[0] <= total;
+                        // Reset accumulator, start summing PE[0..7]
+                        pe_acc[0] <= 32'sb0;
                         reduce_level <= 1;
+                    end else if (reduce_level <= 4) begin
+                        integer p_start, p_end, p;
+                        reg signed [31:0] partial;
+                        p_start = (reduce_level - 1) * 8;
+                        p_end = p_start + 8;
+                        if (p_end > NUM_PE) p_end = NUM_PE;
+                        partial = 0;
+                        for (p = p_start; p < p_end; p++) begin
+                            partial = partial + pe_acc[p];
+                        end
+                        pe_acc[0] <= pe_acc[0] + partial;
+                        reduce_level <= reduce_level + 1;
                     end else begin
                         act_out[0] <= pe_acc[0];
                         reduce_level <= 3'b0;

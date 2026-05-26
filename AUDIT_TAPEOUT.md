@@ -258,17 +258,23 @@ Di silicon dengan 6 GHz + memory fabric congestion, timeout akan sering terjadi 
 | C-5 | Data forwarding return 0 | `mesi_controller.sv` | Added snoop data inputs, capture mechanism, replaced `512'b0` with `l1_cdata[owner]` |
 | C-5 | MESI↔MOESI mapping inverted | `cache_profiler.sv` | Swapped 01↔11 encoding to match `l1_cache.sv` M=01, S=11 |
 | C-5 | L1 missing snoop data output | `l1_cache.sv` | Added `snoop_data_out` port + reset + capture during snoop |
+| H-24 | Barycentric area2 `| 1` bug | `g_core.sv` | Replaced `area2 | 1` with `(area2 == 0 ? 1 : area2)` — prevents divide-by-zero without corrupting barycentric coordinates |
+| C-6 | Integer sqrt 31-iter combinational | `g_core.sv` | Added `S_LONGOP` state + `longop_*` regs — sqrt/divide over 31+64 cycles instead of 1 |
+| C-6 | 64-bit combinational divide `/` | `g_core.sv:549-550` | Replaced `/ (2*a|1)` with iterative restoring divider in `S_LONGOP` |
+| C-6 | H-Core combinational `/` | `h_core.sv` | Added `DIV_ITER` state + restoring divider (1 bit/cycle, 32 cycles) |
+| C-6 | NPU 32-input adder tree | `npu_cluster.sv` | Pipelined reduction over 4 cycles (8 inputs/cycle) instead of 1 cycle |
+| C-6 | BVH traversal 48-iter loop | `rt_engine.sv` | Converted combinational `bvh_traverse` task to 1-iteration/cycle state machine |
 
 ### ⏳ BELUM DIPERBAIKI (Perlu Arsitektur Ulang)
 
 | # | Issue | Alasan |
 |---|-------|--------|
 | C-5 | Cache coherency protocol non-functional | Lihat progress di bawah — sebagian diperbaiki |
-| C-6 | BVH/sqrt/div combinational (timing impossible) | Perlu pipeline multi-stage — redesign arsitektural |
+| C-6 | BVH/sqrt/div combinational | Lihat progress di bawah — sebagian diperbaiki |
 | C-8 | Parameter mismatch FPGA | Accepted untuk prototyping FPGA (resource constraint) |
 | H-1 | 155 $display tanpa synthesis guard | Perlu `\`ifndef SYNTHESIS` di 10 file |
 | H-2 | CDC multi-bit tanpa Gray code | Perubahan struktur synchronizer |
-| H-24 | Barycentric area2 `| 1` bug | Perlu fix algoritma triangle setup |
+
 | H-25 | Ray direction hardcoded | Perlu menghubungkan memory input |
 | H-9 | Zero formal/coverage/random/UVM | Infrastruktur verifikasi baru |
 | H-8 | Testbench tanpa self-checking | Rewrite testbench |
@@ -292,5 +298,5 @@ Di silicon dengan 6 GHz + memory fabric congestion, timeout akan sering terjadi 
 
 ### Prioritas selanjutnya:
 1. H-1: Guard 155 $display dengan `\`ifndef SYNTHESIS` (10 files)
-2. C-6: Pipeline BVH traversal (rt_engine.sv) dan integer sqrt (g_core.sv)
-3. H-24: Fix barycentric coordinate area2 bit-OR bug (g_core.sv)
+2. C-6: BVH loading state also needs multi-cycle fix (LOAD_BVH state iterates node loading)
+3. H-2: CDC multi-bit tanpa Gray code

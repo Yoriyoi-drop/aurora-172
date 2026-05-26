@@ -89,23 +89,17 @@ module h_core #(
     wire [4:0]              fwd_mem_addr;
 
     // Pipeline state
-    reg [2:0]               pipeline_state;
-    reg [15:0]              h_exec_counter;
-    reg [15:0]              h_exec_target_cycles;
+    reg [3:0]               pipeline_state;
 
-    // Saved command
-    reg [ADDR_WIDTH-1:0]    saved_cmd_addr;
-    reg [DATA_WIDTH-1:0]    saved_cmd_data;
-    reg [7:0]               saved_opcode;
-
-    localparam IDLE         = 3'b000;
-    localparam FETCH        = 3'b001;
-    localparam DECODE       = 3'b010;
-    localparam EXECUTE      = 3'b011;
-    localparam MEMORY       = 3'b100;
-    localparam WRITEBACK    = 3'b101;
-    localparam RETIRE       = 3'b110;
-    localparam ERROR_STATE  = 3'b111;
+    localparam IDLE         = 4'b0000;
+    localparam FETCH        = 4'b0001;
+    localparam DECODE       = 4'b0010;
+    localparam EXECUTE      = 4'b0011;
+    localparam DIV_ITER     = 4'b0100;  // C-6: Multi-cycle division
+    localparam MEMORY       = 4'b0101;
+    localparam WRITEBACK    = 4'b0110;
+    localparam RETIRE       = 4'b0111;
+    localparam ERROR_STATE  = 4'b1000;
 
     // Forwarding signals
     wire [4:0] fwd_rs1_addr = saved_cmd_data[11:7];
@@ -151,6 +145,12 @@ module h_core #(
 
     // Bug 6: Track which ROB slot the current in-flight instruction uses
     reg [5:0]               rob_dispatch_idx;
+
+    // C-6: Multi-cycle divider registers
+    reg [DATA_WIDTH-1:0]    div_remainder;
+    reg [DATA_WIDTH-1:0]    div_quotient;
+    reg [DATA_WIDTH-1:0]    div_divisor;
+    reg [5:0]               div_bit;
 
     // =========================================================================
     // Main pipeline
@@ -336,8 +336,18 @@ module h_core #(
                             OP_OR:  alu_result <= fwd_rs1_val | fwd_rs2_val;
                             OP_XOR: alu_result <= fwd_rs1_val ^ fwd_rs2_val;
                             OP_MUL: alu_result <= fwd_rs1_val * fwd_rs2_val;
-                            OP_DIV: alu_result <= (fwd_rs2_val != 0) ?
-                                                     fwd_rs1_val / fwd_rs2_val : {DATA_WIDTH{1'b1}};
+                            OP_DIV: begin
+                                // C-6: Multi-cycle restoring divider
+                                if (fwd_rs2_val != 0) begin
+                                    div_remainder <= {DATA_WIDTH{1'b0}};
+                                    div_quotient <= fwd_rs1_val;
+                                    div_divisor <= fwd_rs2_val;
+                                    div_bit <= DATA_WIDTH;
+                                    pipeline_state <= DIV_ITER;
+                                end else begin
+                                    alu_result <= {DATA_WIDTH{1'b1}};
+                                end
+                            end
                             OP_LOAD: begin
                                 fabric_addr <= saved_cmd_addr;
                                 fabric_rd_en <= 1'b1;
@@ -359,6 +369,27 @@ module h_core #(
                         endcase
                         if (saved_opcode != OP_LOAD && saved_opcode != OP_STORE)
                             pipeline_state <= WRITEBACK;
+                    end
+                end
+
+                // C-6: Multi-cycle restoring divider (1 bit per cycle, DATA_WIDTH cycles)
+                DIV_ITER: begin
+                    if (div_bit > 0) begin
+                        begin
+                            reg [DATA_WIDTH-1:0] shifted_rem;
+                            shifted_rem = {div_remainder[DATA_WIDTH-2:0], div_quotient[DATA_WIDTH-1]};
+                            if (shifted_rem >= div_divisor) begin
+                                div_remainder <= shifted_rem - div_divisor;
+                                div_quotient <= {div_quotient[DATA_WIDTH-2:0], 1'b1};
+                            end else begin
+                                div_remainder <= shifted_rem;
+                                div_quotient <= {div_quotient[DATA_WIDTH-2:0], 1'b0};
+                            end
+                        end
+                        div_bit <= div_bit - 1;
+                    end else begin
+                        alu_result <= div_quotient;
+                        pipeline_state <= WRITEBACK;
                     end
                 end
 
